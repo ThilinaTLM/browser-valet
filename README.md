@@ -18,6 +18,8 @@ flowchart LR
   Brave and other Chromium browsers (≥127).
 - **Consent first.** Agent-opened tabs are the agent's. Any other tab needs your approval in a
   popup; you can revoke control at any time (popup, or close Chrome's "debugging" bar).
+  `open <url>` never navigates away from a tab you shared; it opens an agent tab instead.
+  Reloading the extension clears all grants.
 
 ## Install
 
@@ -75,7 +77,8 @@ they would modify your real profile or aren't needed for driving pages.
 ## The extension popup
 
 - Connection status, on/off switch, and the pairing command.
-- **Permission requests** from agents (Allow / Deny) — the popup opens by itself when one arrives.
+- **Permission requests** from agents (Allow / Deny). The popup opens by itself when one arrives;
+  if Chrome isn't the focused app, it appears as a small separate window instead.
 - **This tab**: share the tab you're looking at with agents, or stop sharing it.
 - **Agent tabs**: everything agents control right now, with Stop / Stop all.
 - **Recent activity**: the last commands, with typed text redacted.

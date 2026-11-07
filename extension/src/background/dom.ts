@@ -58,7 +58,11 @@ export async function call<T>(h: Handle, fn: string, args: unknown[] = []): Prom
     awaitPromise: true,
     userGesture: true,
   });
-  if (r.exceptionDetails) throw new UserError(exceptionText(r.exceptionDetails));
+  if (r.exceptionDetails) {
+    // Our own helpers throw short messages; the page-side stack trace is just noise here.
+    const msg = exceptionText(r.exceptionDetails).split('\n')[0] ?? '';
+    throw new UserError(msg.replace(/^Error: /, ''));
+  }
   return r.result.value as T;
 }
 

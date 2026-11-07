@@ -38,6 +38,7 @@ bctl --session task-42 open https://example.com
 - The user's other tabs are off-limits until they approve. `bctl tab` lists every tab; ones you
   can't use are marked `[not shared]`.
 - `bctl tab t3` asks the user (a prompt appears in their browser) and waits up to 2 minutes.
+  In a shared tab, `open <url>` opens a new agent tab rather than navigating the user's page.
   If they deny, respect it — don't ask again for the same tab unless they tell you to.
 - The user can revoke control at any time; you'll get an error saying so. Don't work around it.
 

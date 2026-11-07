@@ -196,11 +196,14 @@ export const navigationCommands: Command[] = [
     aliases: ['goto', 'navigate'],
     group: 'Navigation',
     usage: 'open [url]',
-    summary: "Navigate the session's tab (opens a new background tab if there is none)",
+    summary:
+      "Navigate the session's tab; opens a new background tab if there is none (never navigates away from a tab the user shared)",
     async run(ctx, a) {
       const url = a.pos[0];
       let id = currentTab(ctx);
-      if (id === undefined) id = await newTab(ctx, url);
+      // A tab the user shared is theirs: don't navigate it somewhere else, open our own instead.
+      const shared = id !== undefined && state.tabs[id]?.control === 'user';
+      if (id === undefined || (shared && url)) id = await newTab(ctx, url);
       else if (url) await navigate(ctx, id, normalizeUrl(url));
       ctx.setTab(id);
       save();

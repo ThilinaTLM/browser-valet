@@ -263,24 +263,15 @@ export const inspectionCommands: Command[] = [
         ? ctx.path(a.pos[0])
         : ctx.tmpPath('bctl', 'screenshots', `screenshot-${Date.now()}.png`);
       const format = /\.jpe?g$/i.test(path) ? 'jpeg' : 'png';
-      const params: Record<string, unknown> = { format };
-      if (a.has('full')) {
-        const m = await cdp.send<{ cssContentSize: { width: number; height: number } }>(
-          id,
-          'Page.getLayoutMetrics',
-        );
-        params.captureBeyondViewport = true;
-        params.clip = {
-          x: 0,
-          y: 0,
-          width: Math.ceil(m.cssContentSize.width),
-          height: Math.ceil(m.cssContentSize.height),
-          scale: 1,
-        };
+      if (!a.has('full')) {
+        const { data } = await cdp.send<{ data: string }>(id, 'Page.captureScreenshot', { format });
+        ctx.files.push({ path, base64: data });
+        return { text: `✓ Screenshot saved to ${path}`, data: { path } };
       }
-      const { data } = await cdp.send<{ data: string }>(id, 'Page.captureScreenshot', params);
+      const { data, truncated } = await fullPage(id, format);
       ctx.files.push({ path, base64: data });
-      return { text: `✓ Screenshot saved to ${path}`, data: { path } };
+      const note = truncated ? ' (very tall page: truncated)' : '';
+      return { text: `✓ Screenshot saved to ${path}${note}`, data: { path, truncated } };
     },
   },
   {
@@ -359,6 +350,60 @@ export const inspectionCommands: Command[] = [
     },
   },
 ];
+
+// Chrome can't capture more than ~16k px in one go; canvases top out around 32k px.
+const SLICE = 8000;
+const MAX_HEIGHT = 32000;
+
+function toBase64(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+}
+
+/** Full-page screenshot; tall pages are captured in slices and stitched together. */
+async function fullPage(
+  tabId: number,
+  format: 'png' | 'jpeg',
+): Promise<{ data: string; truncated: boolean }> {
+  const m = await cdp.send<{ cssContentSize: { width: number; height: number } }>(
+    tabId,
+    'Page.getLayoutMetrics',
+  );
+  // Captures come back in device pixels; keep the stitched canvas within limits in those units.
+  const dpr = Number((await evaluate(tabId, 'devicePixelRatio')).value) || 1;
+  const width = Math.ceil(m.cssContentSize.width);
+  const fullHeight = Math.ceil(m.cssContentSize.height);
+  const height = Math.min(fullHeight, Math.floor(MAX_HEIGHT / dpr));
+  const capture = (y: number, h: number) =>
+    cdp.send<{ data: string }>(tabId, 'Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+      clip: { x: 0, y, width, height: h, scale: 1 },
+    });
+
+  if (height <= SLICE && format === 'png') {
+    return { data: (await capture(0, height)).data, truncated: false };
+  }
+  const canvas = new OffscreenCanvas(Math.round(width * dpr), Math.round(height * dpr));
+  const g = canvas.getContext('2d');
+  if (!g) throw new Error('Canvas unavailable');
+  for (let y = 0; y < height; y += SLICE) {
+    const h = Math.min(SLICE, height - y);
+    const { data } = await capture(y, h);
+    const blob = new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], {
+      type: 'image/png',
+    });
+    g.drawImage(await createImageBitmap(blob), 0, Math.round(y * dpr));
+  }
+  const out = await canvas.convertToBlob({ type: `image/${format}` });
+  return {
+    data: toBase64(new Uint8Array(await out.arrayBuffer())),
+    truncated: fullHeight > height,
+  };
+}
 
 /** `dialog` must work while a dialog blocks the tab, so it bypasses ctx.tab()'s dialog check. */
 async function currentTabIgnoringDialog(ctx: Ctx): Promise<number> {
