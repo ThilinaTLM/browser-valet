@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Bridge",
+  "version": "0.1.0",
+  "description": "Lets the local `bctl` CLI control this browser (for agents and automation).",
+  "minimum_chrome_version": "120",
+  "permissions": ["debugger", "tabs", "storage", "alarms"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Browser Bridge" }
+}
