@@ -1,0 +1,8 @@
+<svg width="128" height="128" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>Browser Bridge</title>
+  <rect x="32" y="32" width="448" height="448" rx="120" fill="#211c15"/>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M150 362V170M362 362V170" stroke="#efece4" stroke-width="36"/>
+    <path d="M150 300H210L236 236L268 340L292 268L304 300H362" stroke="#d97757" stroke-width="32"/>
+  </g>
+</svg>

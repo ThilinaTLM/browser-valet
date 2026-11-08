@@ -101,10 +101,14 @@ export async function requestControl(
 // Badges: "AI" on controlled tabs, "!" while an approval is pending.
 // ---------------------------------------------------------------------------
 
+// Nerve Light primary (ember) and warning; both keep white badge text readable.
+const BADGE_CONTROLLED = '#b95634';
+const BADGE_PENDING = '#9a4c00';
+
 export async function refreshBadge(tabId: number): Promise<void> {
   try {
     await chrome.action.setBadgeText({ tabId, text: isControlled(tabId) ? 'AI' : '' });
-    await chrome.action.setBadgeBackgroundColor({ tabId, color: '#6d28d9' });
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: BADGE_CONTROLLED });
   } catch {
     // tab is gone
   }
@@ -113,7 +117,7 @@ export async function refreshBadge(tabId: number): Promise<void> {
 export async function refreshGlobalBadge(): Promise<void> {
   const waiting = state.approvals.length > 0;
   await chrome.action.setBadgeText({ text: waiting ? '!' : '' });
-  await chrome.action.setBadgeBackgroundColor({ color: '#ea580c' });
+  await chrome.action.setBadgeBackgroundColor({ color: BADGE_PENDING });
 }
 
 // ---------------------------------------------------------------------------
