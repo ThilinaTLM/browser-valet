@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Command } from '../../src/background/command';
 import type { CliRequest, CliResponse } from '../../src/shared';
 import { installChromeMock } from '../helpers/chrome-mock';
 
 let execute: typeof import('../../src/background/dispatch').execute;
+let formatJsonError: typeof import('../../src/background/dispatch').formatJsonError;
+let formatWarnings: typeof import('../../src/background/dispatch').formatWarnings;
+let withUsage: typeof import('../../src/background/dispatch').withUsage;
+let UserError: typeof import('../../src/background/errors').UserError;
 let stateMod: typeof import('../../src/background/state');
 
 const req = (...argv: string[]): CliRequest => ({
@@ -20,7 +25,9 @@ beforeEach(async () => {
   vi.resetModules();
   installChromeMock();
   stateMod = await import('../../src/background/state');
-  ({ execute } = await import('../../src/background/dispatch'));
+  ({ execute, formatJsonError, formatWarnings, withUsage } =
+    await import('../../src/background/dispatch'));
+  ({ UserError } = await import('../../src/background/errors'));
 });
 
 describe('help generation', () => {
@@ -63,8 +70,58 @@ describe('help generation', () => {
       success: false,
       data: null,
       error: 'Unknown command: zzz. Run `bctl help`.',
+      code: 'unknown_command',
+      type: 'unknown_command',
     });
     expect(json.stderr).toBe('');
+  });
+});
+
+describe('error codes and usage', () => {
+  it('adds a stable code to --json errors and omits it when there is none', () => {
+    expect(JSON.parse(formatJsonError('x', 'timeout'))).toEqual({
+      success: false,
+      data: null,
+      error: 'x',
+      code: 'timeout',
+    });
+    expect(JSON.parse(formatJsonError('x'))).not.toHaveProperty('code');
+  });
+
+  it('keeps the plain-text error unchanged by the code', async () => {
+    const r = await run('wait', '--bogus');
+    expect(r.stderr).toMatch(/^✗ Unknown flag: --bogus\nUsage: bctl wait /);
+  });
+
+  it('missing arguments print the usage line and carry bad_args', async () => {
+    const r = await run('get', 'attr', '--bogus', '--json');
+    const j = JSON.parse(r.stdout) as { error: string; code: string };
+    expect(j.code).toBe('bad_args');
+    expect(j.error).toContain('Usage: bctl get ');
+  });
+
+  it('does not repeat a usage line the message already has', () => {
+    const cmd = { usage: 'find <kind> <value>' } as Command;
+    expect(withUsage(cmd, new UserError('Usage: find …', 'bad_args'))).toBe('Usage: find …');
+    expect(withUsage(cmd, new UserError('Missing x', 'bad_args'))).toBe(
+      'Missing x\nUsage: bctl find <kind> <value>',
+    );
+    expect(withUsage(cmd, new UserError('Element is disabled', 'disabled'))).toBe(
+      'Element is disabled',
+    );
+    expect(withUsage(cmd, new UserError('plain'))).toBe('plain');
+  });
+
+  it('formats warnings as ⚠ lines for stderr', () => {
+    expect(formatWarnings(undefined)).toBe('');
+    expect(formatWarnings('careful')).toBe('⚠ careful\n');
+    expect(formatWarnings(['a', 'b'])).toBe('⚠ a\n⚠ b\n');
+  });
+
+  it('every thrown error code is a documented one', async () => {
+    const r = await run('click', '--json');
+    const j = JSON.parse(r.stdout) as { code?: string };
+    expect(['no_tab', 'bad_args']).toContain(j.code);
   });
 });
 

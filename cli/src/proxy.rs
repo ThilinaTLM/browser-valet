@@ -128,7 +128,7 @@ async fn next_json(ws: &mut Ws) -> Option<Value> {
 }
 
 fn err_res(msg: &str) -> Value {
-    json!({"t":"res","res":{"exitCode":1,"stdout":"","stderr":format!("{msg}\n")}})
+    json!({"t":"res","res":{"exitCode":1,"stdout":"","stderr":format!("{msg}\n"),"code":"not_connected"}})
 }
 
 async fn conn(sh: Arc<Shared>, tcp: TcpStream) -> Result<()> {

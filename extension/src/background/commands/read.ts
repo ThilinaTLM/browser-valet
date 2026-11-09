@@ -35,7 +35,7 @@ export const readCommands: Command[] = [
     async run(ctx, a) {
       const max = a.num('max-output');
       if (max !== undefined && (!Number.isInteger(max) || max < 1)) {
-        throw new UserError('--max-output must be a positive integer');
+        throw new UserError('--max-output must be a positive integer', 'bad_args');
       }
       const url = a.pos[0];
       if (url) {

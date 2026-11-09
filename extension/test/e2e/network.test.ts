@@ -32,7 +32,8 @@ describe('network observation', () => {
     // First use starts recording; the page load is not captured (documented hint).
     const first = await net('network', 'requests');
     expect(first.code).toBe(0);
-    expect(first.stdout).toContain('Recording started');
+    expect(first.stderr).toContain('⚠ Recording started');
+    expect(first.stdout).not.toContain('Recording started');
 
     expect((await net('click', '#go')).code).toBe(0);
     await net('wait', '500');

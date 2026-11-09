@@ -3,6 +3,7 @@
 
 import type { Control } from '../shared';
 import * as cdp from './cdp';
+import { UserError } from './errors';
 import { forgetBaselines } from './snapshot-diff';
 import { forgetTab, handoffGraceUntil, meta, save, state } from './state';
 
@@ -91,14 +92,19 @@ export async function requestControl(
     const allowed = await new Promise<boolean>((resolve, reject) => {
       pending.set(id, { resolve, reject });
       const timer = setTimeout(() => {
-        reject(new Error(`The user did not respond within ${APPROVAL_TIMEOUT_MS / 1000}s`));
+        reject(
+          new UserError(
+            `The user did not respond within ${APPROVAL_TIMEOUT_MS / 1000}s`,
+            'timeout',
+          ),
+        );
       }, APPROVAL_TIMEOUT_MS);
       signal.addEventListener('abort', () => {
         clearTimeout(timer);
         reject(new Error('cancelled'));
       });
     });
-    if (!allowed) throw new Error(`The user denied control of ${m.tid}`);
+    if (!allowed) throw new UserError(`The user denied control of ${m.tid}`, 'denied');
     await grant(tabId, 'user');
   } finally {
     pending.delete(id);
@@ -136,7 +142,10 @@ export async function refreshGlobalBadge(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  failApprovals(tabId, new Error('The tab was closed while waiting for the user to allow control'));
+  failApprovals(
+    tabId,
+    new UserError('The tab was closed while waiting for the user to allow control', 'tab_gone'),
+  );
   forgetTab(tabId);
   void cdp.detach(tabId);
 });

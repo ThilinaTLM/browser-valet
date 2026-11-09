@@ -18,7 +18,7 @@ import { interactionCommands } from './commands/interaction';
 import { navigationCommands } from './commands/navigation';
 import { readCommands } from './commands/read';
 import { networkCommands } from './commands/network';
-import { UserError } from './dom';
+import { type ErrorCode, UserError } from './errors';
 import { log, meta } from './state';
 
 const DEFAULT_TIMEOUT = 25_000;
@@ -81,6 +81,35 @@ function commandHelp(c: Command): string {
   return lines.join('\n');
 }
 
+/** `⚠ …` lines for stderr (empty when there is nothing to warn about). */
+export function formatWarnings(warning: string | string[] | undefined): string {
+  return [warning ?? []]
+    .flat()
+    .map((w) => `⚠ ${w}\n`)
+    .join('');
+}
+
+/** The `--json` error envelope; `code` is omitted when the failure has no stable code. */
+export function formatJsonError(
+  error: string,
+  code?: ErrorCode,
+  extra: Record<string, unknown> = {},
+): string {
+  return JSON.stringify({
+    success: false,
+    data: null,
+    error,
+    ...(code ? { code } : {}),
+    ...extra,
+  });
+}
+
+/** Argument errors end with the command's usage line, unless the message already carries one. */
+export function withUsage(cmd: Command, e: UserError): string {
+  if (e.code !== 'bad_args' || /usage:/i.test(e.message)) return e.message;
+  return `${e.message}\nUsage: bctl ${cmd.usage}`;
+}
+
 /** Split argv into the command name and the rest (global flags may precede the command). */
 function splitCommand(argv: string[]): { name: string | undefined; rest: string[] } {
   const withValue = new Set(['--session', '--timeout']);
@@ -127,8 +156,9 @@ async function raceDialog(ctx: Ctx, run: Promise<Result | undefined>): Promise<R
       const { type, message } = params as { type: string; message: string };
       if (type === 'alert' || type === 'beforeunload') return; // auto-accepted
       resolve({
-        text: `✓ Done\n  A ${type} dialog opened: "${message}". Run \`bctl dialog accept\` or \`bctl dialog dismiss\`.`,
+        text: '✓ Done',
         data: { dialog: { type, message } },
+        warning: `A JavaScript ${type} dialog is blocking the page: "${message}" — use \`bctl dialog accept\` or \`bctl dialog dismiss\``,
       });
     });
   });
@@ -147,21 +177,21 @@ export async function execute(
 ): Promise<CliResponse> {
   const json = req.argv.includes('--json');
   const { name, rest } = splitCommand(req.argv);
-  const ok = (text: string, data: unknown): CliResponse => ({
+  const ok = (text: string, data: unknown, warning?: string | string[]): CliResponse => ({
     exitCode: 0,
     stdout: json
       ? `${JSON.stringify({ success: true, data: data ?? null, error: null })}\n`
       : text
         ? `${text}\n`
         : '',
-    stderr: '',
+    stderr: formatWarnings(warning),
   });
   let lastError: string | undefined;
-  const fail = (error: string): CliResponse => {
+  const fail = (error: string, code?: ErrorCode, extra?: Record<string, unknown>): CliResponse => {
     lastError = error;
     return {
       exitCode: 1,
-      stdout: json ? `${JSON.stringify({ success: false, data: null, error })}\n` : '',
+      stdout: json ? `${formatJsonError(error, code, extra)}\n` : '',
       stderr: json ? '' : `✗ ${error}\n`,
     };
   };
@@ -171,7 +201,11 @@ export async function execute(
     return ok(c ? commandHelp(c) : generalHelp(), null);
   }
   const cmd = lookup(name);
-  if (!cmd) return fail(`Unknown command: ${name}. Run \`bctl help\`.`);
+  if (!cmd) {
+    return fail(`Unknown command: ${name}. Run \`bctl help\`.`, 'unknown_command', {
+      type: 'unknown_command',
+    });
+  }
 
   let ctx: Ctx | undefined;
   let args: Args | undefined;
@@ -182,9 +216,10 @@ export async function execute(
     const session = args.str('session') ?? req.session;
     ctx = new Ctx(req, session, json, args.num('timeout') ?? DEFAULT_TIMEOUT, signal, progress);
     const result = (await raceDialog(ctx, cmd.run(ctx, args))) ?? {};
-    response = { ...ok(result.text ?? '✓ Done', result.data), files: ctx.files };
+    response = { ...ok(result.text ?? '✓ Done', result.data, result.warning), files: ctx.files };
   } catch (e) {
-    response = fail(e instanceof UserError ? e.message : errorMessage(e));
+    if (e instanceof UserError) response = fail(withUsage(cmd, e), e.code);
+    else response = fail(errorMessage(e));
   }
 
   log({

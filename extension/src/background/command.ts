@@ -2,7 +2,7 @@
 
 import type { CliRequest } from '../shared';
 import * as cdp from './cdp';
-import { UserError } from './dom';
+import { UserError } from './errors';
 import { meta, session as sessionState } from './state';
 import { isControlled } from './tabs';
 
@@ -38,6 +38,11 @@ export interface Command {
 export interface Result {
   text?: string;
   data?: unknown;
+  /**
+   * Non-fatal side information (a dialog blocking the page, a truncated capture, …). Printed on
+   * stderr as `⚠ …`, so stdout stays the result only.
+   */
+  warning?: string | string[];
 }
 
 export const GLOBAL_FLAGS: Flag[] = [
@@ -75,14 +80,14 @@ export class Args {
     const v = this.str(name);
     if (v === undefined) return undefined;
     const n = Number(v);
-    if (!Number.isFinite(n)) throw new UserError(`--${name} must be a number`);
+    if (!Number.isFinite(n)) throw new UserError(`--${name} must be a number`, 'bad_args');
     return n;
   }
 
   /** Positional argument `i`, or a usage error naming it. */
   need(i: number, what: string): string {
     const v = this.pos[i];
-    if (v === undefined) throw new UserError(`Missing ${what}`);
+    if (v === undefined) throw new UserError(`Missing ${what}`, 'bad_args');
     return v;
   }
 }
@@ -133,15 +138,15 @@ export function parseArgs(argv: string[], flags: Flag[]): Args {
         continue;
       }
       name = all.find((f) => f.short === shorts)?.name ?? '';
-      if (!name) throw new UserError(`Unknown flag: ${tok}`);
+      if (!name) throw new UserError(`Unknown flag: ${tok}`, 'bad_args');
     }
     const spec = all.find((f) => f.name === name);
-    if (!spec) throw new UserError(`Unknown flag: --${name}`);
+    if (!spec) throw new UserError(`Unknown flag: --${name}`, 'bad_args');
     if (spec.type === 'bool') {
       out.set(name, true);
     } else {
       const value = inline ?? argv[++i];
-      if (value === undefined) throw new UserError(`--${name} needs a value`);
+      if (value === undefined) throw new UserError(`--${name} needs a value`, 'bad_args');
       out.set(name, value);
     }
   }
@@ -172,6 +177,7 @@ export class Ctx {
     if (id === undefined) {
       throw new UserError(
         'No tab yet. Run `bctl open <url>` to open one, or `bctl tab` to list tabs.',
+        'no_tab',
       );
     }
     const tid = meta(id).tid;
@@ -180,16 +186,21 @@ export class Ctx {
       () => false,
     );
     if (!exists)
-      throw new UserError(`Tab ${tid} was closed. Run \`bctl open <url>\` or \`bctl tab\`.`);
+      throw new UserError(
+        `Tab ${tid} was closed. Run \`bctl open <url>\` or \`bctl tab\`.`,
+        'tab_gone',
+      );
     if (!isControlled(id)) {
       throw new UserError(
         `Tab ${tid} is not shared with the agent (the user revoked control). Run \`bctl tab ${tid}\` to ask again, or \`bctl open <url>\`.`,
+        'revoked',
       );
     }
     const dialog = cdp.tabEvents(id).dialog;
     if (dialog) {
       throw new UserError(
         `A ${dialog.type} dialog is open: "${dialog.message}". Run \`bctl dialog accept\` or \`bctl dialog dismiss\`.`,
+        'dialog_open',
       );
     }
     this.tabId = id;

@@ -125,7 +125,8 @@ async function goHistory(ctx: Ctx, tabId: number, delta: number): Promise<void> 
     entries: { id: number; url: string }[];
   }>(tabId, 'Page.getNavigationHistory');
   const entry = entries[currentIndex + delta];
-  if (!entry) throw new UserError(`No ${delta < 0 ? 'previous' : 'next'} page in history`);
+  if (!entry)
+    throw new UserError(`No ${delta < 0 ? 'previous' : 'next'} page in history`, 'not_found');
   await cdp.send(tabId, 'Page.navigateToHistoryEntry', { entryId: entry.id });
   // Back/forward-cache restores don't fire a load event, so poll for the result instead.
   const deadline = Date.now() + ctx.timeout;
@@ -172,9 +173,11 @@ function currentTab(ctx: Ctx): number | undefined {
 }
 
 function resolveTabRef(ref: string): number {
-  if (/^\d+$/.test(ref)) throw new UserError(`Use a tab id like t${ref} (see \`bctl tab\`)`);
+  if (/^\d+$/.test(ref))
+    throw new UserError(`Use a tab id like t${ref} (see \`bctl tab\`)`, 'bad_args');
   const id = findTab(ref);
-  if (id === undefined) throw new UserError(`Unknown tab: ${ref}. Run \`bctl tab\` to list tabs.`);
+  if (id === undefined)
+    throw new UserError(`Unknown tab: ${ref}. Run \`bctl tab\` to list tabs.`, 'not_found');
   return id;
 }
 
@@ -182,10 +185,14 @@ const LABEL = /^[a-zA-Z][\w-]*$/;
 
 export function setLabel(tabId: number, label: string): void {
   if (!LABEL.test(label) || /^t\d+$/i.test(label)) {
-    throw new UserError('Labels start with a letter, use letters/digits/-/_, and are not t<N>');
+    throw new UserError(
+      'Labels start with a letter, use letters/digits/-/_, and are not t<N>',
+      'bad_args',
+    );
   }
   const other = findTab(label);
-  if (other !== undefined && other !== tabId) throw new UserError(`Label "${label}" is in use`);
+  if (other !== undefined && other !== tabId)
+    throw new UserError(`Label "${label}" is in use`, 'bad_args');
   meta(tabId).label = label;
   save();
 }
@@ -331,7 +338,7 @@ export const navigationCommands: Command[] = [
       if (sub === 'close') {
         const id = a.pos[1] ? resolveTabRef(a.pos[1]) : await ctx.tab();
         if (!isControlled(id))
-          throw new UserError(`Tab ${meta(id).tid} is not shared with the agent`);
+          throw new UserError(`Tab ${meta(id).tid} is not shared with the agent`, 'not_shared');
         await chrome.tabs.remove(id);
         return { text: '✓ Done', data: { closed: true } };
       }

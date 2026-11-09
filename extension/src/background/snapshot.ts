@@ -217,7 +217,7 @@ export async function snapshot(
       { objectId: h.objectId },
     );
     const found = [...main.byId.values()].find((n) => n.backendDOMNodeId === node.backendNodeId);
-    if (!found) throw new UserError(`${opts.scope} is not in the accessibility tree`);
+    if (!found) throw new UserError(`${opts.scope} is not in the accessibility tree`, 'not_found');
     start = { node: found, tree: main };
   }
 

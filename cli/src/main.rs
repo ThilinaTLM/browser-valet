@@ -238,7 +238,35 @@ const HELP: &str = "bctl local commands:
 All other commands are forwarded to the browser extension.
 New here? Run `bctl skills get core`.";
 
+/// The `--json` error envelope for failures that happen before the extension answers
+/// (same shape as the extension's, see automation.md).
+fn json_error(msg: &str, code: &str) -> String {
+    json!({"success": false, "data": null, "error": msg, "code": code}).to_string()
+}
+
 fn forward(argv: Vec<String>) -> Result<i32> {
+    let json_out = argv.iter().any(|a| a == "--json");
+    if json_out && load().is_none() {
+        println!(
+            "{}",
+            json_error(
+                "Not paired. Run `bctl setup` to install the browser extension and pair.",
+                "not_paired"
+            )
+        );
+        return Ok(1);
+    }
+    match forward_inner(argv) {
+        Err(e) if json_out => {
+            println!("{}", json_error(&format!("{e:#}"), "not_connected"));
+            Ok(1)
+        }
+        r => r,
+    }
+}
+
+fn forward_inner(argv: Vec<String>) -> Result<i32> {
+    let json_out = argv.iter().any(|a| a == "--json");
     let helpish = matches!(argv.first().map(String::as_str), None | Some("help" | "--help" | "-h"));
     if helpish && load().is_none() {
         println!("{HELP}\n\nNot paired. Run `bctl setup` to install the browser extension and pair.");
@@ -281,14 +309,14 @@ fn forward(argv: Vec<String>) -> Result<i32> {
         let m = recv(&mut ws)?;
         match m["t"].as_str() {
             Some("event") => eprint!("{}", m["stderr"].as_str().unwrap_or("")),
-            Some("res") => return finish(&m["res"]),
+            Some("res") => return finish(&m["res"], json_out),
             Some("error") => bail!("{}", m["error"].as_str().unwrap_or("proxy error")),
             _ => {}
         }
     }
 }
 
-fn finish(res: &Value) -> Result<i32> {
+fn finish(res: &Value, json_out: bool) -> Result<i32> {
     let mut code = res["exitCode"].as_i64().unwrap_or(0) as i32;
     for f in res["files"].as_array().into_iter().flatten() {
         let path = PathBuf::from(f["path"].as_str().unwrap_or(""));
@@ -305,6 +333,17 @@ fn finish(res: &Value) -> Result<i32> {
         }
     }
     let mut o = std::io::stdout();
+    // The proxy answers for an unreachable extension with a bare message; keep `--json` parseable.
+    if res["code"].as_str().is_some() && res["stdout"].as_str().unwrap_or("").is_empty() && json_out {
+        let msg = res["stderr"].as_str().unwrap_or("").trim_end();
+        writeln!(
+            o,
+            "{}",
+            json_error(msg, res["code"].as_str().unwrap_or("not_connected"))
+        )?;
+        o.flush()?;
+        return Ok(code);
+    }
     o.write_all(res["stdout"].as_str().unwrap_or("").as_bytes())?;
     o.flush()?;
     eprint!("{}", res["stderr"].as_str().unwrap_or(""));
@@ -447,5 +486,19 @@ fn main() {
             eprintln!("bctl: {e:#}");
             std::process::exit(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_error_has_the_extension_envelope() {
+        let v: Value = serde_json::from_str(&json_error("boom", "not_connected")).unwrap();
+        assert_eq!(
+            v,
+            json!({"success": false, "data": null, "error": "boom", "code": "not_connected"})
+        );
     }
 }

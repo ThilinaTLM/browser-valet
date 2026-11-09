@@ -66,5 +66,13 @@ describe('parseArgs', () => {
     );
     expect(c.parseArgs([], flags).num('depth')).toBeUndefined();
     expect(() => c.parseArgs([], flags).need(0, 'target')).toThrow('Missing target');
+    for (const f of [
+      () => c.parseArgs([], flags).need(0, 'target'),
+      () => c.parseArgs(['--depth', 'abc'], flags).num('depth'),
+      () => c.parseArgs(['--nope'], flags),
+      () => c.parseArgs(['--depth'], flags),
+    ]) {
+      expect(f).toThrow(expect.objectContaining({ code: 'bad_args' }));
+    }
   });
 });

@@ -58,7 +58,7 @@ export const networkCommands: Command[] = [
       const tabId = await ctx.tab();
       const sub = a.pos[0];
       if (sub !== 'requests' && sub !== 'request') {
-        throw new UserError('Usage: network requests [flags] | network request <id>');
+        throw new UserError('Usage: network requests [flags] | network request <id>', 'bad_args');
       }
       const started = await net.startRecording(tabId);
 
@@ -66,7 +66,10 @@ export const networkCommands: Command[] = [
         const id = a.need(1, 'request id (see `network requests`)');
         const e = net.getEntry(tabId, id);
         if (!e) {
-          throw new UserError(`Request not found: ${id}${started ? ` (${HINT})` : ''}`);
+          throw new UserError(
+            `Request not found: ${id}${started ? ` (${HINT})` : ''}`,
+            'not_found',
+          );
         }
         const body = await net.responseBody(tabId, e);
         const parts = [
@@ -97,7 +100,7 @@ export const networkCommands: Command[] = [
       try {
         if (status !== undefined) statusFn = net.parseStatus(status);
       } catch (e) {
-        throw new UserError((e as Error).message, { cause: e });
+        throw new UserError((e as Error).message, 'bad_args', { cause: e });
       }
       const entries = net.list(tabId, {
         filter: a.str('filter'),
@@ -109,10 +112,10 @@ export const networkCommands: Command[] = [
         status: statusFn,
       });
       const lines = entries.map(net.line);
-      if (started) lines.push(HINT);
-      else if (!lines.length) lines.push('No requests captured');
+      if (!lines.length) lines.push('No requests captured');
       return {
         text: lines.join('\n'),
+        warning: started ? HINT : undefined,
         data: { recordingStarted: started, requests: entries.map((e) => entryJson(e)) },
       };
     },

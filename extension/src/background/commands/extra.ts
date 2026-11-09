@@ -38,14 +38,15 @@ function pointer(tabId: number): Pointer {
 function parseButton(s: string | undefined): Button {
   const b = (s ?? 'left').toLowerCase();
   if (b !== 'left' && b !== 'right' && b !== 'middle') {
-    throw new UserError('Button must be left, right or middle');
+    throw new UserError('Button must be left, right or middle', 'bad_args');
   }
   return b;
 }
 
 function coord(s: string | undefined, what: string): number {
   const n = Number(s);
-  if (s === undefined || s === '' || !Number.isFinite(n)) throw new UserError(`Missing ${what}`);
+  if (s === undefined || s === '' || !Number.isFinite(n))
+    throw new UserError(`Missing ${what}`, 'bad_args');
   return n;
 }
 
@@ -162,7 +163,7 @@ const mouse: Command = {
         return { ...DONE, data: { scrolled: true, deltaX: dx, deltaY: dy } };
       }
       default:
-        throw new UserError(`Unknown: mouse ${what}`);
+        throw new UserError(`Unknown: mouse ${what}`, 'bad_args');
     }
   },
 };
@@ -258,7 +259,8 @@ export async function computedStyles(
   );
   const out: Record<string, string> = {};
   for (const [n, v] of pairs) {
-    if (v === '' && names.length && !all) throw new UserError(`Unknown CSS property: ${n}`);
+    if (v === '' && names.length && !all)
+      throw new UserError(`Unknown CSS property: ${n}`, 'bad_args');
     out[n] = v;
   }
   return out;
@@ -393,7 +395,7 @@ const sessionCmd: Command = {
         },
       };
     }
-    throw new UserError(`Unknown: session ${what}`);
+    throw new UserError(`Unknown: session ${what}`, 'bad_args');
   },
 };
 

@@ -63,7 +63,7 @@ async function poll(ctx: Ctx, what: string, check: () => Promise<boolean>): Prom
     }
     if (ctx.signal.aborted) throw new UserError('cancelled');
     if (Date.now() > deadline)
-      throw new UserError(`Timed out after ${ctx.timeout}ms waiting for ${what}`);
+      throw new UserError(`Timed out after ${ctx.timeout}ms waiting for ${what}`, 'timeout');
     await sleep(100);
   }
 }
@@ -223,7 +223,7 @@ export const inspectionCommands: Command[] = [
           };
         }
         default:
-          throw new UserError(`Unknown: get ${what}`);
+          throw new UserError(`Unknown: get ${what}`, 'bad_args');
       }
     },
   },
@@ -242,7 +242,7 @@ export const inspectionCommands: Command[] = [
         checked: `function () { return this.checked ?? this.getAttribute('aria-checked') === 'true'; }`,
       };
       const fn = fns[what];
-      if (!fn) throw new UserError(`Unknown: is ${what}`);
+      if (!fn) throw new UserError(`Unknown: is ${what}`, 'bad_args');
       const value = await call<boolean>(h, fn);
       return { text: String(value), data: { [what]: value } };
     },
@@ -288,7 +288,8 @@ export const inspectionCommands: Command[] = [
           detached: async () => !(await exists()),
         };
         const check = checks[st];
-        if (!check) throw new UserError('--state must be visible|hidden|attached|detached');
+        if (!check)
+          throw new UserError('--state must be visible|hidden|attached|detached', 'bad_args');
         await poll(ctx, `${first} to be ${st}`, check);
       } else if (text !== undefined) {
         const expr = `document.body?.innerText.includes(${JSON.stringify(text)}) ?? false`;
@@ -319,9 +320,9 @@ export const inspectionCommands: Command[] = [
             }
             return Date.now() - since >= 500;
           });
-        } else throw new UserError('--load must be load|domcontentloaded|networkidle');
+        } else throw new UserError('--load must be load|domcontentloaded|networkidle', 'bad_args');
       } else {
-        throw new UserError('Usage: wait <target|ms> | --text | --url | --load | --fn');
+        throw new UserError('Usage: wait <target|ms> | --text | --url | --load | --fn', 'bad_args');
       }
       return { text: '✓ Done' };
     },
@@ -346,8 +347,11 @@ export const inspectionCommands: Command[] = [
       }
       const { data, truncated } = await fullPage(id, format);
       ctx.files.push({ path, base64: data });
-      const note = truncated ? ' (very tall page: truncated)' : '';
-      return { text: `✓ Screenshot saved to ${path}${note}`, data: { path, truncated } };
+      return {
+        text: `✓ Screenshot saved to ${path}`,
+        data: { path, truncated },
+        warning: truncated ? 'Very tall page: the full-page screenshot was truncated' : undefined,
+      };
     },
   },
   {
@@ -379,7 +383,8 @@ export const inspectionCommands: Command[] = [
         : b64 !== undefined
           ? decodeBase64(b64)
           : a.pos.join(' ');
-      if (!script.trim()) throw new UserError('Usage: eval <js> | eval -b <base64> | eval --stdin');
+      if (!script.trim())
+        throw new UserError('Usage: eval <js> | eval -b <base64> | eval --stdin', 'bad_args');
       const { value, token } = remoteValue(await evaluate(await ctx.tab(), script));
       return {
         text: formatValue(value, token),
@@ -401,9 +406,9 @@ export const inspectionCommands: Command[] = [
           ? { text: `${dialog.type}: ${dialog.message}`, data: { open: true, ...dialog } }
           : { text: '✓ No dialog is currently open', data: { open: false } };
       }
-      if (!dialog) throw new UserError('No dialog is open');
+      if (!dialog) throw new UserError('No dialog is open', 'not_found');
       if (sub !== 'accept' && sub !== 'dismiss')
-        throw new UserError('Usage: dialog <status|accept|dismiss>');
+        throw new UserError('Usage: dialog <status|accept|dismiss>', 'bad_args');
       await cdp.send(id, 'Page.handleJavaScriptDialog', {
         accept: sub === 'accept',
         promptText: a.pos[1] ?? dialog.defaultPrompt ?? '',

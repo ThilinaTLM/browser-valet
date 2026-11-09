@@ -1,6 +1,7 @@
 // Resolving targets (@refs, CSS selectors) to remote objects, running functions on them, and
 // computing safe click points.
 
+import { UserError } from './errors';
 import * as cdp from './cdp';
 import { syncDocument } from './refs';
 import { state } from './state';
@@ -24,7 +25,7 @@ interface EvalResult {
   exceptionDetails?: { text?: string; exception?: RemoteObject };
 }
 
-export class UserError extends Error {}
+export { UserError };
 
 function exceptionText(d: NonNullable<EvalResult['exceptionDetails']>): string {
   return d.exception?.description ?? d.text ?? 'JavaScript exception';
@@ -103,7 +104,11 @@ async function resolveRef(tabId: number, target: string): Promise<Handle> {
   const ref = REF.exec(target)?.[1] ?? target;
   await syncDocument(tabId); // refs of an earlier document are gone
   const info = state.refs[tabId]?.[ref];
-  if (!info) throw new UserError(`Unknown ref: ${ref}. Run \`bctl snapshot\` to get fresh refs.`);
+  if (!info)
+    throw new UserError(
+      `Unknown ref: ${ref}. Run \`bctl snapshot\` to get fresh refs.`,
+      'unknown_ref',
+    );
   try {
     return { tabId, objectId: await resolveBackend(tabId, info.backendNodeId) };
   } catch {
@@ -123,6 +128,7 @@ async function resolveRef(tabId: number, target: string): Promise<Handle> {
     }
     throw new UserError(
       `Stale ref ${ref} (${info.role} "${info.name}") cannot be recovered. Run \`bctl snapshot\` again.`,
+      'stale_ref',
     );
   }
 }
@@ -154,8 +160,8 @@ export async function resolve(tabId: number, target: string): Promise<Handle> {
   const r = await cdp.send<EvalResult>(tabId, 'Runtime.evaluate', {
     expression: queryExpression(target),
   });
-  if (r.exceptionDetails) throw new UserError(`Invalid selector: ${target}`);
-  if (!r.result.objectId) throw new UserError(`Element not found: ${target}`);
+  if (r.exceptionDetails) throw new UserError(`Invalid selector: ${target}`, 'bad_args');
+  if (!r.result.objectId) throw new UserError(`Element not found: ${target}`, 'not_found');
   return { tabId, objectId: r.result.objectId };
 }
 
@@ -218,17 +224,20 @@ export async function clickPoint(
       return { covered: describe(hit) };
     }`,
   );
-  if (check.hidden) throw new UserError('Element is not visible');
-  if (check.disabled && !opts.allowDisabled) throw new UserError('Element is disabled');
+  if (check.hidden) throw new UserError('Element is not visible', 'not_visible');
+  if (check.disabled && !opts.allowDisabled) throw new UserError('Element is disabled', 'disabled');
   if (check.covered) {
-    throw new UserError(`Element is covered by ${check.covered}. Dismiss it, re-snapshot, retry.`);
+    throw new UserError(
+      `Element is covered by ${check.covered}. Dismiss it, re-snapshot, retry.`,
+      'covered',
+    );
   }
 
   const { quads } = await cdp.send<{ quads: number[][] }>(h.tabId, 'DOM.getContentQuads', {
     objectId: h.objectId,
   });
   const q = quads.find((q) => q.length === 8);
-  if (!q) throw new UserError('Element is not visible');
+  if (!q) throw new UserError('Element is not visible', 'not_visible');
   const [x1 = 0, y1 = 0, x2 = 0, y2 = 0, x3 = 0, y3 = 0, x4 = 0, y4 = 0] = q;
   return { x: (x1 + x2 + x3 + x4) / 4, y: (y1 + y2 + y3 + y4) / 4 };
 }

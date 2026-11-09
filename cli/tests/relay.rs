@@ -219,6 +219,7 @@ fn ext_disconnect_yields_error_res() {
         .as_str()
         .unwrap()
         .contains("browser extension disconnected"));
+    assert_eq!(r["res"]["code"], "not_connected");
 }
 
 #[test]
@@ -371,6 +372,7 @@ fn no_extension_errors_after_wait() {
     assert!(t.elapsed() >= Duration::from_millis(350));
     assert_eq!(r["res"]["exitCode"], 1);
     assert!(r["res"]["stderr"].as_str().unwrap().contains("not connected"));
+    assert_eq!(r["res"]["code"], "not_connected");
 }
 
 #[test]

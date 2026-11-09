@@ -22,7 +22,8 @@ async function agentTab(ctx: Ctx, what: string): Promise<number> {
 
 function positive(v: string | undefined, what: string, usage: string): number {
   const n = Number(v);
-  if (v === undefined || !Number.isFinite(n) || n <= 0) throw new UserError(`${what}\n${usage}`);
+  if (v === undefined || !Number.isFinite(n) || n <= 0)
+    throw new UserError(`${what}\n${usage}`, 'bad_args');
   return n;
 }
 
@@ -36,7 +37,7 @@ async function setViewport(ctx: Ctx, rest: string[]) {
     return { text: '✓ Done', data: { reset: true } };
   }
   if (rest.length < 2)
-    throw new UserError(`Missing arguments for: set viewport\n${VIEWPORT_USAGE}`);
+    throw new UserError(`Missing arguments for: set viewport\n${VIEWPORT_USAGE}`, 'bad_args');
   const width = Math.round(positive(rest[0], 'Width must be a positive number', VIEWPORT_USAGE));
   const height = Math.round(positive(rest[1], 'Height must be a positive number', VIEWPORT_USAGE));
   const deviceScaleFactor =
@@ -64,9 +65,9 @@ async function setMedia(ctx: Ctx, rest: string[]) {
   for (const w of rest) {
     if (w === 'dark' || w === 'light') colorScheme = w;
     else if (w === 'reduced-motion') reducedMotion = true;
-    else throw new UserError(`Unknown media option: ${w}\n${MEDIA_USAGE}`);
+    else throw new UserError(`Unknown media option: ${w}\n${MEDIA_USAGE}`, 'bad_args');
   }
-  if (colorScheme === undefined && !reducedMotion) throw new UserError(MEDIA_USAGE);
+  if (colorScheme === undefined && !reducedMotion) throw new UserError(MEDIA_USAGE, 'bad_args');
   if (colorScheme) features.push({ name: 'prefers-color-scheme', value: colorScheme });
   if (reducedMotion) features.push({ name: 'prefers-reduced-motion', value: 'reduce' });
   await cdp.send(id, 'Emulation.setEmulatedMedia', { features });
@@ -118,14 +119,16 @@ export const emulationCommands: Command[] = [
       if (sub === undefined) {
         throw new UserError(
           'Missing arguments for: set\nUsage: bctl set <viewport|media> [args...]',
+          'bad_args',
         );
       }
       if (NOT_SUPPORTED.includes(sub)) {
         throw new UserError(
           `set ${sub} is not supported: it would change what servers see in the user's logged-in browser. Only \`set viewport\` and \`set media\` exist, on agent tabs.`,
+          'bad_args',
         );
       }
-      throw new UserError(`Unknown subcommand: ${sub}\nValid options: viewport, media`);
+      throw new UserError(`Unknown subcommand: ${sub}\nValid options: viewport, media`, 'bad_args');
     },
   },
 ];

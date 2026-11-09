@@ -207,7 +207,7 @@ const FIND_HELP =
 async function locate(ctx: Ctx, a: Args): Promise<{ h: Handle; rest: string[] }> {
   const tabId = await ctx.tab();
   const [kind, value, ...rest] = a.pos;
-  if (!kind || value === undefined) throw new UserError(`Usage: ${FIND_HELP}`);
+  if (!kind || value === undefined) throw new UserError(`Usage: ${FIND_HELP}`, 'bad_args');
   const exact = a.has('exact');
   const name = a.str('name');
   let h: Handle | null;
@@ -245,7 +245,7 @@ async function locate(ctx: Ctx, a: Args): Promise<{ h: Handle; rest: string[] }>
     }
     case 'nth': {
       const selector = rest[0];
-      if (!selector) throw new UserError(`Usage: ${FIND_HELP}`);
+      if (!selector) throw new UserError(`Usage: ${FIND_HELP}`, 'bad_args');
       rest2 = rest.slice(1);
       h = await evaluateHandle(
         tabId,
@@ -254,11 +254,11 @@ async function locate(ctx: Ctx, a: Args): Promise<{ h: Handle; rest: string[] }>
       break;
     }
     default:
-      throw new UserError(`Unknown locator "${kind}". Usage: ${FIND_HELP}`);
+      throw new UserError(`Unknown locator "${kind}". Usage: ${FIND_HELP}`, 'bad_args');
   }
   if (!h) {
     const desc = kind === 'role' && name ? `role ${value} named "${name}"` : `${kind} "${value}"`;
-    throw new UserError(`No element found by ${desc}`);
+    throw new UserError(`No element found by ${desc}`, 'not_found');
   }
   ctx.tabId = tabId;
   return { h, rest: rest2 };
@@ -388,7 +388,7 @@ export const interactionCommands: Command[] = [
       const text = a.need(1, 'text');
       if (mode === 'type') await input.type(id, text);
       else if (mode === 'inserttext') await input.insertText(id, text);
-      else throw new UserError('Usage: keyboard <type|inserttext> <text>');
+      else throw new UserError('Usage: keyboard <type|inserttext> <text>', 'bad_args');
       return DONE;
     },
   },
@@ -436,7 +436,7 @@ export const interactionCommands: Command[] = [
       const px = Number(a.pos[1] ?? 300);
       const delta = { up: [0, -px], down: [0, px], left: [-px, 0], right: [px, 0] }[dir];
       if (!delta || !Number.isFinite(px))
-        throw new UserError('Usage: scroll [up|down|left|right] [px]');
+        throw new UserError('Usage: scroll [up|down|left|right] [px]', 'bad_args');
       // Scrolled via script rather than wheel events: Chrome doesn't process wheel input for
       // background tabs, which is where agent tabs usually live.
       const sel = a.str('selector');
@@ -518,7 +518,7 @@ export const interactionCommands: Command[] = [
       const { h, rest } = await locate(ctx, a);
       const [action = '', value] = rest;
       const needValue = () => {
-        if (value === undefined) throw new UserError(`${action} needs a value`);
+        if (value === undefined) throw new UserError(`${action} needs a value`, 'bad_args');
         return value;
       };
       switch (action) {
@@ -544,7 +544,10 @@ export const interactionCommands: Command[] = [
         case 'text':
           return textOf(h);
         default:
-          throw new UserError(`Unknown or missing action "${action}". Usage: ${FIND_HELP}`);
+          throw new UserError(
+            `Unknown or missing action "${action}". Usage: ${FIND_HELP}`,
+            'bad_args',
+          );
       }
     },
   },
