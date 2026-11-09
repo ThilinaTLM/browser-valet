@@ -325,16 +325,23 @@ export const navigationCommands: Command[] = [
           })
           .join('\n');
         return {
-          text: `${text}\n\nTabs marked [not shared] need user approval: \`bctl tab <id>\` asks the user.`,
-          data: rows.map(({ m, t, controlled, current: cur }) => ({
-            tabId: m.tid,
-            label: m.label,
-            title: t.title,
-            url: t.url,
-            controlled,
-            current: cur,
-            active: t.active,
-          })),
+          text,
+          warning: rows.some((r) => !r.controlled)
+            ? 'Tabs marked [not shared] need user approval: `bctl tab <id>` asks the user.'
+            : undefined,
+          data: {
+            tabs: rows.map(({ id, m, t, controlled, current: cur }) => ({
+              tabId: m.tid,
+              label: m.label ?? null,
+              title: t.title,
+              url: t.url,
+              active: t.active,
+              type: 'page',
+              controlled,
+              pending: pendingIds.has(id),
+              current: cur,
+            })),
+          },
         };
       }
 

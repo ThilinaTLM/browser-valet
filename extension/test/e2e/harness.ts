@@ -100,7 +100,8 @@ export async function openUserTab(url: string): Promise<Page> {
 /** Find the `tN` id that `bctl tab` shows for a page title (optionally only unshared tabs). */
 export async function tidForTitle(title: string): Promise<string> {
   const r = await bctl('tab', '--json');
-  const tabs = (JSON.parse(r.stdout) as { data: { tabId: string; title: string }[] }).data;
+  const tabs = (JSON.parse(r.stdout) as { data: { tabs: { tabId: string; title: string }[] } }).data
+    .tabs;
   const hit = tabs.find((t) => t.title === title);
   if (!hit) throw new Error(`No tab titled "${title}" in: ${r.stdout}`);
   return hit.tabId;

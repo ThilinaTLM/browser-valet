@@ -41,3 +41,50 @@ describe('attach', () => {
     await expect(cdp.attach(7)).rejects.toThrow(/does not allow extensions/);
   });
 });
+
+describe('console and error buffers', () => {
+  it('store entries shaped like agent-browser (type/text/args, text/line/column/url)', () => {
+    const fire = (method: string, params: unknown) => {
+      (mock.events.debuggerOnEvent as unknown as { fire(...a: unknown[]): void }).fire(
+        { tabId: 7 },
+        method,
+        params,
+      );
+    };
+    fire('Runtime.consoleAPICalled', {
+      type: 'warning',
+      args: [
+        { type: 'string', value: 'hi' },
+        { type: 'number', value: 1 },
+      ],
+    });
+    fire('Runtime.exceptionThrown', {
+      exceptionDetails: {
+        text: 'Uncaught',
+        exception: { type: 'object', description: 'Error: boom' },
+        lineNumber: 3,
+        columnNumber: 9,
+        url: 'http://x/y.js',
+      },
+    });
+    fire('Runtime.exceptionThrown', { exceptionDetails: { text: 'Uncaught' } });
+    const ev = cdp.tabEvents(7);
+    expect(ev.console).toEqual([
+      {
+        type: 'warning',
+        text: 'hi 1',
+        args: [
+          { type: 'string', value: 'hi' },
+          { type: 'number', value: 1 },
+        ],
+      },
+    ]);
+    expect(ev.errors[0]).toEqual({
+      text: 'Error: boom',
+      line: 3,
+      column: 9,
+      url: 'http://x/y.js',
+    });
+    expect(ev.errors[1]).toEqual({ text: 'Uncaught', line: null, column: null, url: null });
+  });
+});

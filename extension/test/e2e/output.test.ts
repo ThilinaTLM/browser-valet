@@ -106,3 +106,63 @@ describe('wait prints what it matched', () => {
     expect((await bctl('wait', '--load', 'load')).stdout).toBe('✓ Done\n');
   });
 });
+
+describe('JSON fields line up with agent-browser', () => {
+  const json = async (...args: string[]) =>
+    (JSON.parse((await bctl(...args, '--json')).stdout) as { data: Record<string, unknown> }).data;
+
+  it('actions echo their target', async () => {
+    await bctl('open', fixture('/form.html'));
+    const snap = (await bctl('snapshot', '-i')).stdout;
+    const ref = `@${/\[ref=(e\d+)\]/.exec(snap.split('\n').find((l) => l.includes('textbox')) ?? '')?.[1]}`;
+    expect(await json('fill', ref, 'hello')).toEqual({ filled: ref });
+    expect(await json('type', ref, '!')).toEqual({ typed: '!' });
+    expect(await json('focus', ref)).toEqual({ focused: ref });
+    expect(await json('hover', ref)).toEqual({ hovered: ref });
+    expect(await json('press', 'Tab')).toEqual({ pressed: 'Tab' });
+    expect(await json('scroll', 'down', '10')).toEqual({ scrolled: true });
+    expect(await json('wait', '20')).toEqual({ ms: 20, waited: 'timeout' });
+    expect(await json('click', 'h1')).toEqual({ clicked: 'h1' });
+  });
+
+  it('page reads carry origin; get attr uses value', async () => {
+    const origin = fixture('/form.html');
+    expect(await json('get', 'text', 'h1')).toMatchObject({ text: 'Fixture Form', origin });
+    expect(await json('get', 'attr', 'h1', 'id')).toMatchObject({ value: null, origin });
+    expect(await json('get', 'count', 'h1')).toMatchObject({ count: 1, selector: 'h1' });
+    const box = await json('get', 'box', 'h1');
+    expect(typeof box.width).toBe('number');
+    expect(box).toHaveProperty('x');
+    expect(await json('eval', '1+1')).toEqual({ result: 2, origin });
+    expect(await json('is', 'visible', 'h1')).toEqual({ visible: true, origin });
+    expect(await json('dialog', 'status')).toMatchObject({ hasDialog: false, open: false });
+  });
+
+  it('console and errors are lists of objects', async () => {
+    await bctl('eval', 'console.log("hi", 1); setTimeout(() => { throw new Error("boom") }, 10)');
+    await bctl('wait', '300');
+    const c = await json('console');
+    expect(c.messages).toEqual([
+      expect.objectContaining({
+        type: 'log',
+        text: 'hi 1',
+        args: [expect.anything(), expect.anything()],
+      }),
+    ]);
+    const e = await json('errors');
+    const errs = e.errors as { text: string }[];
+    expect(errs).toHaveLength(1);
+    expect(errs[0]?.text).toMatch(/Error: boom/);
+    expect((await bctl('console')).stdout).toBe('[log] hi 1\n');
+  });
+
+  it('tab list is { tabs: [...] } with the upstream fields plus controlled/pending', async () => {
+    const r = await bctl('tab', '--json');
+    const d = (JSON.parse(r.stdout) as { data: { tabs: Record<string, unknown>[] } }).data;
+    expect(d.tabs.length).toBeGreaterThan(0);
+    expect(d.tabs[0]).toHaveProperty('tabId');
+    for (const k of ['label', 'title', 'url', 'active', 'controlled', 'pending']) {
+      expect(d.tabs[0]).toHaveProperty(k);
+    }
+  });
+});

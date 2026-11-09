@@ -15,6 +15,9 @@ import { openInNewTab } from './navigation';
 
 const DONE: Result = { text: '✓ Done' };
 
+/** `✓ Done` with the upstream-style JSON payload (`{ clicked: '@e3' }`, …). */
+const done = (data: unknown): Result => ({ text: '✓ Done', data });
+
 async function element(ctx: Ctx, target: string): Promise<Handle> {
   return resolveWait(await ctx.tab(), target, ctx.timeout, ctx.signal);
 }
@@ -298,7 +301,8 @@ export const interactionCommands: Command[] = [
         if (!href) throw new UserError('Element is not a link');
         return openInNewTab(ctx, href);
       }
-      return clickEl(h, 1, a.has('right') ? 'right' : 'left');
+      const r = await clickEl(h, 1, a.has('right') ? 'right' : 'left');
+      return { ...r, data: { clicked: target(a) } };
     },
   },
   {
@@ -308,7 +312,8 @@ export const interactionCommands: Command[] = [
     usage: 'dblclick <target>',
     summary: 'Double-click an element',
     async run(ctx, a) {
-      return clickEl(await element(ctx, target(a)), 2);
+      await clickEl(await element(ctx, target(a)), 2);
+      return done({ clicked: target(a) });
     },
   },
   {
@@ -318,7 +323,7 @@ export const interactionCommands: Command[] = [
     summary: 'Focus an element',
     async run(ctx, a) {
       await focusEl(await element(ctx, target(a)));
-      return DONE;
+      return done({ focused: target(a) });
     },
   },
   {
@@ -327,7 +332,8 @@ export const interactionCommands: Command[] = [
     usage: 'hover <target>',
     summary: 'Move the mouse over an element',
     async run(ctx, a) {
-      return hoverEl(await element(ctx, target(a)));
+      await hoverEl(await element(ctx, target(a)));
+      return done({ hovered: target(a) });
     },
   },
   {
@@ -339,7 +345,8 @@ export const interactionCommands: Command[] = [
     usage: 'fill <target> <text>',
     summary: 'Clear an input and fill it with text',
     async run(ctx, a) {
-      return fillEl(await element(ctx, target(a)), a.need(1, 'text'));
+      await fillEl(await element(ctx, target(a)), a.need(1, 'text'));
+      return done({ filled: target(a) });
     },
   },
   {
@@ -348,7 +355,9 @@ export const interactionCommands: Command[] = [
     usage: 'type <target> <text>',
     summary: 'Type text into an element without clearing it (real key events)',
     async run(ctx, a) {
-      return typeEl(await element(ctx, target(a)), a.need(1, 'text'));
+      const text = a.need(1, 'text');
+      await typeEl(await element(ctx, target(a)), text);
+      return done({ typed: text });
     },
   },
   {
@@ -362,9 +371,10 @@ export const interactionCommands: Command[] = [
     summary: 'Press a key at the current focus: Enter, Tab, Control+a, ControlOrMeta+c, …',
     async run(ctx, a) {
       const id = await ctx.tab();
-      await input.press(id, a.need(0, 'key'));
+      const key = a.need(0, 'key');
+      await input.press(id, key);
       await settle(id);
-      return DONE;
+      return done({ pressed: key });
     },
   },
   {
@@ -374,8 +384,9 @@ export const interactionCommands: Command[] = [
     usage: 'keydown <key>',
     summary: 'Hold a key down (e.g. Shift)',
     async run(ctx, a) {
-      await input.keyDown(await ctx.tab(), a.need(0, 'key'));
-      return DONE;
+      const key = a.need(0, 'key');
+      await input.keyDown(await ctx.tab(), key);
+      return done({ keydown: key });
     },
   },
   {
@@ -385,8 +396,9 @@ export const interactionCommands: Command[] = [
     usage: 'keyup <key>',
     summary: 'Release a held key',
     async run(ctx, a) {
-      await input.keyUp(await ctx.tab(), a.need(0, 'key'));
-      return DONE;
+      const key = a.need(0, 'key');
+      await input.keyUp(await ctx.tab(), key);
+      return done({ keyup: key });
     },
   },
   {
@@ -398,10 +410,15 @@ export const interactionCommands: Command[] = [
       const id = await ctx.tab();
       const mode = a.need(0, 'type|inserttext');
       const text = a.need(1, 'text');
-      if (mode === 'type') await input.type(id, text);
-      else if (mode === 'inserttext') await input.insertText(id, text);
-      else throw new UserError('Usage: keyboard <type|inserttext> <text>', 'bad_args');
-      return DONE;
+      if (mode === 'type') {
+        await input.type(id, text);
+        return done({ typed: text });
+      }
+      if (mode === 'inserttext') {
+        await input.insertText(id, text);
+        return done({ inserted: true });
+      }
+      throw new UserError('Usage: keyboard <type|inserttext> <text>', 'bad_args');
     },
   },
   {
@@ -411,7 +428,8 @@ export const interactionCommands: Command[] = [
     usage: 'check <target>',
     summary: 'Check a checkbox / radio / switch',
     async run(ctx, a) {
-      return setChecked(await element(ctx, target(a)), true);
+      await setChecked(await element(ctx, target(a)), true);
+      return done({ checked: target(a) });
     },
   },
   {
@@ -421,7 +439,8 @@ export const interactionCommands: Command[] = [
     usage: 'uncheck <target>',
     summary: 'Uncheck a checkbox / switch',
     async run(ctx, a) {
-      return setChecked(await element(ctx, target(a)), false);
+      await setChecked(await element(ctx, target(a)), false);
+      return done({ unchecked: target(a) });
     },
   },
   {
@@ -461,7 +480,7 @@ export const interactionCommands: Command[] = [
         'function (dx, dy) { this.scrollBy({ left: dx, top: dy, behavior: "instant" }); }',
         [delta[0] ?? 0, delta[1] ?? 0],
       );
-      return DONE;
+      return done({ scrolled: true });
     },
   },
   {
@@ -474,7 +493,7 @@ export const interactionCommands: Command[] = [
     async run(ctx, a) {
       const h = await element(ctx, target(a));
       await cdp.send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId });
-      return DONE;
+      return done({ scrolled: target(a) });
     },
   },
   {
@@ -489,7 +508,7 @@ export const interactionCommands: Command[] = [
         allowDisabled: true,
       });
       await input.drag(await ctx.tab(), from, to);
-      return DONE;
+      return done({ dragged: true, source: target(a), target: a.need(1, 'drop target') });
     },
   },
   {

@@ -7,10 +7,25 @@ export interface Dialog {
   defaultPrompt?: string;
 }
 
+/** One console message; shaped like agent-browser's: `args` are CDP RemoteObjects. */
+export interface ConsoleEntry {
+  type: string;
+  text: string;
+  args: RemoteObject[];
+}
+
+/** One uncaught page error (`line` and `column` are 0-based, as CDP reports them). */
+export interface PageError {
+  text: string;
+  line: number | null;
+  column: number | null;
+  url: string | null;
+}
+
 interface TabEvents {
   dialog?: Dialog;
-  console: string[];
-  errors: string[];
+  console: ConsoleEntry[];
+  errors: PageError[];
 }
 
 const attached = new Set<number>();
@@ -39,8 +54,8 @@ export function tabEvents(tabId: number): TabEvents {
   return e;
 }
 
-function push(buf: string[], line: string): void {
-  buf.push(line);
+function push<T>(buf: T[], entry: T): void {
+  buf.push(entry);
   if (buf.length > MAX_BUFFER) buf.splice(0, buf.length - MAX_BUFFER);
 }
 
@@ -107,7 +122,7 @@ export function onEvent(fn: (tabId: number, method: string, params: unknown) => 
   return () => listeners.delete(fn);
 }
 
-interface RemoteObject {
+export interface RemoteObject {
   type: string;
   value?: unknown;
   description?: string;
@@ -137,10 +152,27 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     delete ev.dialog;
   } else if (method === 'Runtime.consoleAPICalled') {
     const args = (p.args as RemoteObject[] | undefined) ?? [];
-    push(ev.console, `[${String(p.type)}] ${args.map(formatArg).join(' ')}`);
+    push(ev.console, {
+      type: String(p.type),
+      text: args.map(formatArg).join(' '),
+      args,
+    });
   } else if (method === 'Runtime.exceptionThrown') {
-    const d = p.exceptionDetails as { text?: string; exception?: RemoteObject } | undefined;
-    push(ev.errors, d?.exception?.description ?? d?.text ?? 'Uncaught error');
+    const d = p.exceptionDetails as
+      | {
+          text?: string;
+          exception?: RemoteObject;
+          lineNumber?: number;
+          columnNumber?: number;
+          url?: string;
+        }
+      | undefined;
+    push(ev.errors, {
+      text: d?.exception?.description ?? d?.text ?? 'Uncaught error',
+      line: d?.lineNumber ?? null,
+      column: d?.columnNumber ?? null,
+      url: d?.url ?? null,
+    });
   }
   for (const fn of listeners) fn(tabId, method, params);
 });

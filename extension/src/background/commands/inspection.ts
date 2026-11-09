@@ -175,19 +175,24 @@ export const inspectionCommands: Command[] = [
     async run(ctx, a) {
       const what = a.need(0, 'text|html|value|attr|title|url|count|box|styles');
       const id = await ctx.tab();
-      const out = (value: unknown) => ({
+      const origin = async () => (await chrome.tabs.get(id)).url ?? null;
+      const out = async (value: unknown, data?: Record<string, unknown>) => ({
         text: typeof value === 'string' ? value : JSON.stringify(value),
-        data: { [what]: value },
+        data: data ?? { [what]: value, origin: await origin() },
       });
       switch (what) {
-        case 'title':
-          return out((await chrome.tabs.get(id)).title ?? '');
-        case 'url':
-          return out((await chrome.tabs.get(id)).url ?? '');
+        case 'title': {
+          const title = (await chrome.tabs.get(id)).title ?? '';
+          return out(title, { title });
+        }
+        case 'url': {
+          const url = (await chrome.tabs.get(id)).url ?? '';
+          return out(url, { url });
+        }
         case 'count': {
           const sel = a.need(1, 'selector');
           const r = await evaluate(id, countExpression(sel));
-          return out(r.value);
+          return out(r.value, { count: r.value, selector: sel });
         }
         case 'text':
         case 'html': {
@@ -201,27 +206,27 @@ export const inspectionCommands: Command[] = [
               : 'function () { return this.innerHTML; }';
           return out(await call<string>(h, fn));
         }
-        case 'value':
-          return out(
-            await call(
-              await element(ctx, a.need(1, 'target')),
-              'function () { return this.value; }',
-            ),
+        case 'value': {
+          const value = await call(
+            await element(ctx, a.need(1, 'target')),
+            'function () { return this.value; }',
           );
+          return out(value, { value, origin: await origin() });
+        }
         case 'attr': {
           const h = await element(ctx, a.need(1, 'target'));
           const name = a.need(2, 'attribute name');
-          return out(await call(h, 'function (n) { return this.getAttribute(n); }', [name]));
+          const value = await call(h, 'function (n) { return this.getAttribute(n); }', [name]);
+          return out(value, { value, attr: name, origin: await origin() });
         }
         case 'box': {
           const h = await element(ctx, a.need(1, 'target'));
-          return out(
-            await call(
-              h,
-              `function () { const r = this.getBoundingClientRect();
+          const box = await call<Record<string, number>>(
+            h,
+            `function () { const r = this.getBoundingClientRect();
                  return { x: r.x, y: r.y, width: r.width, height: r.height }; }`,
-            ),
           );
+          return out(box, { ...box, box });
         }
         case 'styles': {
           const h = await element(ctx, a.need(1, 'target'));
@@ -230,7 +235,7 @@ export const inspectionCommands: Command[] = [
             text: Object.entries(styles)
               .map(([k, v]) => `${k}: ${v}`)
               .join('\n'),
-            data: { styles },
+            data: { styles, origin: await origin() },
           };
         }
         default:
@@ -255,7 +260,10 @@ export const inspectionCommands: Command[] = [
       const fn = fns[what];
       if (!fn) throw new UserError(`Unknown: is ${what}`, 'bad_args');
       const value = await call<boolean>(h, fn);
-      return { text: String(value), data: { [what]: value } };
+      return {
+        text: String(value),
+        data: { [what]: value, origin: (await chrome.tabs.get(h.tabId)).url ?? null },
+      };
     },
   },
   {
@@ -286,7 +294,7 @@ export const inspectionCommands: Command[] = [
       const first = a.pos[0];
       if (first !== undefined && /^\d+$/.test(first)) {
         await sleep(Number(first));
-        return { text: '✓ Done' };
+        return { text: '✓ Done', data: { ms: Number(first), waited: 'timeout' } };
       }
       const id = await ctx.tab();
       const text = a.str('text');
@@ -420,10 +428,15 @@ export const inspectionCommands: Command[] = [
           : a.pos.join(' ');
       if (!script.trim())
         throw new UserError('Usage: eval <js> | eval -b <base64> | eval --stdin', 'bad_args');
-      const { value, token } = remoteValue(await evaluate(await ctx.tab(), script));
+      const id = await ctx.tab();
+      const { value, token } = remoteValue(await evaluate(id, script));
+      const origin = (await chrome.tabs.get(id)).url ?? null;
       return {
         text: formatValue(value, token),
-        data: token === undefined ? { result: value } : { result: null, unserializable: token },
+        data:
+          token === undefined
+            ? { result: value, origin }
+            : { result: null, unserializable: token, origin },
       };
     },
   },
@@ -441,8 +454,11 @@ export const inspectionCommands: Command[] = [
       const dialog = cdp.tabEvents(id).dialog;
       if (sub === 'status') {
         return dialog
-          ? { text: `${dialog.type}: ${dialog.message}`, data: { open: true, ...dialog } }
-          : { text: '✓ No dialog is currently open', data: { open: false } };
+          ? {
+              text: `${dialog.type}: ${dialog.message}`,
+              data: { hasDialog: true, open: true, ...dialog },
+            }
+          : { text: '✓ No dialog is currently open', data: { hasDialog: false, open: false } };
       }
       if (!dialog) throw new UserError('No dialog is open', 'not_found');
       if (sub !== 'accept' && sub !== 'dismiss')
@@ -463,9 +479,12 @@ export const inspectionCommands: Command[] = [
     flags: [{ name: 'clear', type: 'bool', desc: 'Clear after printing' }],
     async run(ctx, a) {
       const ev = cdp.tabEvents(await ctx.tab());
-      const lines = [...ev.console];
+      const entries = [...ev.console];
       if (a.has('clear')) ev.console.length = 0;
-      return { text: lines.join('\n'), data: { messages: lines } };
+      return {
+        text: entries.map((m) => `[${m.type}] ${m.text}`).join('\n'),
+        data: { messages: entries },
+      };
     },
   },
   {
@@ -476,9 +495,9 @@ export const inspectionCommands: Command[] = [
     flags: [{ name: 'clear', type: 'bool', desc: 'Clear after printing' }],
     async run(ctx, a) {
       const ev = cdp.tabEvents(await ctx.tab());
-      const lines = [...ev.errors];
+      const entries = [...ev.errors];
       if (a.has('clear')) ev.errors.length = 0;
-      return { text: lines.join('\n\n'), data: { errors: lines } };
+      return { text: entries.map((e) => e.text).join('\n\n'), data: { errors: entries } };
     },
   },
 ];
