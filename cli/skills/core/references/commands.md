@@ -17,6 +17,8 @@ get text|html|value|attr|title|url|count|box [t] [attr]   get styles <t> [prop..
 wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob | --load s | --fn js
 read [url] [--outline] [--filter <text>] [--max-output <chars>]
 screenshot [path] [--full]   eval <js> | eval -b <base64> | eval --stdin
+pdf <path> [--landscape] [--background]   set viewport <w> <h> [scale] | reset
+set media [dark|light] [reduced-motion] | reset   (set: agent tabs only)
 dialog status|accept [text]|dismiss   console [--clear]   errors [--clear]
 network requests [--filter <text>] [--type xhr,fetch,document] [--method <m>] [--status 200|2xx|400-499] [--clear]
 network request <id>

@@ -45,7 +45,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 | [cross-origin-frames.md](cross-origin-frames.md) | automation | Draft |
 | [batch.md](batch.md) | automation | Draft |
 | [agent-guardrails.md](agent-guardrails.md) | security | Draft |
-| [revisit-pdf-and-viewport.md](revisit-pdf-and-viewport.md) | automation | Draft |
 | [page-audits.md](page-audits.md) | automation | Draft |
 
 ## Roadmap
@@ -59,12 +58,11 @@ Overview and priorities: [agent-browser-parity/](agent-browser-parity/README.md)
 - [ ] Cross-origin iframes and `frame`: [cross-origin-frames.md](cross-origin-frames.md)
 - [ ] `batch`: [batch.md](batch.md)
 - [ ] Guardrails (needs security sign-off): [agent-guardrails.md](agent-guardrails.md)
-- [ ] Reconsider `pdf` and agent-tab viewport (changes a settled direction): [revisit-pdf-and-viewport.md](revisit-pdf-and-viewport.md)
 - [ ] `a11y` / `vitals`: [page-audits.md](page-audits.md)
 
 ## Not planned
 
 - `wait --download [path]` (agent-browser's wait for a download): skipped by decision. It needs the manifest `downloads` permission, which widens what the extension can see, and downloads land in the user's real Downloads folder. Revisit only with a security note.
-- Cookies/storage/state commands, network interception (routing, mocking, blocking, header changes), emulation, video/trace/pdf: they would modify the real profile or aren't needed. Read-only `network requests` is built (see [security.md](../architecture/security.md)).
+- Cookies/storage/state commands, network interception (routing, mocking, blocking, header changes), video/trace, and `set device/geo/offline/headers/credentials`: they would modify the real profile, change what servers see, or aren't needed. Read-only `network requests` is built (see [security.md](../architecture/security.md)).
 - Firefox: there is no `chrome.debugger`.
 - Off-store `.crx` install: Chrome rejects it.

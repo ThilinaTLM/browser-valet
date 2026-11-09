@@ -26,7 +26,6 @@ stable monotonic refs, `snapshot --delta/--full`, clickable (`cursor:pointer`/`o
 | [cross-origin-frames.md](../cross-origin-frames.md) | inline cross-site iframes; `frame` | 2 |
 | [batch.md](../batch.md) | `batch` | 2 |
 | [agent-guardrails.md](../agent-guardrails.md) | allowed domains, content boundaries, max output, action confirmation | 3 (security sign-off) |
-| [revisit-pdf-and-viewport.md](../revisit-pdf-and-viewport.md) | `pdf`; `set viewport/media` on agent tabs | 4 (changes a settled direction) |
 | [page-audits.md](../page-audits.md) | `a11y`, `vitals` | 4 |
 
 ```mermaid
@@ -39,7 +38,7 @@ flowchart LR
 ## Out of scope (by principle)
 
 - **They change the user's profile:** `cookies`, `storage`, `state save/load`, `auth` vault,
-  `network route`/`unroute`, `har` (read-only `network requests`/`request` is built), `set headers/credentials/offline/geo/device`,
+  `network route`/`unroute`, `har` (read-only `network requests`/`request` is built), `set headers/credentials/offline/geo/device` (`pdf` and agent-tab `set viewport/media` are implemented),
   `addinitscript`/`--init-script`, `clipboard` (system clipboard).
 - **Browser launch and hosting, which don't apply to a real browser:** `--cdp`/`connect`,
   `--profile`, `--headed`, `--engine`, `--proxy`, `--executable-path`, `--extension`, `install`,

@@ -86,7 +86,7 @@ reference).
 |---|---|
 | Navigation | `open` (`goto`, `navigate`), `back`, `forward`, `reload`, `close` |
 | Tabs | `tab`, `tab new [--label L] [url]`, `tab <tN\|label>`, `tab close` |
-| Reading | `snapshot [-i -c -d N -s sel -u]`, `get text\|html\|value\|attr\|title\|url\|count\|box`, `is visible\|enabled\|checked`, `screenshot [--full]`, `eval` (`-b`, `--stdin`) |
+| Reading | `snapshot [-i -c -d N -s sel -u]`, `get text\|html\|value\|attr\|title\|url\|count\|box`, `is visible\|enabled\|checked`, `screenshot [--full]`, `pdf <path>`, `set viewport\|media` (agent tabs), `eval` (`-b`, `--stdin`) |
 | Interaction | `click [--new-tab]`, `dblclick`, `hover`, `focus`, `fill`, `type`, `press`, `keydown`, `keyup`, `keyboard`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview`, `drag`, `upload`, `find …` |
 | Waiting | `wait <t\|ms>`, `--text`, `--url <glob>`, `--load`, `--fn`, `--state`; `dialog status\|accept\|dismiss` |
 | Debugging | `console`, `errors` |
@@ -95,8 +95,9 @@ Global flags: `--json` (`{success, data, error}`), `--session <name>` (or `BCTL_
 `--timeout <ms>`. CLI-local commands: `setup`, `skills`, `pair`, `unpair`, `status`, `stop`,
 `proxy`, `version`.
 
-Deliberately left out: cookies/storage/state, network interception (read-only `network requests` is available), emulation, video/trace/pdf —
-they would modify your real profile or aren't needed for driving pages.
+Deliberately left out: cookies/storage/state, network interception (read-only `network requests` is available), device emulation, video/trace —
+they would modify your real profile or aren't needed for driving pages. `pdf` and, on tabs the agent
+opened, `set viewport` / `set media` are available.
 
 ## The extension popup
 

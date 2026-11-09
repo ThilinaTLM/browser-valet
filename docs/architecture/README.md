@@ -45,7 +45,7 @@ flowchart LR
 3. **The extension is the single source of truth; the CLI and proxy stay thin.** *Why:* new commands ship in the extension alone, and proxy or CLI restarts lose nothing.
 4. **CLI, proxy, embedded extension and skills are one version.** *Why:* the protocol has no negotiation; a mismatch is handled by restarting or updating, never by compatibility code.
 5. **Keep the agent-browser interface** (command names, flags, snapshot and ref format). Deviate only where the real browser requires it (consent, `tab <tN>` approval, no profile-changing commands). *Why:* agents already know agent-browser, so they need no new vocabulary.
-6. **Don't modify the user's profile beyond what a command explicitly asks.** *Why:* cookies, storage, emulation and network interception (not read-only observation) were deliberately left out (see Settled directions).
+6. **Don't modify the user's profile beyond what a command explicitly asks.** *Why:* cookies, storage, device emulation and network interception (not read-only observation) were deliberately left out; viewport and color-scheme emulation exist only on agent tabs (see Settled directions).
 7. **Agent tabs stay in the background.** *Why:* the user keeps working while the agent runs; see [automation.md](automation.md) for the cost.
 
 ## Change risk
@@ -76,7 +76,7 @@ Do not reintroduce these without a proposal ([proposals](../proposals/README.md)
 - Stateful daemon, or argument parsing in the CLI (replaced by the thin CLI and stateless proxy in v0.2).
 - `.crx` or self-hosted extension install: Chrome rejects off-store `.crx`. Load unpacked from the managed folder.
 - Manual pairing as the default flow: `pairing.json` in the managed folder replaces it. `bctl pair` remains for dev builds.
-- Cookies/storage/state commands, network interception (routing, mocking, blocking, header changes), emulation, video/trace/pdf: they would modify the real profile or aren't needed. Read-only network *observation* (`network requests`) is allowed under the redaction rules in [security.md](security.md).
+- Cookies/storage/state commands, network interception (routing, mocking, blocking, header changes), video/trace, and emulation beyond `set viewport` / `set media` on agent tabs (no `set device/geo/offline/headers/credentials`): they would modify the real profile, change what servers see, or aren't needed. `pdf` is allowed (read-only). Read-only network *observation* (`network requests`) is allowed under the redaction rules in [security.md](security.md).
 - Firefox support: there is no `chrome.debugger` there.
 
 ## Freedom

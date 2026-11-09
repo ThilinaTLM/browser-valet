@@ -89,7 +89,7 @@ snapshot: `--outline` lists headings, `--filter <text>` returns matching section
 
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
 `select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`,
-`read`, `screenshot`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
+`read`, `screenshot`, `pdf`, `set`, `network`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 Full list with arguments and global flags: `bctl skills get core --ref commands`.
 `bctl <command> --help` for details.
 
@@ -104,5 +104,9 @@ Full list with arguments and global flags: `bctl skills get core --ref commands`
   page sent and received (read-only). Recording starts at the first `network` command on a tab, so
   reload or repeat the action afterwards. Cookie, Authorization and similar headers, secret fields in
   request bodies and token fields in JSON responses are always shown as `[redacted]`.
-- Not supported: cookies/storage/state commands, network interception (routing/mocking), device emulation,
-  video/trace/pdf — they would modify the user's real profile or aren't needed here.
+- `pdf <path> [--landscape] [--background]` works on any controlled tab (read-only).
+- `set viewport <w> <h> [scale]` / `set media dark|light [reduced-motion]` (and `... reset`) work on
+  tabs you opened only; shared tabs are refused. They persist across navigations and end on `close`.
+  If the user switches to one of your tabs they will see the emulated size/theme, so reset when done.
+- Not supported: cookies/storage/state commands, network interception (routing/mocking), `set device/geo/offline/
+  headers/credentials`, video/trace — they would modify the user's real profile or aren't needed here.
