@@ -22,7 +22,6 @@ stable monotonic refs, `snapshot --delta/--full`, clickable (`cursor:pointer`/`o
 | Proposal | What | Priority |
 |---|---|---|
 | [cross-origin-frames.md](../cross-origin-frames.md) | inline cross-site iframes; `frame` | 2 |
-| [batch.md](../batch.md) | `batch` | 2 |
 | [agent-guardrails.md](../agent-guardrails.md) | allowed domains, content boundaries, max output, action confirmation | 3 (security sign-off) |
 | [page-audits.md](../page-audits.md) | `a11y`, `vitals` | 4 |
 

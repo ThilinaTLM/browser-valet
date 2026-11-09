@@ -89,7 +89,7 @@ snapshot: `--outline` lists headings, `--filter <text>` returns matching section
 
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
 `select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`,
-`read`, `screenshot`, `pdf`, `set`, `network`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
+`read`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 `screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
 Full list with arguments and global flags: `bctl skills get core --ref commands`.
 `bctl <command> --help` for details.
@@ -109,6 +109,8 @@ Full list with arguments and global flags: `bctl skills get core --ref commands`
 - `Element is covered by <div#…>`: dismiss that overlay, re-snapshot, retry.
 - A `confirm`/`prompt` dialog pauses the page: `bctl dialog accept` or `bctl dialog dismiss`.
   Alerts are accepted automatically.
+- Known sequences cost one call as `bctl batch "fill @e1 a@b.c" "fill @e2 pw" "click @e3" "wait --url **/home"`
+  (`--bail` stops at the first failure; snapshot first, batch only steps whose refs you already know).
 - For scripts with quotes, use `eval --stdin` with a quoted heredoc.
 - `network requests [--filter --type --method --status 4xx --clear]` / `network request <id>` show what the
   page sent and received (read-only). Recording starts at the first `network` command on a tab, so

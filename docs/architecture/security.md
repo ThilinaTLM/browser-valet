@@ -13,6 +13,7 @@ The wire details are in [protocol.md](protocol.md).
 - **MUST** route every tab access through `Ctx.tab()` / `isControlled()`. Never call CDP on a tab id taken straight from argv. *Why:* this is the consent boundary.
 - **MUST NOT** let `open <url>` navigate a shared tab. It opens an agent tab instead. *Why:* sharing a tab means "look and act here", not "replace my page".
 - **MUST** redact user-typed text from the activity log. *Why:* agents type passwords and personal data. The popup and session storage are visible to anyone at the machine.
+- **MUST** log `batch` per item (each through its own command's redaction) and never as a raw line; see [automation.md](automation.md).
 
 - **MUST** declare redaction next to the parser: `Command.show` / `showFlags` / `log` (`logArgs` in `command.ts`). By default a command logs only its first positional argument and no flag values; everything else is `•••`. A command opts in to showing more (`show: Infinity` for targets, URLs and key names; `showFlags` for flag values that are never user text). `find … <action> <value>` logs the locator and the action but not the value, `dialog accept <text>` logs no text, and `eval` logs only `eval (N chars)`. Arguments that do not parse log the command name alone. *Why:* a new command is safe without remembering anything.
 

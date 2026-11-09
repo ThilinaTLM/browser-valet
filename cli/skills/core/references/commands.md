@@ -18,6 +18,7 @@ wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob |
 read [url] [--outline] [--filter <text>] [--max-output <chars>]
 screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
 eval <js> | eval -b <base64> | eval --stdin
+batch [--bail] [--omit-command] "<cmd>" "<cmd>" … | batch --stdin   # one command per line
 pdf <path> [--landscape] [--background]   set viewport <w> <h> [scale] | reset
 set media [dark|light] [reduced-motion] | reset   (set: agent tabs only)
 dialog status|accept [text]|dismiss   console [--clear]   errors [--clear]
@@ -30,6 +31,11 @@ network request <id>
 `highlight` outlines the element for 3 s. `pushstate` does client-side navigation (same origin only).
 `mouse` is for canvases, maps and sliders; on a background tab `mouse wheel` scrolls by script. Global flags: `--json`, `--session <name>`,
 `--timeout <ms>` (default 25000). `bctl <command> --help` shows details and examples.
+
+`batch` runs the items in order (quotes and backslashes like a shell, nothing expanded). Text output is each item's output; failures
+go to stderr and the exit code is 1 if any failed (`--bail` stops at the first). `--json` prints a top-level array of
+`{command, success, result, error}` (`--omit-command`: `index` instead of `command`). A confirm/prompt dialog ends the batch.
+Not allowed inside a batch: `batch`, `--session`, `--stdin`; `--timeout` applies per item.
 
 `--json` output: `{success, data, error}`, plus `code` on failures (list in SKILL.md). `data` follows agent-browser:
 actions echo their target (`click` → `{clicked:"@e3"}`, `fill` → `{filled}`, `press` → `{pressed}`, …), page reads add
