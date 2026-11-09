@@ -1,6 +1,6 @@
 // Types shared by the background worker and the popup.
 
-/** A request from the CLI (see PROTOCOL.md). */
+/** A request from the CLI (see docs/architecture/protocol.md). */
 export interface CliRequest {
   argv: string[];
   cwd: string;

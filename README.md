@@ -19,7 +19,7 @@ flowchart LR
 - **Consent first.** Agent-opened tabs are the agent's. Any other tab needs your approval in a
   popup; you can revoke control at any time (popup, or close Chrome's "debugging" bar).
   `open <url>` never navigates away from a tab you shared; it opens an agent tab instead.
-  Turning the extension off and on again clears all grants.
+  Turning the extension off (popup switch) ends all control and clears every grant.
 - **One binary.** `bctl` contains the extension and the agent skills, always version-matched.
 
 ## Install
@@ -44,10 +44,10 @@ folder, and the extension reads it from there.
 
 **Updates.** After you update `bctl`, the next connection notices that the extension is a
 different version. The proxy rewrites the folder, and the extension reloads itself after any
-running commands finish. Tab approvals carry over.
+running commands finish (it waits at most 2 minutes). Tab approvals carry over.
 
-**Agents.** `bctl skills install` puts a small skill stub in `~/.claude/skills/bctl` and
-`~/.agents/skills/bctl`. The stub tells the agent to run `bctl skills get core`, which prints the
+**Agents.** `bctl skills install` puts a small skill stub in `~/.agents/skills/bctl` and, if
+`~/.claude` exists, in `~/.claude/skills/bctl` (or in `--dir D`). The stub tells the agent to run `bctl skills get core`, which prints the
 full guide for the installed version.
 
 > Chrome only installs extensions from the Chrome Web Store with one click (it rejects a `.crx`
@@ -111,7 +111,8 @@ Controlled tabs show an **AI** badge on the toolbar icon.
 
 ## How it works
 
-- `PROTOCOL.md` describes the wire protocol. Both sides prove knowledge of the pairing secret
+- [docs/architecture/protocol.md](docs/architecture/protocol.md) describes the wire protocol;
+  [docs/](docs/README.md) holds the engineering docs. Both sides prove knowledge of the pairing secret
   with an HMAC challenge–response, so the secret never crosses the wire and a process squatting
   on the port while the proxy is down can't impersonate it. Web pages are rejected by `Origin`.
 - Agent tabs open in the background so you can keep working. Chrome doesn't render hidden tabs

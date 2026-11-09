@@ -1,4 +1,4 @@
-// WebSocket client to the local `bctl` proxy (see PROTOCOL.md), with mutual HMAC authentication.
+// WebSocket client to the local `bctl` proxy (see docs/architecture/protocol.md), with mutual HMAC authentication.
 
 import type { CliRequest, ConnStatus } from '../shared';
 import { execute } from './dispatch';

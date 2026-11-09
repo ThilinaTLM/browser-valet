@@ -1,5 +1,8 @@
 # Browser Bridge wire protocol (v1)
 
+Contract between CLI, proxy and extension. Rules and change risk: [security.md](security.md),
+[runtime.md](runtime.md). Proxy tests: `cli/tests/relay.rs`.
+
 Three parties:
 
 - **CLI** (`bctl …`) — thin client. Sends raw argv, prints what comes back.
@@ -71,7 +74,7 @@ the version embedded in the binary, and the binary embeds an extension:
 
 The extension then:
 
-1. Waits until no requests are in flight.
+1. Waits until no requests are in flight (at most 120 s; then it reloads anyway and drops them).
 2. Copies its session state to `chrome.storage.local` (`handoff`), because a reload clears
    `chrome.storage.session`.
 3. Calls `chrome.runtime.reload()`. Chrome re-reads the folder and the extension restores the
@@ -86,7 +89,7 @@ The proxy never updates non-managed extensions; `bctl status` only reports their
 After `welcome`, the CLI sends exactly one message and waits:
 
 - `{"t":"req","req":{...}}` — run a command in the browser.
-- `{"t":"status"}` → proxy replies `{"t":"status","proxy":{"version":"…","pid":123,"port":47823,"idleTimeoutSecs":600},"ext":null | {"browser":"…","extVersion":"…"}}`
+- `{"t":"status"}` → proxy replies `{"t":"status","proxy":{"version":"…","pid":123,"port":47823,"idleTimeoutSecs":600},"ext":null | {"browser":"…","extVersion":"…","managed":true}}` (`ext` is the extension's auth `info`)
 - `{"t":"shutdown"}` → proxy replies `{"t":"ok"}` and exits.
 
 `req` object (opaque to the proxy):
@@ -124,7 +127,7 @@ flight. On idle expiry the proxy exits.
   "exitCode": 0,
   "stdout": "✓ Done\n",        // printed verbatim to stdout (may be empty)
   "stderr": "",                // printed verbatim to stderr
-  "files": [                   // optional: written by the CLI before printing
+  "files": [                   // written by the CLI before printing (the extension always sends it, often [])
     { "path": "/abs/path/screenshot.png", "base64": "iVBOR…" }
   ]
 }

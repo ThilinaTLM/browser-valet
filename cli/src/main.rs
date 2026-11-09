@@ -1,4 +1,4 @@
-//! bctl: thin CLI + relay proxy for Browser Bridge (see ../PROTOCOL.md).
+//! bctl: thin CLI + relay proxy for Browser Bridge (see ../docs/architecture/protocol.md).
 //!
 //! Env: BCTL_PORT (port), BCTL_SESSION, BCTL_IDLE_TIMEOUT (proxy), BCTL_EXT_WAIT_MS (proxy; test hook),
 //! BCTL_CONFIG_DIR (replaces `<config_dir>/browser-bridge`; used by tests).
