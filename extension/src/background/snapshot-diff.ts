@@ -1,6 +1,8 @@
 // `snapshot --delta`: compare a snapshot with the last one returned for the same tab and options.
 // Pure functions plus an in-memory baseline store, shaped like agent-browser 0.41.2's output.
 
+import { forgetCaptures } from './capture-compare';
+
 export type RefSummary = Record<string, { role: string; name: string }>;
 
 export interface Baseline {
@@ -136,6 +138,7 @@ export function nextRevision(tabId: number): number {
 }
 
 export function forgetBaselines(tabId: number): void {
+  forgetCaptures(tabId);
   revisions.delete(tabId);
   for (const k of [...baselines.keys()]) if (k.startsWith(`${String(tabId)}:`)) baselines.delete(k);
 }

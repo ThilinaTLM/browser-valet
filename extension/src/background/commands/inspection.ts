@@ -10,6 +10,16 @@ import {
   resolveWait,
   UserError,
 } from '../dom';
+import { type Annotation, annotations, drawAnnotations, formatAnnotations } from '../annotate';
+import {
+  captureKey,
+  changedRatio,
+  comparisonSize,
+  formatPercent,
+  getCapture,
+  type Pixels,
+  setCapture,
+} from '../capture-compare';
 import { snapshot } from '../snapshot';
 import { computedStyles } from './extra';
 import {
@@ -367,25 +377,108 @@ export const inspectionCommands: Command[] = [
     examples: ['bctl screenshot', 'bctl screenshot page.png --full'],
     show: Infinity,
     group: 'Reading',
-    usage: 'screenshot [path] [--full]',
+    showFlags: ['threshold'],
+    usage: 'screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]',
     summary: 'Save a PNG (or .jpg) screenshot; without a path it goes to a temp file',
-    flags: [{ name: 'full', type: 'bool', desc: 'Capture the full scrollable page' }],
+    flags: [
+      { name: 'full', type: 'bool', desc: 'Capture the full scrollable page' },
+      {
+        name: 'annotate',
+        type: 'bool',
+        desc: 'Draw numbered boxes for the interactive elements ([N] = @eN) and list them',
+      },
+      {
+        name: 'if-changed',
+        type: 'bool',
+        desc: 'Skip the file when the page looks the same as the last such capture',
+      },
+      {
+        name: 'threshold',
+        type: 'string',
+        desc: 'Ignore changes up to this fraction of pixels (0-1); implies --if-changed',
+      },
+    ],
     async run(ctx, a) {
+      const full = a.has('full');
+      const annotate = a.has('annotate');
+      const thresholdArg = a.str('threshold');
+      const conditional = a.has('if-changed') || thresholdArg !== undefined;
+      const threshold = a.num('threshold') ?? 0;
+      if (a.has('threshold') && thresholdArg === undefined)
+        throw new UserError('Missing --threshold value', 'bad_args');
+      if (threshold < 0 || threshold > 1) {
+        throw new UserError(`--threshold must be from 0 to 1, got '${thresholdArg ?? ''}'`, 'bad_args');
+      }
       const id = await ctx.tab();
       const path = a.pos[0]
         ? ctx.path(a.pos[0])
         : ctx.tmpPath('bctl', 'screenshots', `screenshot-${Date.now()}.png`);
       const format = /\.jpe?g$/i.test(path) ? 'jpeg' : 'png';
-      if (!a.has('full')) {
-        const { data } = await cdp.send<{ data: string }>(id, 'Page.captureScreenshot', { format });
-        ctx.files.push({ path, base64: data });
-        return { text: `✓ Screenshot saved to ${path}`, data: { path } };
+
+      // Always the plain capture first; the comparison ignores annotations.
+      let data: string;
+      let truncated = false;
+      if (full) ({ data, truncated } = await fullPage(id, format));
+      else ({ data } = await captureScreenshot(id, { format }));
+
+      const extra: Record<string, unknown> = {};
+      if (conditional) {
+        const key = captureKey(id, `${full ? 'full' : 'view'}${annotate ? '+annotate' : ''}`);
+        const prev = getCapture(key);
+        const pixels = await comparisonPixels(data, format);
+        const ratio = prev ? changedRatio(prev.pixels, pixels) : 1;
+        const revision = (prev?.revision ?? 0) + 1;
+        if (prev && ratio <= threshold) {
+          // Keep the older picture as the reference so slow drift still adds up.
+          setCapture(key, { pixels: prev.pixels, revision });
+          return {
+            text: `✓ Screenshot unchanged (revision ${String(revision)}, ${formatPercent(ratio)} pixels changed)`,
+            data: { changed: false, pixelChangeRatio: ratio, revision, threshold },
+          };
+        }
+        setCapture(key, { pixels, revision });
+        Object.assign(extra, { changed: true, pixelChangeRatio: ratio, revision, threshold });
       }
-      const { data, truncated } = await fullPage(id, format);
+
+      let list: Annotation[] | undefined;
+      if (annotate) {
+        const m = await cdp.send<{
+          cssVisualViewport: {
+            clientWidth: number;
+            clientHeight: number;
+            pageX: number;
+            pageY: number;
+          };
+          cssContentSize: { width: number };
+        }>(id, 'Page.getLayoutMetrics');
+        const v = m.cssVisualViewport;
+        list = await annotations(id, ctx.session, {
+          width: v.clientWidth,
+          height: v.clientHeight,
+          offsetX: full ? v.pageX : 0,
+          offsetY: full ? v.pageY : 0,
+          full,
+        });
+        const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        const drawn = await drawAnnotations(
+          new Blob([bytes], { type: `image/${format}` }),
+          list,
+          full ? m.cssContentSize.width : v.clientWidth,
+          format,
+        );
+        data = toBase64(new Uint8Array(await drawn.arrayBuffer()));
+      }
+
       ctx.files.push({ path, base64: data });
+      const listing = list?.length ? `\n${formatAnnotations(list)}` : '';
       return {
-        text: `✓ Screenshot saved to ${path}`,
-        data: { path, truncated },
+        text: `✓ Screenshot saved to ${path}${listing}`,
+        data: {
+          path,
+          ...(full ? { truncated } : {}),
+          ...(list ? { annotations: list } : {}),
+          ...extra,
+        },
         warning: truncated ? 'Very tall page: the full-page screenshot was truncated' : undefined,
       };
     },
@@ -514,6 +607,35 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
+/**
+ * `Page.captureScreenshot` on a hidden tab sometimes never answers (see `prime`); a later attempt
+ * works once a frame exists, so retry a few times instead of hanging.
+ */
+async function captureScreenshot(
+  tabId: number,
+  params: Record<string, unknown>,
+): Promise<{ data: string }> {
+  for (let attempt = 0; ; attempt++) {
+    const pending = cdp.send<{ data: string }>(tabId, 'Page.captureScreenshot', params);
+    if (attempt >= 3) return pending;
+    pending.catch(() => undefined);
+    const r = await Promise.race([pending, sleep(4000).then(() => undefined)]);
+    if (r) return r;
+  }
+}
+
+/** The capture decoded and downscaled for comparison. */
+async function comparisonPixels(base64: string, format: 'png' | 'jpeg'): Promise<Pixels> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const bmp = await createImageBitmap(new Blob([bytes], { type: `image/${format}` }));
+  const size = comparisonSize(bmp.width, bmp.height);
+  const canvas = new OffscreenCanvas(size.width, size.height);
+  const g = canvas.getContext('2d', { willReadFrequently: true });
+  if (!g) throw new Error('Canvas unavailable');
+  g.drawImage(bmp, 0, 0, size.width, size.height);
+  return { ...size, data: g.getImageData(0, 0, size.width, size.height).data };
+}
+
 /** Full-page screenshot; tall pages are captured in slices and stitched together. */
 async function fullPage(
   tabId: number,
@@ -529,7 +651,7 @@ async function fullPage(
   const fullHeight = Math.ceil(m.cssContentSize.height);
   const height = Math.min(fullHeight, Math.floor(MAX_HEIGHT / dpr));
   const capture = (y: number, h: number) =>
-    cdp.send<{ data: string }>(tabId, 'Page.captureScreenshot', {
+    captureScreenshot(tabId, {
       format: 'png',
       captureBeyondViewport: true,
       clip: { x: 0, y, width, height: h, scale: 1 },
