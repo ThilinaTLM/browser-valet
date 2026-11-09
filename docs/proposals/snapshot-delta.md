@@ -25,8 +25,7 @@ agent-browser 0.41.2 solves both (see
 
 - Per tab: `backendNodeId → ref` map, plus a per-session counter `nextRef`.
 - At each snapshot, nodes already in the map keep their ref and new nodes take `e<nextRef++>`. Refs
-  whose node is gone are dropped and reported in `removedRefs` (see
-  [snapshot-parity.md](snapshot-parity.md)).
+  whose node is gone are dropped and reported in `removedRefs`.
 - On a cross-document navigation of the main frame, clear the tab's map but **keep the counter**,
   so old refs can never collide.
 - `state.refs` stays the persisted source (it already survives service-worker restarts). Add

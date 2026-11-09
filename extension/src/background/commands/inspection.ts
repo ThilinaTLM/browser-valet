@@ -103,7 +103,13 @@ export const inspectionCommands: Command[] = [
       });
       return {
         text: snap.text,
-        data: { snapshot: snap.text, refs: snap.refs, origin: t.url, title: t.title },
+        data: {
+          origin: t.url,
+          title: t.title,
+          refs: snap.refs,
+          removedRefs: snap.removedRefs,
+          snapshot: snap.text,
+        },
       };
     },
   },

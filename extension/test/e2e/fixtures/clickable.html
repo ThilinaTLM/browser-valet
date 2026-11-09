@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Clickable</title>
+  </head>
+  <body>
+    <h1>Clickable</h1>
+    <div id="a" onclick="window.hits.push('a')" style="cursor: pointer">Clickable div</div>
+    <div id="b" style="cursor: pointer">Pointer only <span>inner span</span></div>
+    <div id="c" tabindex="0">Tab zero</div>
+    <div id="d" tabindex="-1">Tab minus</div>
+    <a href="#x" style="cursor: pointer">Link <span>in link</span></a>
+    <button>
+      Btn <span id="bs" style="cursor: pointer">btn span</span>
+      <span id="bo" onclick="1">btn onclick span</span>
+    </button>
+    <div id="e" onclick="1" style="cursor: pointer">
+      <div id="e2" style="cursor: pointer">nested inherits</div>
+      <div id="e3" onclick="1">nested onclick</div>
+    </div>
+    <div id="f" onclick="1"></div>
+    <div id="h" onclick="1" hidden>hidden clickable</div>
+    <div id="p" tabindex="0" onclick="1" style="cursor: pointer">all three</div>
+    <ul>
+      <li onclick="1">li click</li>
+    </ul>
+    <script>
+      window.hits = [];
+    </script>
+  </body>
+</html>

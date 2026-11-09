@@ -41,7 +41,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 |---|---|---|
 | [agent-browser-parity/](agent-browser-parity/README.md) | automation, security | Draft (umbrella) |
 | [snapshot-delta.md](snapshot-delta.md) | automation | Draft |
-| [snapshot-parity.md](snapshot-parity.md) | automation | Draft |
 | [cli-output-conventions.md](cli-output-conventions.md) | automation | Draft |
 | [screenshot-improvements.md](screenshot-improvements.md) | automation | Draft |
 | [cross-origin-frames.md](cross-origin-frames.md) | automation | Draft |
@@ -59,7 +58,6 @@ Overview and priorities: [agent-browser-parity/](agent-browser-parity/README.md)
 
 - [ ] Stable, monotonic refs and `snapshot --delta`: [snapshot-delta.md](snapshot-delta.md)
 - [ ] Output conventions (wait output, stderr warnings, JSON error codes, help): [cli-output-conventions.md](cli-output-conventions.md)
-- [ ] Refs for clickable non-semantic elements: [snapshot-parity.md](snapshot-parity.md)
 - [ ] `screenshot --annotate/--if-changed`: [screenshot-improvements.md](screenshot-improvements.md)
 - [ ] Cross-origin iframes and `frame`: [cross-origin-frames.md](cross-origin-frames.md)
 - [ ] `batch`: [batch.md](batch.md)

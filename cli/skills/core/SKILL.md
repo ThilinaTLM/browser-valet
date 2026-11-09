@@ -68,6 +68,11 @@ Refs are stable: while the page stays the same document, re-snapshotting (also w
 reload invalidates all refs; new refs keep counting upwards, so an old ref never points at a
 different element.
 
+Elements that act like buttons but have no interactive role (`<div onclick>`, `cursor: pointer`
+spans, `tabindex`) get a ref too, marked `clickable [cursor:pointer, onclick]` (or
+`focusable [tabindex]`). In `-i` their text is the name. Listeners added with `addEventListener`
+are not detected; use `find text` or a CSS selector for those.
+
 ## Reading prose
 
 For docs and articles use `bctl read [url]` (markdown of the main content, no nav) instead of a

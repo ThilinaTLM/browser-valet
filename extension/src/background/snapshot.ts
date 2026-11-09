@@ -3,6 +3,7 @@
 //   - textbox "Email" [ref=e4]: me@example.com
 
 import * as cdp from './cdp';
+import { type ClickableInfo, clickableScript, clickableSuffix } from './clickable';
 import { resolve, UserError } from './dom';
 import { RefTable } from './ref-table';
 import { syncDocument } from './refs';
@@ -125,6 +126,64 @@ async function iframeTree(tabId: number, node: AXNode): Promise<Tree | undefined
   }
 }
 
+/**
+ * Elements that behave like buttons without an interactive role, by backend node id. Best effort:
+ * pages that refuse script (or any CDP failure) just yield none.
+ */
+async function clickables(tabId: number, withText: boolean): Promise<Map<number, ClickableInfo>> {
+  const found = new Map<number, ClickableInfo>();
+  const group = 'bctl-clickable';
+  try {
+    const holder = await cdp.send<{ result: { objectId?: string }; exceptionDetails?: unknown }>(
+      tabId,
+      'Runtime.evaluate',
+      { expression: clickableScript(withText), objectGroup: group },
+    );
+    const objectId = holder.result.objectId;
+    if (!objectId || holder.exceptionDetails) return found;
+    const [infoRes, elsRes] = await Promise.all([
+      cdp.send<{ result: { value?: [string[], string][] } }>(tabId, 'Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: 'function () { return this.info; }',
+        returnByValue: true,
+      }),
+      cdp.send<{ result: { objectId?: string } }>(tabId, 'Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: 'function () { return this.els; }',
+      }),
+    ]);
+    const info = infoRes.result.value ?? [];
+    const elsId = elsRes.result.objectId;
+    if (!elsId || info.length === 0) return found;
+    const { result: props } = await cdp.send<{
+      result: { name: string; value?: { objectId?: string } }[];
+    }>(tabId, 'Runtime.getProperties', { objectId: elsId, ownProperties: true });
+    const items = props.filter((p) => /^\d+$/.test(p.name) && p.value?.objectId);
+    const nodes = await Promise.all(
+      items.map((p) =>
+        cdp
+          .send<{ node: { backendNodeId: number } }>(tabId, 'DOM.describeNode', {
+            objectId: p.value?.objectId,
+          })
+          .then((r) => r.node.backendNodeId)
+          .catch(() => undefined),
+      ),
+    );
+    items.forEach((p, i) => {
+      const id = nodes[i];
+      const entry = info[Number(p.name)];
+      if (id !== undefined && entry) found.set(id, { reasons: entry[0], text: entry[1] });
+    });
+  } catch {
+    // keep what we have
+  } finally {
+    await cdp
+      .send(tabId, 'Runtime.releaseObjectGroup', { objectGroup: group })
+      .catch(() => undefined);
+  }
+  return found;
+}
+
 export async function snapshot(
   tabId: number,
   opts: SnapshotOptions,
@@ -144,6 +203,7 @@ export async function snapshot(
       if (n.backendDOMNodeId !== undefined) present.add(n.backendDOMNodeId);
   };
   note(main);
+  const clickable = await clickables(tabId, opts.interactive);
 
   let start: { node: AXNode; tree: Tree } | undefined = main.root && {
     node: main.root,
@@ -169,13 +229,22 @@ export async function snapshot(
     inField: boolean,
   ): Promise<Out[]> {
     const role = str(node.role);
-    const name = str(node.name).replace(/\s+/g, ' ').trim();
+    let name = str(node.name).replace(/\s+/g, ' ').trim();
     const isText = role === 'StaticText';
     const focusable = prop(node, 'focusable') === true;
-    const interactive = INTERACTIVE.has(role) || (focusable && !isText && role !== 'RootWebArea');
+    // Looks clickable but has no interactive role (natively interactive nodes need no hint).
+    const hint =
+      node.backendDOMNodeId !== undefined && !INTERACTIVE.has(role) && !isText
+        ? clickable.get(node.backendDOMNodeId)
+        : undefined;
+    const interactive =
+      INTERACTIVE.has(role) ||
+      hint !== undefined ||
+      (focusable && !isText && role !== 'RootWebArea');
+    if (hint && !name && opts.interactive) name = hint.text;
 
     let show = !node.ignored && !SKIP.has(role) && role !== 'RootWebArea';
-    if (show && FLATTEN_UNNAMED.has(role) && !name) show = false;
+    if (show && FLATTEN_UNNAMED.has(role) && !name && !hint) show = false;
     if (show && isText && (!name || name === parentName || inField)) show = false;
     if (show && opts.interactive && !interactive) show = false;
     if (opts.depth !== undefined && level > opts.depth) return [];
@@ -203,6 +272,7 @@ export async function snapshot(
         attrs.push(`ref=${ref}`);
       }
       if (attrs.length) line += ` [${attrs.join(', ')}]`;
+      if (hint) line += ` ${clickableSuffix(hint.reasons)}`;
       const value = str(node.value);
       if (value && value !== name) line += `: ${trunc(value, 150)}`;
       out = { line, content: Boolean(name || value || refable), children: [] };

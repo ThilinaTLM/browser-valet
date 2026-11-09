@@ -2,7 +2,7 @@
 // --delta. Fixtures: form.html, other.html, clickable.html.
 
 import { describe, expect, it } from 'vitest';
-import { bctl, fixture, useBrowser } from './harness';
+import { bctl, bctlJson, fixture, useBrowser } from './harness';
 
 useBrowser();
 
@@ -59,5 +59,69 @@ describe('stable refs', () => {
     expect((await bctl('click', `@${inc}`)).stderr).toContain('Unknown ref');
     const again = (await bctl('snapshot', '-i')).stdout;
     expect(num(refOf(again, /button "Increment"/))).toBeGreaterThan(num(inc));
+  });
+});
+
+describe('clickable elements', () => {
+  it('gives div/span clickables a ref and a clickable suffix; -i lifts the text', async () => {
+    await bctl('open', fixture('/clickable.html'));
+    const snap = (await bctl('snapshot', '-i')).stdout;
+    expect(snap).toContain('generic "Clickable div" [ref=');
+    expect(snap).toMatch(/"Clickable div" \[ref=e\d+\] clickable \[cursor:pointer, onclick\]/);
+    expect(snap).toMatch(/"Pointer only inner span" \[ref=e\d+\] clickable \[cursor:pointer\]/);
+    expect(snap).toMatch(/"Tab zero" \[ref=e\d+\] focusable \[tabindex\]/);
+    expect(snap).toMatch(
+      /"all three" \[ref=e\d+\] clickable \[cursor:pointer, onclick, tabindex\]/,
+    );
+    expect(snap).toMatch(/"btn onclick span" \[ref=e\d+\] clickable \[onclick\]/);
+    // inherited pointer, tabindex=-1, hidden and empty elements are not listed
+    expect(snap).not.toContain('"inner span"');
+    expect(snap).not.toContain('Tab minus');
+    expect(snap).not.toContain('hidden clickable');
+    expect(snap).not.toMatch(/generic \[ref=e\d+\] clickable/);
+    // natively interactive elements get no suffix
+    expect(snap).toMatch(/button "Btn[^\n]*\[ref=e\d+\]\n/);
+    expect(snap).toMatch(/link "Link in link" \[ref=e\d+\]\n/);
+
+    // the full snapshot keeps the text as children and shares the refs
+    const full = (await bctl('snapshot')).stdout;
+    const div = refOf(snap, /"Clickable div"/);
+    expect(full).toContain(
+      `generic [ref=${div}] clickable [cursor:pointer, onclick]\n  - StaticText "Clickable div"`,
+    );
+  });
+
+  it('a clickable div can be clicked through its ref', async () => {
+    await bctl('open', fixture('/clickable.html'));
+    const div = refOf((await bctl('snapshot', '-i')).stdout, /"Clickable div"/);
+    expect((await bctl('click', `@${div}`)).code).toBe(0);
+    expect((await bctl('eval', 'window.hits.join(",")')).stdout).toContain('a');
+  });
+});
+
+describe('snapshot --json', () => {
+  it('returns origin, title, refs, removedRefs and snapshot', async () => {
+    await bctl('open', fixture('/form.html'));
+    await bctl('snapshot', '-i');
+    const r = await bctlJson('snapshot', '-i');
+    const d = r.data as Record<string, unknown>;
+    expect(Object.keys(d).sort()).toEqual(['origin', 'refs', 'removedRefs', 'snapshot', 'title']);
+    expect(d.origin).toBe(fixture('/form.html'));
+    expect(d.title).toBe('Fixture Form');
+    expect(d.removedRefs).toEqual([]);
+    expect(Object.values(d.refs as object)).toContainEqual({ role: 'button', name: 'Increment' });
+    expect(typeof d.snapshot).toBe('string');
+  });
+
+  it('reports refs that left the page in removedRefs', async () => {
+    await bctl('open', fixture('/form.html'));
+    const snap = (await bctl('snapshot')).stdout;
+    const inc = refOf(snap, /button "Increment"/);
+    await bctl('eval', `document.getElementById('inc').remove()`);
+    const d = (await bctlJson('snapshot')).data as { removedRefs: string[]; refs: object };
+    expect(d.removedRefs).toContain(inc);
+    expect(d.refs).not.toHaveProperty(inc);
+    expect((await bctl('snapshot')).stdout).not.toContain(`ref=${inc}`);
+    expect((await bctlJson('snapshot')).data).toMatchObject({ removedRefs: [] });
   });
 });
