@@ -13,6 +13,7 @@ import {
 } from './command';
 import { batchCommands, type Outcome, runBatch } from './commands/batch';
 import { extraCommands } from './commands/extra';
+import { frameCommands } from './commands/frame';
 import { emulationCommands } from './commands/emulation';
 import { inspectionCommands } from './commands/inspection';
 import { interactionCommands } from './commands/interaction';
@@ -30,6 +31,7 @@ const COMMANDS: Command[] = [
   ...inspectionCommands,
   ...readCommands,
   ...extraCommands,
+  ...frameCommands,
   ...networkCommands,
   ...emulationCommands,
   ...batchCommands,

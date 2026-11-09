@@ -4,6 +4,7 @@ import {
   call,
   countExpression,
   evaluate,
+  evaluateScoped,
   type Handle,
   remoteValue,
   resolve,
@@ -201,7 +202,7 @@ export const inspectionCommands: Command[] = [
         }
         case 'count': {
           const sel = a.need(1, 'selector');
-          const r = await evaluate(id, countExpression(sel));
+          const r = await evaluateScoped(id, countExpression(sel));
           return out(r.value, { count: r.value, selector: sel });
         }
         case 'text':
@@ -342,7 +343,9 @@ export const inspectionCommands: Command[] = [
         });
         result = { text: matched, data: { url: matched } };
       } else if (fn !== undefined) {
-        await poll(ctx, `condition ${fn}`, async () => Boolean((await evaluate(id, fn)).value));
+        await poll(ctx, `condition ${fn}`, async () =>
+          Boolean((await evaluateScoped(id, fn)).value),
+        );
       } else if (load !== undefined) {
         const ready = async (want: string) =>
           (await evaluate(id, 'document.readyState')).value === want;
@@ -525,7 +528,7 @@ export const inspectionCommands: Command[] = [
       if (!script.trim())
         throw new UserError('Usage: eval <js> | eval -b <base64> | eval --stdin', 'bad_args');
       const id = await ctx.tab();
-      const { value, token } = remoteValue(await evaluate(id, script));
+      const { value, token } = remoteValue(await evaluateScoped(id, script));
       const origin = (await chrome.tabs.get(id)).url ?? null;
       return {
         text: formatValue(value, token),

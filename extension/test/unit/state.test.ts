@@ -18,6 +18,8 @@ const handedOff = (): State => ({
   sessions: { default: { tab: 11, nextRef: 9 } },
   refs: { 11: { e1: { backendNodeId: 5, role: 'button', name: 'Go' } } },
   refDocs: { 11: 'L1' },
+  childSessions: { 11: [{ sessionId: 'S1', targetId: 'F1', url: 'http://x/' }] },
+  frames: { 11: { frameId: 'F1', name: 'pay' } },
   approvals: [{ id: 'a1', tabId: 11, session: 'default', ts: 1 }],
   log: [],
   conn: { status: 'connected', paired: true, managed: true, port: 1 },
@@ -84,6 +86,21 @@ describe('restoreHandoff (via loadState)', () => {
     expect(s.state.refDocs).toEqual({});
   });
 
+  it('keeps the frame scope but drops child sessions (the reload ended the debugger)', async () => {
+    mock.local.data = { handoff: { state: handedOff(), ts: Date.now() }, secret: 's' };
+    await s.loadState();
+    expect(s.state.frames[11]).toEqual({ frameId: 'F1', name: 'pay' });
+    expect(s.state.childSessions).toEqual({});
+  });
+
+  it('accepts a handoff from before frames (no childSessions, no frames)', async () => {
+    const old = { nextTid: 3, tabs: {}, sessions: {}, refs: {}, refDocs: {} };
+    mock.local.data = { handoff: { state: old, ts: Date.now() }, secret: 's' };
+    await s.loadState();
+    expect(s.state.childSessions).toEqual({});
+    expect(s.state.frames).toEqual({});
+  });
+
   it('accepts a handoff from before stable refs (no refDocs, no session nextRef)', async () => {
     const old = {
       nextTid: 3,
@@ -139,11 +156,15 @@ describe('persistence and tab ids', () => {
     s.session('default').tab = 10;
     s.state.refs[10] = {};
     s.state.refDocs[10] = 'L';
+    s.state.frames[10] = { frameId: 'F', name: 'f' };
+    s.state.childSessions[10] = [{ sessionId: 'S', targetId: 'F', url: '' }];
     s.state.approvals.push({ id: 'x', tabId: 10, session: 'default', ts: 0 });
     s.forgetTab(10);
     expect(s.state.tabs[10]).toBeUndefined();
     expect(s.state.refs[10]).toBeUndefined();
     expect(s.state.refDocs[10]).toBeUndefined();
+    expect(s.state.frames[10]).toBeUndefined();
+    expect(s.state.childSessions[10]).toBeUndefined();
     expect(s.session('default').tab).toBeUndefined();
     expect(s.state.approvals).toEqual([]);
     expect(s.meta(30).tid).toBe('t3'); // never reused

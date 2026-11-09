@@ -62,6 +62,20 @@ export interface RefInfo {
   backendNodeId: number;
   role: string;
   name: string;
+  /** Child (out-of-process iframe) session the node lives in; absent for the tab's own session. */
+  sessionId?: string;
+  /** Target (frame) id of that out-of-process iframe. Stable across session re-creation. */
+  frameId?: string;
+}
+
+/** An out-of-process iframe reached through `Target.setAutoAttach` (flatten). */
+export interface ChildSession {
+  sessionId: string;
+  /** Equals the id of the iframe's top frame. */
+  targetId: string;
+  /** Session that owns the iframe element; absent when it is the tab's own session. */
+  parent?: string;
+  url: string;
 }
 
 export interface State {
@@ -72,6 +86,10 @@ export interface State {
   refs: Record<number, Record<string, RefInfo>>;
   /** Loader id of the main-frame document the tab's refs belong to. */
   refDocs: Record<number, string>;
+  /** Out-of-process iframe sessions per controlled tab (valid while the debugger stays attached). */
+  childSessions: Record<number, ChildSession[]>;
+  /** Frame the `frame` command scoped the tab to (absent: main frame). */
+  frames: Record<number, { frameId: string; name: string }>;
   approvals: Approval[];
   log: LogEntry[];
   conn: Connection;

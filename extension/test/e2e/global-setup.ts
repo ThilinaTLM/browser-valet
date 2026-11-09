@@ -23,6 +23,8 @@ export interface E2eInfo {
   extensionOrigin: string;
   /** Base URL of the fixture server, no trailing slash. */
   fixtureUrl: string;
+  /** Same server under another host name (`localhost`): a different site, so an iframe from it is out of process. */
+  crossFixtureUrl: string;
   /** Scratch directory used as the CLI's cwd. */
   workDir: string;
 }
@@ -234,6 +236,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
       wsEndpoint: browser.wsEndpoint(),
       extensionOrigin,
       fixtureUrl: fixtures.url,
+      crossFixtureUrl: fixtures.url.replace('127.0.0.1', 'localhost'),
       workDir,
     });
   } catch (e) {

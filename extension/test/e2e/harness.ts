@@ -26,6 +26,13 @@ const info = () => inject('e2e');
 /** URL of a fixture page (files live in test/e2e/fixtures/). */
 export const fixture = (path = '/'): string => `${info().fixtureUrl}${path}`;
 
+/** URL of a fixture page under another site (`localhost`; the host page uses 127.0.0.1). */
+export const crossFixture = (path = '/'): string => `${info().crossFixtureUrl}${path}`;
+
+/** The frames host page with the inner page from the other site: an out-of-process iframe. */
+export const framesPage = (query = '', innerQuery = ''): string =>
+  `${fixture('/frames.html')}?inner=${encodeURIComponent(crossFixture(`/frame-inner.html${innerQuery}`))}${query}`;
+
 /** Scratch directory used as the cwd of every bctl run (for screenshots and the like). */
 export const workDir = (): string => info().workDir;
 
@@ -174,6 +181,43 @@ export async function stopTabInPopup(tid: string): Promise<void> {
       { timeout: 15_000 },
       tid,
     );
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
+/**
+ * Kill the extension's service worker, as Chrome does when it is idle, and wake it again.
+ * The debugger attachments and `chrome.storage.session` survive; in-memory state does not.
+ */
+export async function restartExtensionWorker(): Promise<void> {
+  const session = await browser().target().createCDPSession();
+  try {
+    const { targetInfos } = await session.send('Target.getTargets');
+    const sw = targetInfos.find(
+      (t) => t.type === 'service_worker' && t.url.startsWith(info().extensionOrigin),
+    );
+    if (!sw) throw new Error('extension service worker not found');
+    await session.send('Target.closeTarget', { targetId: sw.targetId });
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
+  // Let the proxy notice the disconnect, so that "connected" below means the new worker.
+  for (let i = 0; i < 20; i++) {
+    if ((await bctl('status')).stdout.includes('extension: not connected')) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  // Opening an extension page starts the worker again; it reconnects to the proxy by itself.
+  const page = await browser().newPage();
+  try {
+    await page.goto(`${info().extensionOrigin}/popup.html?window=1`);
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+      const r = await bctl('status');
+      if (/extension: \S/.test(r.stdout) && !r.stdout.includes('extension: not connected')) break;
+      if (Date.now() > deadline) throw new Error(`extension did not reconnect:\n${r.stdout}`);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
   } finally {
     await page.close().catch(() => undefined);
   }

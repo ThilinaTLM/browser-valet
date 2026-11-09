@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Frame Inner</title>
+  </head>
+  <body>
+    <h2>Payment</h2>
+    <label>Card number <input id="card" type="text" /></label>
+    <button
+      id="pay"
+      onclick="
+        document.getElementById('out').textContent = 'paid:' + document.getElementById('card').value
+      "
+    >
+      Pay
+    </button>
+    <p id="out"></p>
+    <iframe
+      id="deep"
+      name="deep-frame"
+      title="deep-frame"
+      src="frame-deep.html"
+      width="300"
+      height="100"
+    ></iframe>
+    <script>
+      // ?deep=<url> moves the nested frame to another site (a second out-of-process level).
+      document.getElementById('deep').src =
+        new URLSearchParams(location.search).get('deep') || 'frame-deep.html';
+    </script>
+  </body>
+</html>

@@ -5,7 +5,8 @@
 import * as cdp from './cdp';
 import { type ClickableInfo, clickableScript, clickableSuffix } from './clickable';
 import { resolve, UserError } from './dom';
-import { RefTable } from './ref-table';
+import { hostedFrameId, scopeLoc } from './frames';
+import { nodeKey, type NodeKey, RefTable } from './ref-table';
 import { syncDocument } from './refs';
 import { save, session, state } from './state';
 
@@ -27,6 +28,9 @@ interface AXNode {
 interface Tree {
   byId: Map<string, AXNode>;
   root: AXNode | undefined;
+  /** Child session (out-of-process iframe) and its frame id; absent for the tab's own session. */
+  sessionId?: string;
+  frameId?: string;
 }
 
 export interface SnapshotOptions {
@@ -102,27 +106,58 @@ function prop(n: AXNode, name: string): string | number | boolean | undefined {
   return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? v : undefined;
 }
 
-async function axTree(tabId: number, frameId?: string): Promise<Tree> {
+async function axTree(
+  tabId: number,
+  where: { frameId?: string; sessionId?: string; ofFrame?: string } = {},
+): Promise<Tree> {
+  if (where.sessionId) await cdp.send(tabId, 'Accessibility.enable', {}, where.sessionId);
   const { nodes } = await cdp.send<{ nodes: AXNode[] }>(
     tabId,
     'Accessibility.getFullAXTree',
-    frameId ? { frameId } : {},
+    where.frameId ? { frameId: where.frameId } : {},
+    where.sessionId,
   );
-  return { byId: new Map(nodes.map((n) => [n.nodeId, n])), root: nodes[0] };
+  const tree: Tree = { byId: new Map(nodes.map((n) => [n.nodeId, n])), root: nodes[0] };
+  if (where.sessionId) tree.sessionId = where.sessionId;
+  if (where.ofFrame) tree.frameId = where.ofFrame;
+  return tree;
 }
 
-/** Same-process iframes: fetch their AX tree so their content is inlined under the Iframe node. */
-async function iframeTree(tabId: number, node: AXNode): Promise<Tree | undefined> {
+/**
+ * The content of an `Iframe` node, so it is inlined under it: a frame in the same process is read
+ * from the session of its parent; an out-of-process one from its own child session.
+ * `unreadable` collects frames that exist but could not be read.
+ */
+async function iframeTree(
+  tabId: number,
+  parent: Tree,
+  node: AXNode,
+  unreadable: Set<string>,
+): Promise<Tree | undefined> {
   if (node.backendDOMNodeId === undefined) return undefined;
+  const frameId = await hostedFrameId(tabId, parent.sessionId, {
+    backendNodeId: node.backendDOMNodeId,
+  });
+  if (!frameId) return undefined;
+  const inherit = { sessionId: parent.sessionId, ofFrame: parent.frameId };
+  let child = cdp.childSessions(tabId).find((c) => c.targetId === frameId);
+  if (!child) {
+    try {
+      return await axTree(tabId, { frameId, ...inherit });
+    } catch {
+      // not in this process: wait a moment for its session
+    }
+    child = await cdp.sessionForFrame(tabId, frameId, 800);
+  }
+  if (!child) {
+    unreadable.add(frameId);
+    return undefined;
+  }
   try {
-    const { node: dom } = await cdp.send<{ node: { frameId?: string } }>(
-      tabId,
-      'DOM.describeNode',
-      { backendNodeId: node.backendDOMNodeId },
-    );
-    return dom.frameId ? await axTree(tabId, dom.frameId) : undefined;
+    return await axTree(tabId, { sessionId: child.sessionId, ofFrame: frameId });
   } catch {
-    return undefined; // cross-origin (out-of-process) frames are skipped
+    unreadable.add(frameId);
+    return undefined;
   }
 }
 
@@ -194,16 +229,34 @@ export async function snapshot(
 }> {
   await cdp.send(tabId, 'Accessibility.enable');
   await syncDocument(tabId);
-  const main = await axTree(tabId);
   const sess = session(opts.session);
+  // `frame` scoped the tab to an iframe: the snapshot starts at its document.
+  const scopedFrame = await scopeLoc(tabId);
+  let main: Tree;
+  if (scopedFrame) {
+    const sid = scopedFrame.sessionId;
+    const top = sid ? cdp.childSession(tabId, sid)?.targetId : undefined;
+    main = await axTree(
+      tabId,
+      scopedFrame.top
+        ? { sessionId: sid, ofFrame: scopedFrame.frameId }
+        : { frameId: scopedFrame.frameId, sessionId: sid, ofFrame: top },
+    );
+  } else {
+    main = await axTree(tabId);
+  }
+  const unreadable = new Set<string>();
   const table = new RefTable(state.refs[tabId], sess.nextRef ?? 1);
-  const present = new Set<number>();
+  const present = new Set<NodeKey>();
   const note = (t: Tree) => {
     for (const n of t.byId.values())
-      if (n.backendDOMNodeId !== undefined) present.add(n.backendDOMNodeId);
+      if (n.backendDOMNodeId !== undefined) present.add(nodeKey(n.backendDOMNodeId, t.frameId));
   };
   note(main);
-  const clickable = await clickables(tabId, opts.interactive);
+  // Clickable detection runs in the main frame only.
+  const clickable = scopedFrame
+    ? new Map<number, ClickableInfo>()
+    : await clickables(tabId, opts.interactive);
 
   let start: { node: AXNode; tree: Tree } | undefined = main.root && {
     node: main.root,
@@ -215,10 +268,18 @@ export async function snapshot(
       tabId,
       'DOM.describeNode',
       { objectId: h.objectId },
+      h.sessionId,
     );
-    const found = [...main.byId.values()].find((n) => n.backendDOMNodeId === node.backendNodeId);
+    // A target inside an out-of-process iframe is found in that iframe's tree.
+    let tree = main;
+    if (h.sessionId !== main.sessionId) {
+      const c = h.sessionId ? cdp.childSession(tabId, h.sessionId) : undefined;
+      tree = await axTree(tabId, { sessionId: h.sessionId, ofFrame: c?.targetId });
+      note(tree);
+    }
+    const found = [...tree.byId.values()].find((n) => n.backendDOMNodeId === node.backendNodeId);
     if (!found) throw new UserError(`${opts.scope} is not in the accessibility tree`, 'not_found');
-    start = { node: found, tree: main };
+    start = { node: found, tree };
   }
 
   async function walk(
@@ -234,7 +295,7 @@ export async function snapshot(
     const focusable = prop(node, 'focusable') === true;
     // Looks clickable but has no interactive role (natively interactive nodes need no hint).
     const hint =
-      node.backendDOMNodeId !== undefined && !INTERACTIVE.has(role) && !isText
+      node.backendDOMNodeId !== undefined && !tree.frameId && !INTERACTIVE.has(role) && !isText
         ? clickable.get(node.backendDOMNodeId)
         : undefined;
     const interactive =
@@ -246,7 +307,8 @@ export async function snapshot(
     let show = !node.ignored && !SKIP.has(role) && role !== 'RootWebArea';
     if (show && FLATTEN_UNNAMED.has(role) && !name && !hint) show = false;
     if (show && isText && (!name || name === parentName || inField)) show = false;
-    if (show && opts.interactive && !interactive) show = false;
+    // Iframes stay in -i: `frame @ref` needs them.
+    if (show && opts.interactive && !interactive && role !== 'Iframe') show = false;
     if (opts.depth !== undefined && level > opts.depth) return [];
 
     let out: Out | undefined;
@@ -268,7 +330,14 @@ export async function snapshot(
       }
       const refable = interactive || (NAMED_REF_ROLES.has(role) && name);
       if (node.backendDOMNodeId !== undefined && refable) {
-        const ref = table.assign(node.backendDOMNodeId, role, name);
+        const ref = table.assign(
+          node.backendDOMNodeId,
+          role,
+          name,
+          tree.sessionId && tree.frameId
+            ? { sessionId: tree.sessionId, frameId: tree.frameId }
+            : undefined,
+        );
         attrs.push(`ref=${ref}`);
       }
       if (attrs.length) line += ` [${attrs.join(', ')}]`;
@@ -287,7 +356,7 @@ export async function snapshot(
       if (child) kids.push(...(await walk(child, tree, childLevel, childName, childInField)));
     }
     if (role === 'Iframe') {
-      const sub = await iframeTree(tabId, node);
+      const sub = await iframeTree(tabId, tree, node, unreadable);
       if (sub) note(sub);
       if (sub?.root) kids.push(...(await walk(sub.root, sub, childLevel, childName, false)));
     }
@@ -314,7 +383,8 @@ export async function snapshot(
   render(opts.compact ? prune(roots) : roots, '');
 
   // A scoped or depth-limited snapshot doesn't see the whole page, so it removes nothing.
-  const removedRefs = opts.scope || opts.depth !== undefined ? [] : table.prune(present);
+  const removedRefs =
+    opts.scope || opts.depth !== undefined || scopedFrame ? [] : table.prune(present, unreadable);
   state.refs[tabId] = table.refs;
   sess.nextRef = table.counter;
   save();

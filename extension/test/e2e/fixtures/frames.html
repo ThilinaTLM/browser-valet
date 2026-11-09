@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Frames Host</title>
+  </head>
+  <body>
+    <h1>Frames Host</h1>
+    <button id="host-btn">Host button</button>
+    <div id="spacer"></div>
+    <iframe
+      id="inner"
+      name="payment-frame"
+      title="payment-frame"
+      width="400"
+      height="300"
+      style="margin-left: 40px; margin-top: 20px; border: 0"
+    ></iframe>
+    <script>
+      // The inner page URL comes from ?inner= so tests can point it at another origin.
+      // ?pad=N pushes the iframe N px down the page (tests scrolling it into view).
+      document.getElementById('spacer').style.height =
+        (new URLSearchParams(location.search).get('pad') || 0) + 'px';
+      const inner = new URLSearchParams(location.search).get('inner');
+      if (inner) document.getElementById('inner').src = inner;
+    </script>
+  </body>
+</html>

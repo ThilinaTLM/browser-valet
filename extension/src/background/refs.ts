@@ -21,6 +21,7 @@ async function loaderId(tabId: number): Promise<string | undefined> {
 /** Forget the tab's refs (the counter lives in the session and is kept). */
 export function clearRefs(tabId: number, docId?: string): void {
   delete state.refs[tabId];
+  delete state.frames[tabId]; // a new document leaves the scoped frame behind
   if (docId === undefined) delete state.refDocs[tabId];
   else state.refDocs[tabId] = docId;
   save();

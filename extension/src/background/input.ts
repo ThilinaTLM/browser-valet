@@ -35,8 +35,9 @@ export async function sendInput(
   hidden: boolean,
   method: string,
   params: Record<string, unknown>,
+  sessionId?: string,
 ): Promise<void> {
-  const sent = cdp.send(tabId, method, params);
+  const sent = cdp.send(tabId, method, params, sessionId);
   if (!hidden) {
     await sent;
     return;
@@ -50,30 +51,43 @@ export async function sendInput(
 
 export type Button = 'left' | 'right' | 'middle';
 
-export async function move(tabId: number, x: number, y: number): Promise<void> {
+export async function move(tabId: number, x: number, y: number, sessionId?: string): Promise<void> {
   const hidden = await prime(tabId);
-  await sendInput(tabId, hidden, 'Input.dispatchMouseEvent', {
-    type: 'mouseMoved',
-    x,
-    y,
-    modifiers,
-  });
+  await sendInput(
+    tabId,
+    hidden,
+    'Input.dispatchMouseEvent',
+    { type: 'mouseMoved', x, y, modifiers },
+    sessionId,
+  );
 }
 
 export async function click(
   tabId: number,
   x: number,
   y: number,
-  { button = 'left', count = 1 }: { button?: Button; count?: number } = {},
+  {
+    button = 'left',
+    count = 1,
+    sessionId,
+  }: { button?: Button; count?: number; sessionId?: string } = {},
 ): Promise<void> {
   const hidden = await prime(tabId);
   // Hover first like a real user, except on hidden pages where moves are never acknowledged.
-  if (!hidden)
-    await cdp.send(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, modifiers });
+  if (!hidden) {
+    await cdp.send(
+      tabId,
+      'Input.dispatchMouseEvent',
+      { type: 'mouseMoved', x, y, modifiers },
+      sessionId,
+    );
+  }
   for (let i = 1; i <= count; i++) {
     const base = { x, y, button, clickCount: i, modifiers };
-    await sendInput(tabId, hidden, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...base });
-    await sendInput(tabId, hidden, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...base });
+    const press = { type: 'mousePressed', ...base };
+    await sendInput(tabId, hidden, 'Input.dispatchMouseEvent', press, sessionId);
+    const release = { type: 'mouseReleased', ...base };
+    await sendInput(tabId, hidden, 'Input.dispatchMouseEvent', release, sessionId);
   }
 }
 

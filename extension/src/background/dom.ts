@@ -3,12 +3,15 @@
 
 import { UserError } from './errors';
 import * as cdp from './cdp';
+import { evalInFrame, scopeLoc } from './frames';
 import { syncDocument } from './refs';
 import { state } from './state';
 
 export interface Handle {
   tabId: number;
   objectId: string;
+  /** Child session (out-of-process iframe) the object lives in; undefined = the tab's session. */
+  sessionId?: string;
 }
 
 interface RemoteObject {
@@ -20,7 +23,7 @@ interface RemoteObject {
   objectId?: string;
 }
 
-interface EvalResult {
+export interface EvalResult {
   result: RemoteObject;
   exceptionDetails?: { text?: string; exception?: RemoteObject };
 }
@@ -50,16 +53,33 @@ export async function evaluate(tabId: number, expression: string): Promise<Remot
   return r.result;
 }
 
+/**
+ * Like `evaluate`, but in the frame `frame` scoped the tab to (the main frame by default). Used by
+ * the commands that follow the scope: `eval`, `get`, `wait --fn`.
+ */
+export async function evaluateScoped(tabId: number, expression: string): Promise<RemoteObject> {
+  const loc = await scopeLoc(tabId);
+  if (!loc) return evaluate(tabId, expression);
+  const r = await evalInFrame(tabId, loc, expression, { byValue: true });
+  if (r.exceptionDetails) throw new UserError(exceptionText(r.exceptionDetails));
+  return r.result;
+}
+
 /** Run `fn` (a function source string) with `this` bound to the element. Returns by value. */
 export async function call<T>(h: Handle, fn: string, args: unknown[] = []): Promise<T> {
-  const r = await cdp.send<EvalResult>(h.tabId, 'Runtime.callFunctionOn', {
-    objectId: h.objectId,
-    functionDeclaration: fn,
-    arguments: args.map((value) => ({ value })),
-    returnByValue: true,
-    awaitPromise: true,
-    userGesture: true,
-  });
+  const r = await cdp.send<EvalResult>(
+    h.tabId,
+    'Runtime.callFunctionOn',
+    {
+      objectId: h.objectId,
+      functionDeclaration: fn,
+      arguments: args.map((value) => ({ value })),
+      returnByValue: true,
+      awaitPromise: true,
+      userGesture: true,
+    },
+    h.sessionId,
+  );
   if (r.exceptionDetails) {
     // Our own helpers throw short messages; the page-side stack trace is just noise here.
     const msg = exceptionText(r.exceptionDetails).split('\n')[0] ?? '';
@@ -74,23 +94,41 @@ export function isRef(target: string): boolean {
   return REF.test(target);
 }
 
-async function documentBackendId(tabId: number): Promise<number> {
-  const { root } = await cdp.send<{ root: { backendNodeId: number } }>(tabId, 'DOM.getDocument', {
-    depth: 0,
-  });
+async function documentBackendId(tabId: number, sessionId?: string): Promise<number> {
+  const { root } = await cdp.send<{ root: { backendNodeId: number } }>(
+    tabId,
+    'DOM.getDocument',
+    { depth: 0 },
+    sessionId,
+  );
   return root.backendNodeId;
 }
 
-async function resolveBackend(tabId: number, backendNodeId: number): Promise<string> {
-  const { object } = await cdp.send<{ object: RemoteObject }>(tabId, 'DOM.resolveNode', {
-    backendNodeId,
-  });
+async function resolveBackend(
+  tabId: number,
+  backendNodeId: number,
+  sessionId?: string,
+): Promise<string> {
+  const { object } = await cdp.send<{ object: RemoteObject }>(
+    tabId,
+    'DOM.resolveNode',
+    { backendNodeId },
+    sessionId,
+  );
   if (!object.objectId) throw new Error('unresolvable');
   return object.objectId;
 }
 
-export async function fromBackend(tabId: number, backendNodeId: number): Promise<Handle> {
-  return { tabId, objectId: await resolveBackend(tabId, backendNodeId) };
+export async function fromBackend(
+  tabId: number,
+  backendNodeId: number,
+  sessionId?: string,
+): Promise<Handle> {
+  return {
+    tabId,
+    objectId: await resolveBackend(tabId, backendNodeId, sessionId),
+    ...(sessionId ? { sessionId } : {}),
+  };
 }
 
 /** Evaluate an expression that yields an element (or null) and return a handle to it. */
@@ -109,22 +147,35 @@ async function resolveRef(tabId: number, target: string): Promise<Handle> {
       `Unknown ref: ${ref}. Run \`bctl snapshot\` to get fresh refs.`,
       'unknown_ref',
     );
+  // A node in an out-of-process iframe is reached through that iframe's session. The session id
+  // stored with the ref may be from before a navigation or worker restart: go by the frame.
+  let sessionId: string | undefined;
+  if (info.frameId !== undefined) {
+    sessionId = (await cdp.sessionForFrame(tabId, info.frameId))?.sessionId;
+    if (!sessionId) {
+      throw new UserError(
+        `The iframe of ${ref} is gone (navigated or removed). Run \`bctl snapshot\` again.`,
+        'stale_ref',
+      );
+    }
+  }
   try {
-    return { tabId, objectId: await resolveBackend(tabId, info.backendNodeId) };
+    return await fromBackend(tabId, info.backendNodeId, sessionId);
   } catch {
     // The node was replaced: fall back to the single element with the same role and name.
     const { nodes } = await cdp.send<{ nodes: { backendDOMNodeId?: number }[] }>(
       tabId,
       'Accessibility.queryAXTree',
       {
-        backendNodeId: await documentBackendId(tabId),
+        backendNodeId: await documentBackendId(tabId, sessionId),
         role: info.role,
         accessibleName: info.name,
       },
+      sessionId,
     );
     const matches = nodes.filter((n) => n.backendDOMNodeId !== undefined);
     if (matches.length === 1 && matches[0]?.backendDOMNodeId !== undefined) {
-      return { tabId, objectId: await resolveBackend(tabId, matches[0].backendDOMNodeId) };
+      return await fromBackend(tabId, matches[0].backendDOMNodeId, sessionId);
     }
     throw new UserError(
       `Stale ref ${ref} (${info.role} "${info.name}") cannot be recovered. Run \`bctl snapshot\` again.`,
@@ -157,12 +208,21 @@ export function countExpression(target: string): string {
 /** Resolve a ref (`@e3`), CSS selector or XPath to an element handle. */
 export async function resolve(tabId: number, target: string): Promise<Handle> {
   if (isRef(target)) return resolveRef(tabId, target);
-  const r = await cdp.send<EvalResult>(tabId, 'Runtime.evaluate', {
-    expression: queryExpression(target),
-  });
+  // CSS and XPath follow the frame the tab is scoped to (`frame`); refs carry their own.
+  await syncDocument(tabId);
+  const loc = await scopeLoc(tabId);
+  const r = loc
+    ? await evalInFrame(tabId, loc, queryExpression(target), { byValue: false, gesture: false })
+    : await cdp.send<EvalResult>(tabId, 'Runtime.evaluate', {
+        expression: queryExpression(target),
+      });
   if (r.exceptionDetails) throw new UserError(`Invalid selector: ${target}`, 'bad_args');
   if (!r.result.objectId) throw new UserError(`Element not found: ${target}`, 'not_found');
-  return { tabId, objectId: r.result.objectId };
+  return {
+    tabId,
+    objectId: r.result.objectId,
+    ...(loc?.sessionId ? { sessionId: loc.sessionId } : {}),
+  };
 }
 
 /** Like resolve(), but polls until the element exists (bounded by timeoutMs). */
@@ -195,14 +255,17 @@ const DESCRIBE = `function describe(el) {
 
 /**
  * Scroll the element into view and return the viewport point to click, after checking that it is
- * visible, enabled and not covered by another element.
+ * visible, enabled and not covered by another element. For a node in an out-of-process iframe the
+ * point is relative to that iframe and `sessionId` names the session to send the input to: a
+ * hidden tab hit-tests nothing inside an iframe, so input addressed to the tab would land on the
+ * parent page.
  */
 export async function clickPoint(
   h: Handle,
   opts: { allowDisabled?: boolean } = {},
-): Promise<{ x: number; y: number }> {
+): Promise<{ x: number; y: number; sessionId?: string }> {
   try {
-    await cdp.send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId });
+    await cdp.send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }, h.sessionId);
   } catch {
     // not an element (e.g. text node) or not rendered; checks below report it
   }
@@ -233,11 +296,17 @@ export async function clickPoint(
     );
   }
 
-  const { quads } = await cdp.send<{ quads: number[][] }>(h.tabId, 'DOM.getContentQuads', {
-    objectId: h.objectId,
-  });
+  const { quads } = await cdp.send<{ quads: number[][] }>(
+    h.tabId,
+    'DOM.getContentQuads',
+    { objectId: h.objectId },
+    h.sessionId,
+  );
   const q = quads.find((q) => q.length === 8);
   if (!q) throw new UserError('Element is not visible', 'not_visible');
   const [x1 = 0, y1 = 0, x2 = 0, y2 = 0, x3 = 0, y3 = 0, x4 = 0, y4 = 0] = q;
-  return { x: (x1 + x2 + x3 + x4) / 4, y: (y1 + y2 + y3 + y4) / 4 };
+  const x = (x1 + x2 + x3 + x4) / 4;
+  const y = (y1 + y2 + y3 + y4) / 4;
+  // Quads of a node in an out-of-process iframe are relative to that iframe.
+  return h.sessionId ? { x, y, sessionId: h.sessionId } : { x, y };
 }

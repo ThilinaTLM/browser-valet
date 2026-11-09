@@ -17,6 +17,8 @@ const initial = (): State => ({
   sessions: {},
   refs: {},
   refDocs: {},
+  childSessions: {},
+  frames: {},
   approvals: [],
   log: [],
   conn: { status: 'waiting', paired: false },
@@ -108,8 +110,15 @@ async function restoreHandoff(): Promise<void> {
     typeof handoff.ts === 'number' &&
     Date.now() - handoff.ts < HANDOFF_MAX_AGE_MS
   ) {
-    // Pending approvals are dropped: their CLI waiters are gone.
-    state = { ...initial(), ...handoff.state, approvals: [], conn: initial().conn };
+    // Pending approvals are dropped: their CLI waiters are gone. So are child (iframe) sessions:
+    // the reload ended every debugger attachment, and with it their sessions.
+    state = {
+      ...initial(),
+      ...handoff.state,
+      approvals: [],
+      childSessions: {},
+      conn: initial().conn,
+    };
     handoffGraceUntil = Date.now() + 5000;
   }
 }
@@ -186,6 +195,8 @@ export function forgetTab(tabId: number): void {
   delete state.tabs[tabId];
   delete state.refs[tabId];
   delete state.refDocs[tabId];
+  delete state.childSessions[tabId];
+  delete state.frames[tabId];
   forgetBaselines(tabId);
   for (const s of Object.values(state.sessions)) if (s.tab === tabId) delete s.tab;
   state.approvals = state.approvals.filter((a) => a.tabId !== tabId);

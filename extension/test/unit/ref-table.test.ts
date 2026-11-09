@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RefTable } from '../../src/background/ref-table';
+import { nodeKey, RefTable } from '../../src/background/ref-table';
 
 describe('RefTable', () => {
   it('numbers new nodes from the counter in assignment order', () => {
@@ -52,5 +52,44 @@ describe('RefTable', () => {
     expect(Object.keys(next.refs)).toEqual(['e1', 'e2', 'e3']);
     // a removed node coming back is a new element and gets a new ref
     expect(next.assign(40, 'button', 'b4')).toBe('e12');
+  });
+
+  describe('nodes in out-of-process iframes', () => {
+    const inFrame = (frameId: string) => ({ sessionId: `S-${frameId}`, frameId });
+
+    it('does not mix up equal backend node ids of different processes', () => {
+      const t = new RefTable(undefined, 1);
+      expect(t.assign(7, 'button', 'Main')).toBe('e1');
+      expect(t.assign(7, 'button', 'Pay', inFrame('F1'))).toBe('e2');
+      expect(t.assign(7, 'button', 'Other', inFrame('F2'))).toBe('e3');
+      expect(t.refs.e2).toEqual({
+        backendNodeId: 7,
+        role: 'button',
+        name: 'Pay',
+        sessionId: 'S-F1',
+        frameId: 'F1',
+      });
+      expect(t.refs.e1).toEqual({ backendNodeId: 7, role: 'button', name: 'Main' });
+    });
+
+    it('keeps the ref when the frame gets a new session', () => {
+      const first = new RefTable(undefined, 1);
+      first.assign(7, 'button', 'Pay', { sessionId: 'old', frameId: 'F1' });
+      const second = new RefTable(first.refs, first.counter);
+      expect(second.assign(7, 'button', 'Pay', { sessionId: 'new', frameId: 'F1' })).toBe('e1');
+      expect(second.refs.e1?.sessionId).toBe('new');
+    });
+
+    it('prune keys by frame and keeps the refs of frames that could not be read', () => {
+      const t = new RefTable(undefined, 1);
+      t.assign(7, 'button', 'Main');
+      t.assign(7, 'button', 'A', inFrame('F1'));
+      t.assign(8, 'button', 'B', inFrame('F2'));
+      const next = new RefTable(t.refs, t.counter);
+      // main node 7 present; F1's node 7 gone; F2 unreadable
+      const removed = next.prune(new Set([nodeKey(7)]), new Set(['F2']));
+      expect(removed).toEqual(['e2']);
+      expect(Object.keys(next.refs)).toEqual(['e1', 'e3']);
+    });
   });
 });

@@ -193,18 +193,26 @@ const highlight: Command = {
     const target = a.need(0, 'target');
     const id = await ctx.tab();
     const h = await resolve(id, target);
-    await Promise.all([cdp.send(id, 'DOM.enable'), cdp.send(id, 'Overlay.enable')]);
+    await Promise.all([
+      cdp.send(id, 'DOM.enable', {}, h.sessionId),
+      cdp.send(id, 'Overlay.enable', {}, h.sessionId),
+    ]);
     await clearHighlight(id);
-    await cdp.send(id, 'Overlay.highlightNode', {
-      objectId: h.objectId,
-      highlightConfig: {
-        showInfo: false,
-        contentColor: { r: 111, g: 168, b: 220, a: 0.4 },
-        paddingColor: { r: 147, g: 196, b: 125, a: 0.4 },
-        borderColor: { r: 255, g: 229, b: 153, a: 0.6 },
-        marginColor: { r: 246, g: 178, b: 107, a: 0.4 },
+    await cdp.send(
+      id,
+      'Overlay.highlightNode',
+      {
+        objectId: h.objectId,
+        highlightConfig: {
+          showInfo: false,
+          contentColor: { r: 111, g: 168, b: 220, a: 0.4 },
+          paddingColor: { r: 147, g: 196, b: 125, a: 0.4 },
+          borderColor: { r: 255, g: 229, b: 153, a: 0.6 },
+          marginColor: { r: 246, g: 178, b: 107, a: 0.4 },
+        },
       },
-    });
+      h.sessionId,
+    );
     // The overlay stays until hidden. Fade it out so the page isn't left decorated.
     highlightTimers.set(
       id,
@@ -362,6 +370,7 @@ const sessionCmd: Command = {
       let title: string | null = null;
       let url: string | null = null;
       let note = '';
+      const frame = (tabId === undefined ? undefined : state.frames[tabId]?.name) ?? 'main';
       if (tabId !== undefined) {
         const m = meta(tabId);
         tab = m.tid;
@@ -379,7 +388,7 @@ const sessionCmd: Command = {
         `Tab: ${tab === null ? '-' : tab + note}`,
         ...(label ? [`Label: ${label}`] : []),
         ...(url !== null ? [`Title: ${title ?? ''}`, `URL: ${url}`] : []),
-        'Frame: main',
+        `Frame: ${frame}`,
       ].join('\n');
       return {
         text,
@@ -389,7 +398,7 @@ const sessionCmd: Command = {
           label,
           title,
           url,
-          frame: 'main',
+          frame,
           owned: ownedTids(ctx.session),
           lastActivity: lastActivity(ctx.session) ?? null,
         },

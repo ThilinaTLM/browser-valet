@@ -13,6 +13,8 @@ import * as input from '../input';
 import { settle } from '../tabs';
 import { openInNewTab } from './navigation';
 
+const pt = ({ x, y }: { x: number; y: number }) => ({ x, y });
+
 const DONE: Result = { text: '✓ Done' };
 
 /** `✓ Done` with the upstream-style JSON payload (`{ clicked: '@e3' }`, …). */
@@ -27,14 +29,16 @@ async function element(ctx: Ctx, target: string): Promise<Handle> {
 // ---------------------------------------------------------------------------
 
 async function clickEl(h: Handle, count = 1, button: input.Button = 'left'): Promise<Result> {
-  const { x, y } = await clickPoint(h);
-  await input.click(h.tabId, x, y, { count, button });
+  const { x, y, sessionId } = await clickPoint(h);
+  await input.click(h.tabId, x, y, { count, button, ...(sessionId ? { sessionId } : {}) });
   await settle(h.tabId);
   return DONE;
 }
 
 async function focusEl(h: Handle): Promise<void> {
-  await cdp.send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }).catch(() => 0);
+  await cdp
+    .send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }, h.sessionId)
+    .catch(() => 0);
   await call(
     h,
     `function () {
@@ -47,7 +51,9 @@ async function focusEl(h: Handle): Promise<void> {
 }
 
 async function fillEl(h: Handle, text: string): Promise<Result> {
-  await cdp.send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }).catch(() => 0);
+  await cdp
+    .send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }, h.sessionId)
+    .catch(() => 0);
   await call(
     h,
     `function () {
@@ -75,8 +81,8 @@ async function typeEl(h: Handle, text: string): Promise<Result> {
 }
 
 async function hoverEl(h: Handle): Promise<Result> {
-  const { x, y } = await clickPoint(h, { allowDisabled: true });
-  await input.move(h.tabId, x, y);
+  const { x, y, sessionId } = await clickPoint(h, { allowDisabled: true });
+  await input.move(h.tabId, x, y, sessionId);
   return DONE;
 }
 
@@ -492,7 +498,7 @@ export const interactionCommands: Command[] = [
     summary: 'Scroll an element into view',
     async run(ctx, a) {
       const h = await element(ctx, target(a));
-      await cdp.send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId });
+      await cdp.send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }, h.sessionId);
       return done({ scrolled: target(a) });
     },
   },
@@ -507,7 +513,10 @@ export const interactionCommands: Command[] = [
       const to = await clickPoint(await element(ctx, a.need(1, 'drop target')), {
         allowDisabled: true,
       });
-      await input.drag(await ctx.tab(), from, to);
+      if (from.sessionId !== undefined || to.sessionId !== undefined) {
+        throw new UserError('drag does not work inside a cross-origin iframe', 'bad_args');
+      }
+      await input.drag(await ctx.tab(), pt(from), pt(to));
       return done({ dragged: true, source: target(a), target: a.need(1, 'drop target') });
     },
   },
@@ -521,7 +530,12 @@ export const interactionCommands: Command[] = [
       a.need(1, 'file');
       const h = await element(ctx, target(a));
       const files = a.pos.slice(1).map((f) => ctx.path(f));
-      await cdp.send(h.tabId, 'DOM.setFileInputFiles', { objectId: h.objectId, files });
+      await cdp.send(
+        h.tabId,
+        'DOM.setFileInputFiles',
+        { objectId: h.objectId, files },
+        h.sessionId,
+      );
       return { text: '✓ Done', data: { files } };
     },
   },
