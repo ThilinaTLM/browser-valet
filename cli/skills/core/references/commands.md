@@ -16,7 +16,8 @@ find first|last <selector> <action> [value]   find nth <n> <selector> <action> [
 get text|html|value|attr|title|url|count|box [t] [attr]   get styles <t> [prop...] [--all]   is visible|enabled|checked <t>
 wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob | --load s | --fn js
 read [url] [--outline] [--filter <text>] [--max-output <chars>]
-screenshot [path] [--full]   eval <js> | eval -b <base64> | eval --stdin
+screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
+eval <js> | eval -b <base64> | eval --stdin
 pdf <path> [--landscape] [--background]   set viewport <w> <h> [scale] | reset
 set media [dark|light] [reduced-motion] | reset   (set: agent tabs only)
 dialog status|accept [text]|dismiss   console [--clear]   errors [--clear]

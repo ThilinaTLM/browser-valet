@@ -90,6 +90,7 @@ snapshot: `--outline` lists headings, `--filter <text>` returns matching section
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
 `select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`,
 `read`, `screenshot`, `pdf`, `set`, `network`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
+`screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
 Full list with arguments and global flags: `bctl skills get core --ref commands`.
 `bctl <command> --help` for details.
 
