@@ -13,6 +13,7 @@ open/back/forward/reload/close, `tab` (list/new/label/switch/close), `snapshot -
 (line format identical to the binary), click/dblclick/hover/focus/fill/type/press/keydown/keyup/
 keyboard, check/uncheck/select, scroll/scrollintoview, drag, upload, `find` (all locators),
 `get text|html|value|attr|title|url|count|box`, `is`, `wait` (target/ms/text/url/load/fn/state),
+`get styles` (curated by default), XPath targets, `mouse`, `highlight`, `pushstate`, `session list/info`,
 `screenshot [--full]`, `read` (active tab/URL; no `--raw/--llms/--require-md`), `eval` (inline/-b/--stdin), `dialog`, `console`, `errors`, `--json`,
 `--session`, `--timeout`, the `skills` command.
 
@@ -23,7 +24,6 @@ keyboard, check/uncheck/select, scroll/scrollintoview, drag, upload, `find` (all
 | [snapshot-delta.md](../snapshot-delta.md) | stable, monotonic refs; `snapshot --delta` | **1**: refs pointing to the wrong element is a safety issue in a real browser |
 | [cli-output-conventions.md](../cli-output-conventions.md) | wait prints the match, warnings on stderr, JSON error codes, usage on missing args, help examples, JSON field names | 1 |
 | [snapshot-parity.md](../snapshot-parity.md) | refs for `cursor:pointer`/`onclick` elements; `removedRefs` | 1 |
-| [small-parity-commands.md](../small-parity-commands.md) | `mouse`, `get styles`, `highlight`, `pushstate`, `session list/info`, XPath, `wait --download` | 2 |
 | [screenshot-improvements.md](../screenshot-improvements.md) | `--annotate`, `--if-changed`, `--threshold` | 2 |
 | [cross-origin-frames.md](../cross-origin-frames.md) | inline cross-site iframes; `frame` | 2 |
 | [batch.md](../batch.md) | `batch` | 2 |

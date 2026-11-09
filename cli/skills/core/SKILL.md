@@ -72,7 +72,8 @@ snapshot: `--outline` lists headings, `--filter <text>` returns matching section
 ## Commands (summary)
 
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
-`select`, `scroll`, `wait`, `get`, `find`, `read`, `screenshot`, `eval`, `dialog`, `console`, `errors`.
+`select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`,
+`read`, `screenshot`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 Full list with arguments and global flags: `bctl skills get core --ref commands`.
 `bctl <command> --help` for details.
 

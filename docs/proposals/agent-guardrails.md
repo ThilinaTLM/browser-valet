@@ -77,7 +77,6 @@ trusted UI that upstream lacks: the **popup**. Proposal:
   - `eval` (arbitrary JS in a logged-in page)
   - `upload` (local files leave the machine)
   - `navigate-new-site` (agent tab goes to a site not yet visited in this session)
-  - `download` (if `wait --download` lands)
 - It reuses the consent approval flow (popup card, or a small window if Chrome isn't focused, with
   a 120 s timeout). The card shows the session, command and target, with the arguments **redacted**
   as in the activity log.

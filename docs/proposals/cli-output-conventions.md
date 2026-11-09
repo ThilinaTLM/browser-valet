@@ -69,7 +69,7 @@ A few of our own choices are better than upstream's and should stay.
   action.
 - `errors` text output: upstream prints empty `✗` lines (a bug). Ours prints the messages.
 - No `lifecycle` object in every JSON response.
-- `get styles` curated by default (see [small-parity-commands.md](small-parity-commands.md)).
+- `get styles` is curated by default (built; see [automation.md](../architecture/automation.md)).
 
 ## Impact
 

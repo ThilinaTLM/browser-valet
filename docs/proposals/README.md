@@ -43,7 +43,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 | [snapshot-delta.md](snapshot-delta.md) | automation | Draft |
 | [snapshot-parity.md](snapshot-parity.md) | automation | Draft |
 | [cli-output-conventions.md](cli-output-conventions.md) | automation | Draft |
-| [small-parity-commands.md](small-parity-commands.md) | automation | Draft |
 | [screenshot-improvements.md](screenshot-improvements.md) | automation | Draft |
 | [cross-origin-frames.md](cross-origin-frames.md) | automation | Draft |
 | [batch.md](batch.md) | automation | Draft |
@@ -61,7 +60,6 @@ Overview and priorities: [agent-browser-parity/](agent-browser-parity/README.md)
 - [ ] Stable, monotonic refs and `snapshot --delta`: [snapshot-delta.md](snapshot-delta.md)
 - [ ] Output conventions (wait output, stderr warnings, JSON error codes, help): [cli-output-conventions.md](cli-output-conventions.md)
 - [ ] Refs for clickable non-semantic elements: [snapshot-parity.md](snapshot-parity.md)
-- [ ] `mouse`, `get styles`, `highlight`, `pushstate`, `session`, XPath: [small-parity-commands.md](small-parity-commands.md)
 - [ ] `screenshot --annotate/--if-changed`: [screenshot-improvements.md](screenshot-improvements.md)
 - [ ] Cross-origin iframes and `frame`: [cross-origin-frames.md](cross-origin-frames.md)
 - [ ] `batch`: [batch.md](batch.md)
@@ -72,6 +70,7 @@ Overview and priorities: [agent-browser-parity/](agent-browser-parity/README.md)
 
 ## Not planned
 
+- `wait --download [path]` (agent-browser's wait for a download): skipped by decision. It needs the manifest `downloads` permission, which widens what the extension can see, and downloads land in the user's real Downloads folder. Revisit only with a security note.
 - Cookies/storage/state commands, network interception, emulation, video/trace/pdf: they would modify the real profile or aren't needed.
 - Firefox: there is no `chrome.debugger`.
 - Off-store `.crx` install: Chrome rejects it.
