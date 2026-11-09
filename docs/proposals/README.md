@@ -40,7 +40,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 | Proposal | Area | Status |
 |---|---|---|
 | [agent-browser-parity/](agent-browser-parity/README.md) | automation, security | Draft (umbrella) |
-| [snapshot-delta.md](snapshot-delta.md) | automation | Draft |
 | [cli-output-conventions.md](cli-output-conventions.md) | automation | Draft |
 | [screenshot-improvements.md](screenshot-improvements.md) | automation | Draft |
 | [cross-origin-frames.md](cross-origin-frames.md) | automation | Draft |
@@ -56,7 +55,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 
 Overview and priorities: [agent-browser-parity/](agent-browser-parity/README.md).
 
-- [ ] Stable, monotonic refs and `snapshot --delta`: [snapshot-delta.md](snapshot-delta.md)
 - [ ] Output conventions (wait output, stderr warnings, JSON error codes, help): [cli-output-conventions.md](cli-output-conventions.md)
 - [ ] `screenshot --annotate/--if-changed`: [screenshot-improvements.md](screenshot-improvements.md)
 - [ ] Cross-origin iframes and `frame`: [cross-origin-frames.md](cross-origin-frames.md)

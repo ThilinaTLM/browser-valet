@@ -3,6 +3,7 @@
 
 import type { Control } from '../shared';
 import * as cdp from './cdp';
+import { forgetBaselines } from './snapshot-diff';
 import { forgetTab, handoffGraceUntil, meta, save, state } from './state';
 
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -26,6 +27,7 @@ export async function revoke(tabId: number): Promise<void> {
     delete m.owner;
     delete state.refs[tabId];
     delete state.refDocs[tabId];
+    forgetBaselines(tabId);
     save();
   }
   await cdp.detach(tabId);

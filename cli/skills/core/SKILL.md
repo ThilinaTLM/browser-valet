@@ -68,6 +68,12 @@ Refs are stable: while the page stays the same document, re-snapshotting (also w
 reload invalidates all refs; new refs keep counting upwards, so an old ref never points at a
 different element.
 
+Long task on a big page? Use `bctl snapshot -i --delta`: the first call prints the tree, later
+calls print `unchanged (revision N)` or a small JSON `delta` (`treeChange` = lines to splice at
+`startLine`, `changes` = refs added/removed/renamed). The tree comes back in full after a URL
+change or when the delta would be larger. `--full` forces the tree and resets the baseline. Each
+combination of flags (`-i`, `-c`, `-s`…) has its own baseline.
+
 Elements that act like buttons but have no interactive role (`<div onclick>`, `cursor: pointer`
 spans, `tabindex`) get a ref too, marked `clickable [cursor:pointer, onclick]` (or
 `focusable [tabindex]`). In `-i` their text is the name. Listeners added with `addEventListener`

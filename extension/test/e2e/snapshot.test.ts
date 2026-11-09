@@ -125,3 +125,104 @@ describe('snapshot --json', () => {
     expect((await bctlJson('snapshot')).data).toMatchObject({ removedRefs: [] });
   });
 });
+
+describe('snapshot --delta', () => {
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => `<button>Row ${String(i)}</button>`).join('');
+
+  async function openList(): Promise<void> {
+    await bctl('open', fixture('/form.html'));
+    await bctl(
+      'eval',
+      `document.body.insertAdjacentHTML('beforeend', '<div id="list">${rows(30)}</div>')`,
+    );
+  }
+  const delta = async (...a: string[]) => bctl('snapshot', '-i', '--delta', ...a);
+
+  it('first call prints the tree, then unchanged, then a delta with ref changes', async () => {
+    await openList();
+    const first = await delta();
+    expect(first.stdout).toContain('button "Row 29"');
+    expect(first.stdout.trimStart().startsWith('{')).toBe(false);
+
+    const same = await delta();
+    expect(same.stdout.trim()).toMatch(/^unchanged \(revision \d+\)$/);
+
+    await bctl(
+      'eval',
+      `document.querySelectorAll('#list button')[10].insertAdjacentHTML('afterend','<button>Added</button>')`,
+    );
+    const d = JSON.parse((await delta()).stdout) as {
+      kind: string;
+      baseRevision: number;
+      revision: number;
+      changes: { op: string; ref: string; node?: { name: string; role: string } }[];
+      treeChange: { startLine: number; deleteCount: number; lines: string[] };
+    };
+    expect(d.kind).toBe('delta');
+    expect(d.revision).toBe(d.baseRevision + 1);
+    expect(d.changes).toHaveLength(1);
+    expect(d.changes[0]).toMatchObject({ op: 'add', node: { name: 'Added', role: 'button' } });
+    expect(d.treeChange.deleteCount).toBe(0);
+    expect(d.treeChange.lines).toEqual([`- button "Added" [ref=${d.changes[0]?.ref.slice(1)}]`]);
+    expect(d.treeChange.startLine).toBeGreaterThan(10);
+
+    await bctl('eval', `document.querySelectorAll('#list button')[3].remove()`);
+    const rm = JSON.parse((await delta()).stdout) as { changes: { op: string }[] };
+    expect(rm.changes).toMatchObject([{ op: 'remove' }]);
+  });
+
+  it('--json shapes: unchanged and delta carry origin and a snapshot object', async () => {
+    await openList();
+    await delta();
+    const un = (await bctlJson('snapshot', '-i', '--delta')).data as {
+      origin: string;
+      snapshot: { kind: string; baseRevision: number; revision: number };
+    };
+    expect(un.origin).toBe(fixture('/form.html'));
+    expect(un.snapshot).toMatchObject({ kind: 'unchanged' });
+    expect(un.snapshot.revision).toBe(un.snapshot.baseRevision + 1);
+
+    await bctl('eval', `document.querySelectorAll('#list button')[0].textContent = 'Renamed'`);
+    const d = (await bctlJson('snapshot', '-i', '--delta')).data as {
+      snapshot: { kind: string; changes: object[] };
+    };
+    expect(d.snapshot.kind).toBe('delta');
+    expect(d.snapshot.changes).toMatchObject([{ field: 'name', op: 'replace', value: 'Renamed' }]);
+  });
+
+  it('--full returns the tree and resets the baseline; option sets have separate baselines', async () => {
+    await openList();
+    await delta();
+    const full = await bctl('snapshot', '-i', '--delta', '--full');
+    expect(full.stdout).toContain('button "Row 0"');
+    expect(full.stdout).not.toContain('unchanged');
+    const j = (await bctlJson('snapshot', '-i', '--full')).data as {
+      snapshot: { kind: string; revision: number; tree: string; refs: object };
+    };
+    expect(j.snapshot.kind).toBe('full');
+    expect(j.snapshot.tree).toContain('Row 0');
+    expect(Object.keys(j.snapshot.refs).length).toBeGreaterThan(30);
+    // a different option set has no baseline yet
+    expect((await bctl('snapshot', '--delta')).stdout).toContain('heading "Fixture Form"');
+    expect((await bctl('snapshot', '--delta')).stdout).toContain('unchanged');
+  });
+
+  it('a URL or document change returns the full tree', async () => {
+    await openList();
+    await delta();
+    await bctl('eval', `location.hash = '#moved'`);
+    expect((await delta()).stdout).toContain('button "Row 29"');
+    await bctl('open', fixture('/other.html'));
+    const after = (await delta()).stdout;
+    expect(after).toContain('button "Do nothing"');
+    expect(after).not.toContain('"kind"');
+  });
+
+  it('plain snapshots do not disturb the baseline', async () => {
+    await openList();
+    await delta();
+    await bctl('snapshot', '-i');
+    expect((await delta()).stdout).toMatch(/^unchanged/);
+  });
+});

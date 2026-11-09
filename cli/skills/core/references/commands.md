@@ -3,7 +3,7 @@
 ```
 open [url]   back   forward   reload   close
 tab [list | new [--label L] [url] | <tN|label> | close [tN|label]]
-snapshot [-i] [-c] [-d N] [-s <selector>] [-u] [@ref]   # --json: {origin,title,refs,removedRefs,snapshot}
+snapshot [-i] [-c] [-d N] [-s <selector>] [-u] [--delta] [--full] [@ref]   # --json: {origin,title,refs,removedRefs,snapshot}
 click <t> [--new-tab] [--right]   dblclick <t>   hover <t>   focus <t>
 fill <t> <text>   type <t> <text>   press <key>   keydown <key>   keyup <key>
 keyboard type|inserttext <text>   check <t>   uncheck <t>   select <t> <value...>

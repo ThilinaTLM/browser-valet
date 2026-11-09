@@ -12,7 +12,16 @@ import {
 } from '../dom';
 import { snapshot } from '../snapshot';
 import { computedStyles } from './extra';
-import { session } from '../state';
+import {
+  baselineKey,
+  computeDelta,
+  formatDelta,
+  formatUnchanged,
+  getBaseline,
+  nextRevision,
+  setBaseline,
+} from '../snapshot-diff';
+import { session, state } from '../state';
 import { sleep } from '../tabs';
 
 async function element(ctx: Ctx, target: string): Promise<Handle> {
@@ -76,7 +85,7 @@ export const inspectionCommands: Command[] = [
     show: Infinity,
     showFlags: ['depth', 'selector'],
     group: 'Reading',
-    usage: 'snapshot [-i] [-c] [-d N] [-s <selector>] [-u] [@ref]',
+    usage: 'snapshot [-i] [-c] [-d N] [-s <selector>] [-u] [--delta] [--full] [@ref]',
     summary: 'Accessibility tree with @refs for interaction',
     flags: [
       {
@@ -89,19 +98,25 @@ export const inspectionCommands: Command[] = [
       { name: 'depth', short: 'd', type: 'string', desc: 'Limit tree depth' },
       { name: 'selector', short: 's', type: 'string', desc: 'Scope to an element (CSS or @ref)' },
       { name: 'urls', short: 'u', type: 'bool', desc: 'Include link URLs' },
+      {
+        name: 'delta',
+        type: 'bool',
+        desc: 'Full tree once, then `unchanged` or only what changed since the last --delta',
+      },
+      { name: 'full', type: 'bool', desc: 'Full tree; with --delta also resets the baseline' },
     ],
     async run(ctx, a) {
       const id = await ctx.tab();
       const t = await chrome.tabs.get(id);
-      const snap = await snapshot(id, {
+      const opts = {
         interactive: a.has('interactive'),
         compact: a.has('compact'),
         depth: a.num('depth'),
         scope: a.str('selector') ?? a.pos[0],
         urls: a.has('urls'),
-        session: ctx.session,
-      });
-      return {
+      };
+      const snap = await snapshot(id, { ...opts, session: ctx.session });
+      const full = {
         text: snap.text,
         data: {
           origin: t.url,
@@ -109,6 +124,32 @@ export const inspectionCommands: Command[] = [
           refs: snap.refs,
           removedRefs: snap.removedRefs,
           snapshot: snap.text,
+        },
+      };
+      if (!a.has('delta') && !a.has('full')) return full;
+
+      // Baseline per tab and option set; `--full` returns the tree and resets it.
+      const key = baselineKey(id, JSON.stringify(opts));
+      const now = {
+        lines: snap.text.split('\n'),
+        refs: snap.refs,
+        url: t.url ?? '',
+        doc: state.refDocs[id],
+      };
+      const base = getBaseline(key);
+      const revision = nextRevision(id);
+      const result =
+        base && !a.has('full') && a.has('delta') ? computeDelta(base, now, revision) : undefined;
+      setBaseline(key, { ...now, revision });
+      if (result?.kind === 'unchanged') {
+        return { text: formatUnchanged(result), data: { origin: t.url, snapshot: result } };
+      }
+      if (result) return { text: formatDelta(result), data: { origin: t.url, snapshot: result } };
+      return {
+        text: snap.text,
+        data: {
+          origin: t.url,
+          snapshot: { kind: 'full', refs: snap.refs, revision, tree: snap.text },
         },
       };
     },

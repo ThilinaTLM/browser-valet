@@ -47,8 +47,8 @@ its number at the top-left. The number is the ref number.
 
 - Take a fresh interactive snapshot first (which updates the tab's refs, as `snapshot -i` does), so
   labels and refs always agree. Print the ref list after the save line in upstream's format
-  (`   [N] @eN role "name"`), so the agent gets both the image and the refs. With stable refs
-  ([snapshot-delta.md](snapshot-delta.md)), existing refs keep their numbers.
+  (`   [N] @eN role "name"`), so the agent gets both the image and the refs. Refs are stable
+  (see automation.md), so existing refs keep their numbers.
 - Get each ref's box with `DOM.getBoxModel`. Keep the refs that intersect the captured area.
 - **Draw the labels on the image in an `OffscreenCanvas`**, not by adding overlay elements to the
   page. Why: a shared tab is the user's live page, and adding DOM there is visible and can upset the

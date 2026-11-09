@@ -62,6 +62,14 @@ $ agent-browser fill @e13 "me@example.com"; agent-browser snapshot -i --delta
 }
 ```
 
+Further observations (0.41.2): the text for unchanged is `unchanged (revision N)`; the revision is
+one counter per session that every `--delta`/`--full` call increments (plain `snapshot` does not),
+baselines are per option set, a URL change (hash included) returns the full tree, and so does a
+delta whose pretty JSON is not shorter than the tree. `changes` entries are `{node:{name,role},op:"add",ref:"@e5"}`,
+`{op:"remove",ref}` and `{field:"name",op:"replace",ref,value}`; attribute-only changes give `changes: []`.
+`startLine` is 0-based. With `--json` the delta/unchanged object is `data.snapshot`; a full result is
+`data.snapshot = {kind:"full", refs, revision, tree}`. Cursor-interactive rules are in `automation.md`.
+
 The first `--delta` prints the plain tree. Later ones print the delta as pretty JSON **even without
 `--json`**. Unchanged (JSON): `"snapshot": {"baseRevision":2,"kind":"unchanged","revision":3}`.
 

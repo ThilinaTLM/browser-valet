@@ -9,6 +9,7 @@ import {
   type State,
   type TabMeta,
 } from '../shared';
+import { forgetBaselines } from './snapshot-diff';
 
 const initial = (): State => ({
   nextTid: 1,
@@ -185,6 +186,7 @@ export function forgetTab(tabId: number): void {
   delete state.tabs[tabId];
   delete state.refs[tabId];
   delete state.refDocs[tabId];
+  forgetBaselines(tabId);
   for (const s of Object.values(state.sessions)) if (s.tab === tabId) delete s.tab;
   state.approvals = state.approvals.filter((a) => a.tabId !== tabId);
   save();
