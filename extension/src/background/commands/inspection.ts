@@ -99,6 +99,7 @@ export const inspectionCommands: Command[] = [
         depth: a.num('depth'),
         scope: a.str('selector') ?? a.pos[0],
         urls: a.has('urls'),
+        session: ctx.session,
       });
       return {
         text: snap.text,

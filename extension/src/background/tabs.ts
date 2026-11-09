@@ -25,6 +25,7 @@ export async function revoke(tabId: number): Promise<void> {
     delete m.control;
     delete m.owner;
     delete state.refs[tabId];
+    delete state.refDocs[tabId];
     save();
   }
   await cdp.detach(tabId);

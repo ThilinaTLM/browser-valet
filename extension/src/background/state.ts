@@ -15,6 +15,7 @@ const initial = (): State => ({
   tabs: {},
   sessions: {},
   refs: {},
+  refDocs: {},
   approvals: [],
   log: [],
   conn: { status: 'waiting', paired: false },
@@ -183,12 +184,13 @@ export function findTab(ref: string): number | undefined {
 export function forgetTab(tabId: number): void {
   delete state.tabs[tabId];
   delete state.refs[tabId];
+  delete state.refDocs[tabId];
   for (const s of Object.values(state.sessions)) if (s.tab === tabId) delete s.tab;
   state.approvals = state.approvals.filter((a) => a.tabId !== tabId);
   save();
 }
 
-export function session(name: string): { tab?: number } {
+export function session(name: string): { tab?: number; nextRef?: number } {
   return (state.sessions[name] ??= {});
 }
 

@@ -67,8 +67,11 @@ export interface RefInfo {
 export interface State {
   nextTid: number;
   tabs: Record<number, TabMeta>;
-  sessions: Record<string, { tab?: number }>;
+  sessions: Record<string, { tab?: number; nextRef?: number }>;
+  /** Refs of the tab's current document (cleared on cross-document navigation). */
   refs: Record<number, Record<string, RefInfo>>;
+  /** Loader id of the main-frame document the tab's refs belong to. */
+  refDocs: Record<number, string>;
   approvals: Approval[];
   log: LogEntry[];
   conn: Connection;

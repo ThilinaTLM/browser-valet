@@ -2,10 +2,11 @@
 //   - button "Submit" [ref=e3]
 //   - textbox "Email" [ref=e4]: me@example.com
 
-import type { RefInfo } from '../shared';
 import * as cdp from './cdp';
 import { resolve, UserError } from './dom';
-import { save, state } from './state';
+import { RefTable } from './ref-table';
+import { syncDocument } from './refs';
+import { save, session, state } from './state';
 
 interface AXValue {
   value?: unknown;
@@ -33,6 +34,8 @@ export interface SnapshotOptions {
   depth?: number;
   scope?: string;
   urls: boolean;
+  /** Session whose ref counter numbers new refs. */
+  session: string;
 }
 
 interface Out {
@@ -125,11 +128,22 @@ async function iframeTree(tabId: number, node: AXNode): Promise<Tree | undefined
 export async function snapshot(
   tabId: number,
   opts: SnapshotOptions,
-): Promise<{ text: string; refs: Record<string, { role: string; name: string }> }> {
+): Promise<{
+  text: string;
+  refs: Record<string, { role: string; name: string }>;
+  removedRefs: string[];
+}> {
   await cdp.send(tabId, 'Accessibility.enable');
+  await syncDocument(tabId);
   const main = await axTree(tabId);
-  const refs: Record<string, RefInfo> = {};
-  let counter = 0;
+  const sess = session(opts.session);
+  const table = new RefTable(state.refs[tabId], sess.nextRef ?? 1);
+  const present = new Set<number>();
+  const note = (t: Tree) => {
+    for (const n of t.byId.values())
+      if (n.backendDOMNodeId !== undefined) present.add(n.backendDOMNodeId);
+  };
+  note(main);
 
   let start: { node: AXNode; tree: Tree } | undefined = main.root && {
     node: main.root,
@@ -185,8 +199,7 @@ export async function snapshot(
       }
       const refable = interactive || (NAMED_REF_ROLES.has(role) && name);
       if (node.backendDOMNodeId !== undefined && refable) {
-        const ref = `e${++counter}`;
-        refs[ref] = { backendNodeId: node.backendDOMNodeId, role, name };
+        const ref = table.assign(node.backendDOMNodeId, role, name);
         attrs.push(`ref=${ref}`);
       }
       if (attrs.length) line += ` [${attrs.join(', ')}]`;
@@ -205,6 +218,7 @@ export async function snapshot(
     }
     if (role === 'Iframe') {
       const sub = await iframeTree(tabId, node);
+      if (sub) note(sub);
       if (sub?.root) kids.push(...(await walk(sub.root, sub, childLevel, childName, false)));
     }
 
@@ -229,10 +243,10 @@ export async function snapshot(
   };
   render(opts.compact ? prune(roots) : roots, '');
 
-  state.refs[tabId] = refs;
+  // A scoped or depth-limited snapshot doesn't see the whole page, so it removes nothing.
+  const removedRefs = opts.scope || opts.depth !== undefined ? [] : table.prune(present);
+  state.refs[tabId] = table.refs;
+  sess.nextRef = table.counter;
   save();
-  const summary = Object.fromEntries(
-    Object.entries(refs).map(([k, v]) => [k, { role: v.role, name: v.name }]),
-  );
-  return { text: lines.join('\n') || '(no elements)', refs: summary };
+  return { text: lines.join('\n') || '(no elements)', refs: table.seen, removedRefs };
 }

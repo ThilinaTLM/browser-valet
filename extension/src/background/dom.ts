@@ -2,6 +2,7 @@
 // computing safe click points.
 
 import * as cdp from './cdp';
+import { syncDocument } from './refs';
 import { state } from './state';
 
 export interface Handle {
@@ -100,6 +101,7 @@ export async function evaluateHandle(tabId: number, expression: string): Promise
 
 async function resolveRef(tabId: number, target: string): Promise<Handle> {
   const ref = REF.exec(target)?.[1] ?? target;
+  await syncDocument(tabId); // refs of an earlier document are gone
   const info = state.refs[tabId]?.[ref];
   if (!info) throw new UserError(`Unknown ref: ${ref}. Run \`bctl snapshot\` to get fresh refs.`);
   try {

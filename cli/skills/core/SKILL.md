@@ -60,8 +60,13 @@ bctl snapshot -i                 # interactive elements with refs
 bctl fill @e1 "user@example.com"
 bctl click @e3
 bctl wait --url "**/dashboard"
-bctl snapshot -i                 # refs change after navigation: snapshot again
+bctl snapshot -i                 # after navigation old refs fail (Unknown ref): snapshot again
 ```
+
+Refs are stable: while the page stays the same document, re-snapshotting (also with or without
+`-i`) gives the same element the same `@eN`, and new elements get new numbers. A navigation or
+reload invalidates all refs; new refs keep counting upwards, so an old ref never points at a
+different element.
 
 ## Reading prose
 

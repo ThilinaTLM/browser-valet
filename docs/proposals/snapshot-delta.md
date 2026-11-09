@@ -21,7 +21,7 @@ agent-browser 0.41.2 solves both (see
 
 ## Design
 
-### 1. Stable, monotonic refs (do first; useful without delta)
+### 1. Stable, monotonic refs — implemented, see automation.md (do first; useful without delta)
 
 - Per tab: `backendNodeId → ref` map, plus a per-session counter `nextRef`.
 - At each snapshot, nodes already in the map keep their ref and new nodes take `e<nextRef++>`. Refs

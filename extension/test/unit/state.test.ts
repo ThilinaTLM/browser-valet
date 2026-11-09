@@ -15,8 +15,9 @@ beforeEach(async () => {
 const handedOff = (): State => ({
   nextTid: 7,
   tabs: { 11: { tid: 't6', control: 'user', label: 'docs' } },
-  sessions: { default: { tab: 11 } },
+  sessions: { default: { tab: 11, nextRef: 9 } },
   refs: { 11: { e1: { backendNodeId: 5, role: 'button', name: 'Go' } } },
+  refDocs: { 11: 'L1' },
   approvals: [{ id: 'a1', tabId: 11, session: 'default', ts: 1 }],
   log: [],
   conn: { status: 'connected', paired: true, managed: true, port: 1 },
@@ -64,7 +65,8 @@ describe('restoreHandoff (via loadState)', () => {
     await s.loadState();
     expect(s.state.nextTid).toBe(7);
     expect(s.state.tabs[11]).toEqual({ tid: 't6', control: 'user', label: 'docs' });
-    expect(s.state.sessions.default).toEqual({ tab: 11 });
+    expect(s.state.sessions.default).toEqual({ tab: 11, nextRef: 9 });
+    expect(s.state.refDocs[11]).toBe('L1');
     expect(s.state.refs[11]?.e1?.name).toBe('Go');
     expect(s.state.approvals).toEqual([]);
     expect(s.state.conn.status).toBe('waiting');
@@ -79,6 +81,21 @@ describe('restoreHandoff (via loadState)', () => {
     expect(s.state.nextTid).toBe(3);
     expect(s.state.log).toEqual([]);
     expect(s.state.sessions).toEqual({});
+    expect(s.state.refDocs).toEqual({});
+  });
+
+  it('accepts a handoff from before stable refs (no refDocs, no session nextRef)', async () => {
+    const old = {
+      nextTid: 3,
+      tabs: {},
+      sessions: { default: { tab: 4 } },
+      refs: { 4: { e1: { backendNodeId: 5, role: 'button', name: 'Go' } } },
+    };
+    mock.local.data = { handoff: { state: old, ts: Date.now() }, secret: 's' };
+    await s.loadState();
+    expect(s.state.refDocs).toEqual({});
+    expect(s.session('default').nextRef).toBeUndefined(); // snapshot starts at e1 (+ max ref)
+    expect(s.state.refs[4]?.e1?.name).toBe('Go');
   });
 
   it('ignores a stale handoff (older than 60 s) but still removes it', async () => {
@@ -120,9 +137,13 @@ describe('persistence and tab ids', () => {
     expect(s.meta(20).tid).toBe('t2');
     expect(s.meta(10).tid).toBe('t1');
     s.session('default').tab = 10;
+    s.state.refs[10] = {};
+    s.state.refDocs[10] = 'L';
     s.state.approvals.push({ id: 'x', tabId: 10, session: 'default', ts: 0 });
     s.forgetTab(10);
     expect(s.state.tabs[10]).toBeUndefined();
+    expect(s.state.refs[10]).toBeUndefined();
+    expect(s.state.refDocs[10]).toBeUndefined();
     expect(s.session('default').tab).toBeUndefined();
     expect(s.state.approvals).toEqual([]);
     expect(s.meta(30).tid).toBe('t3'); // never reused
