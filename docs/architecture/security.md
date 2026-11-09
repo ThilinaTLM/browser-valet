@@ -64,7 +64,7 @@ The user's policy lives in `chrome.storage.local` key `guardrails` (set in the p
 ## Trust boundaries
 
 - **The extension is trusted by the CLI.** The CLI writes `res.files[].path` without confining it. `upload` reads any path the CLI resolves. Anyone who can authenticate as `ext` can write files as the user, which is why the auth rules above are MUST.
-- **The local filesystem is not a boundary.** `bctl` runs as the user, and the agent already has shell access. So `upload`, `screenshot <path>` and opening `file://` URLs are allowed, as in agent-browser. The consent boundary is the browser profile (tabs, sessions, logins), not files.
+- **The local filesystem is not a boundary.** `bvl` runs as the user, and the agent already has shell access. So `upload`, `screenshot <path>` and opening `file://` URLs are allowed, as in agent-browser. The consent boundary is the browser profile (tabs, sessions, logins), not files.
 - **Page content is untrusted data.** Snapshots and text are passed through unchanged (optionally wrapped in nonce markers, see [Guardrails](#guardrails)), and the skills tell agents not to follow instructions found in page content. `eval` runs arbitrary JS with a user gesture by design.
 - **Blocked URLs:** navigation refuses `chrome*`, `edge*`, `brave*` and `about:` URLs (except `about:blank`). Chrome itself refuses to attach to its own pages and the Web Store.
 

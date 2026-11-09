@@ -1,7 +1,7 @@
 # Architecture
 
-Browser Bridge lets coding agents drive the user's **real**, day-to-day Chromium browser (logins,
-cookies, open tabs) through `bctl`, instead of a separate test instance. Its commands stay close to
+Browser Valet lets coding agents drive the user's **real**, day-to-day Chromium browser (logins,
+cookies, open tabs) through `bvl`, instead of a separate test instance. Its commands stay close to
 [agent-browser](https://github.com/vercel-labs/agent-browser), which agents already know. It has three parts: a thin Rust CLI, a stateless relay proxy (the same
 binary), and an MV3 TypeScript extension that owns all state and logic. It is pre-1.0 (0.x). CI
 builds and tests the CLI on Linux, macOS and Windows. The extension has unit tests and a small
@@ -10,7 +10,7 @@ expected to work, but they are not tested.
 
 ```mermaid
 flowchart LR
-  CLI["bctl CLI"] -->|WS, mutual HMAC| P["bctl proxy (127.0.0.1)"]
+  CLI["bvl CLI"] -->|WS, mutual HMAC| P["bvl proxy (127.0.0.1)"]
   EXT["Extension (source of truth)"] -->|WS, mutual HMAC, pinned Origin| P
   EXT -->|chrome.debugger / CDP| T[user's tabs]
 ```
@@ -34,7 +34,7 @@ flowchart LR
 | `cli/src/main.rs` (CLI) | argv capture, config file, proxy auto-start, executing `res` (print, write `files`), CLI-local commands | command parsing, help text, formatting, browser state |
 | `cli/src/proxy.rs` (proxy) | auth, Origin check, relaying req/event/res/cancel by id, idle exit, triggering managed updates | durable state, knowledge of command semantics |
 | `cli/src/embed.rs`, `setup.rs`, `build.rs` | embedded extension + skills, managed folder, `setup`/`skills` | anything the extension must decide at runtime |
-| `cli/skills/` | agent guide sources (`bctl skills get`) | version-specific facts not matching the binary |
+| `cli/skills/` | agent guide sources (`bvl skills get`) | version-specific facts not matching the binary |
 | `extension/src/background/` | sessions, tabs, grants, refs, parsing, help, output formatting, CDP, consent, activity log | assumptions that the proxy keeps state |
 | `extension/src/popup/`, `static/` | consent UI, status, pairing, Nerve theme | logic the worker needs (popup may be closed) |
 
@@ -75,7 +75,7 @@ Do not reintroduce these without a proposal ([proposals](../proposals/README.md)
 
 - Stateful daemon, or argument parsing in the CLI (replaced by the thin CLI and stateless proxy in v0.2).
 - `.crx` or self-hosted extension install: Chrome rejects off-store `.crx`. Load unpacked from the managed folder.
-- Manual pairing as the default flow: `pairing.json` in the managed folder replaces it. `bctl pair` remains for dev builds.
+- Manual pairing as the default flow: `pairing.json` in the managed folder replaces it. `bvl pair` remains for dev builds.
 - Cookies/storage/state commands, network interception (routing, mocking, blocking, header changes), video/trace, and emulation beyond `set viewport` / `set media` on agent tabs (no `set device/geo/offline/headers/credentials`): they would modify the real profile, change what servers see, or aren't needed. `pdf` is allowed (read-only). Read-only network *observation* (`network requests`) is allowed under the redaction rules in [security.md](security.md).
 - Firefox support: there is no `chrome.debugger` there.
 

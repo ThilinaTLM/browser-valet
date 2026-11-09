@@ -7,8 +7,8 @@ Message formats: [protocol.md](protocol.md).
 ## Rules
 
 - **MUST** keep the proxy free of durable state. Its memory holds only the extension connection, pending requests and the idle clock. *Why:* the CLI starts it on demand and it exits when idle. Anything stored there would be lost silently.
-- **MUST** keep the managed folder path (`<config>/browser-bridge/extension`) and the `config.json` / `pairing.json` keys (`secret`, `port`) stable. *Why:* the user picked that folder once in Load unpacked. Moving it or renaming keys strands every install.
-- **MUST** auto-update only managed extensions, and only when the binary embeds an extension of a different version. *Why:* a dev build loaded from `extension/dist` must never be overwritten. `bctl status` only reports its mismatch.
+- **MUST** keep the managed folder path (`<config>/browser-valet/extension`) and the `config.json` / `pairing.json` keys (`secret`, `port`) stable. *Why:* the user picked that folder once in Load unpacked. Moving it or renaming keys strands every install.
+- **MUST** auto-update only managed extensions, and only when the binary embeds an extension of a different version. *Why:* a dev build loaded from `extension/dist` must never be overwritten. `bvl status` only reports its mismatch.
 - **Default:** new fields in the extension's `State` must have a default in `initial()`. *Why:* stored and handed-off state is spread over `initial()`, so state from an older version lacks the field.
 - **Default:** `State.sessions[s].sites` (hosts the session has visited, for `navigate-new-site`) and `Approval.action` are optional; code treats a missing value as empty/none, so state from an older version still loads.
 - **Default:** the user's guardrail policy (`guardrails` in `chrome.storage.local`: `maxOutput`, `contentBoundaries`, `allowedDomains`, `confirm`) is read by `loadGuardrails` through `sanitize`, so a missing or malformed key falls back to `DEFAULT_GUARDRAILS` (everything off). It is not part of `State`, so it is untouched by handoff and by revoke. *Why:* it is the user's setting, not session state; turning the switch off must not erase it.
@@ -19,7 +19,7 @@ Message formats: [protocol.md](protocol.md).
 | Process / store | Lifetime | Survives |
 |---|---|---|
 | CLI | one command | — |
-| Proxy | started detached by the CLI on demand. Exits after `BCTL_IDLE_TIMEOUT` (default 600 s, `0` = never) with no requests in flight. Pings don't count as activity. | nothing; it holds no durable state |
+| Proxy | started detached by the CLI on demand. Exits after `BVL_IDLE_TIMEOUT` (default 600 s, `0` = never) with no requests in flight. Pings don't count as activity. | nothing; it holds no durable state |
 | Extension service worker | killed by Chrome when idle. The 20 s keep-alive ping and a 30 s alarm limit this. | `chrome.storage.session` |
 | `chrome.storage.session` `state` (tabs, grants, sessions, refs, iframe sessions, frame scope, approvals, log) | until the extension is reloaded or disabled, or the browser restarts | SW and proxy restarts; self-update (via handoff) |
 | `chrome.storage.local` (`secret`, `port`, `enabled`, `paired`, `handoff`, `updateTried`, `guardrails`) | persistent | everything except uninstall |
@@ -27,7 +27,7 @@ Message formats: [protocol.md](protocol.md).
 
 ## Persisted files (CLI side)
 
-All under `<config>/browser-bridge` (`dirs::config_dir()`, overridable with `BCTL_CONFIG_DIR`):
+All under `<config>/browser-valet` (`dirs::config_dir()`, overridable with `BVL_CONFIG_DIR`):
 
 | File | Content | Notes |
 |---|---|---|
@@ -41,7 +41,7 @@ All under `<config>/browser-bridge` (`dirs::config_dir()`, overridable with `BCT
 
 ```mermaid
 sequenceDiagram
-  participant C as new bctl CLI
+  participant C as new bvl CLI
   participant P as proxy
   participant E as extension (old)
   C->>P: auth → welcome(version old)
@@ -61,13 +61,13 @@ Request lifecycle rules (in the proxy):
 
 - Every `req` is owned by a drop guard in `request`. On any exit (final `res`, failed write to the CLI, CLI disconnect, cancelled task) it removes the pending entry, and if the entry was still pending it sends `cancel` to the extension. A request that was already answered or failed is never cancelled twice.
 - `shutdown` fails every pending request with a `res` (exit 1, "proxy is shutting down") and sends `cancel` to the extension, then waits up to 1 s for those replies to be written before exiting.
-- A CLI that sees a different proxy version asks `status` first. If `proxy.pending` is above 0 it does **not** restart the proxy: it exits with an error naming the conflict. Use one bctl version at a time; otherwise two versions would restart each other's proxy in a loop. A proxy without `pending` (older) counts as idle.
+- A CLI that sees a different proxy version asks `status` first. If `proxy.pending` is above 0 it does **not** restart the proxy: it exits with an error naming the conflict. Use one bvl version at a time; otherwise two versions would restart each other's proxy in a loop. A proxy without `pending` (older) counts as idle.
 
 ## Gotchas
 
-- `bctl status` starts a proxy if none is running, so that it can report the extension. This is intended: any `bctl` command would start it anyway.
+- `bvl status` starts a proxy if none is running, so that it can report the extension. This is intended: any `bvl` command would start it anyway.
 - On Windows the proxy is spawned with `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`. On Unix it gets its own process group. This path has no automated tests.
-- `BCTL_EXT_WAIT_MS` (how long a request waits for an extension, default 10 s) is a test hook that production code also reads.
+- `BVL_EXT_WAIT_MS` (how long a request waits for an extension, default 10 s) is a test hook that production code also reads.
 - Writing the managed folder is synchronous inside the async proxy. That is fine at its size, but don't add heavy work there.
 - `chrome.storage.session` has a 10 MB quota, and the whole `state`, including refs, is rewritten on every change (coalesced per microtask). Keep refs and the log bounded.
 

@@ -1,32 +1,32 @@
-# Browser Bridge wire protocol (v1)
+# Browser Valet wire protocol (v1)
 
 Contract between CLI, proxy and extension. Rules and change risk: [security.md](security.md),
 [runtime.md](runtime.md). Proxy tests: `cli/tests/relay.rs`.
 
 Three parties:
 
-- **CLI** (`bctl …`) — thin client. Sends raw argv, prints what comes back.
-- **Proxy** (`bctl proxy`, same binary) — stateless relay on `127.0.0.1`. Auto-started by the CLI,
+- **CLI** (`bvl …`) — thin client. Sends raw argv, prints what comes back.
+- **Proxy** (`bvl proxy`, same binary) — stateless relay on `127.0.0.1`. Auto-started by the CLI,
   exits after an idle period.
 - **Extension** — the source of truth. Parses argv, runs commands, owns all state, formats output.
 
 All messages are JSON text frames over one WebSocket endpoint: `ws://127.0.0.1:<port>/`
-(default port `47823`, override with env `BCTL_PORT`).
+(default port `47823`, override with env `BVL_PORT`).
 
 ## Pairing secret
 
 The secret is 32 random bytes, base64url-encoded with no padding. There are two ways to share it:
 
-- **Managed (default):** `bctl setup` generates the secret and writes the bundled extension to
-  `<config_dir>/browser-bridge/extension/`, adding `pairing.json` (`{"secret": "...", "port": 47823}`,
+- **Managed (default):** `bvl setup` generates the secret and writes the bundled extension to
+  `<config_dir>/browser-valet/extension/`, adding `pairing.json` (`{"secret": "...", "port": 47823}`,
   mode 0600). The user loads that folder as an unpacked extension. The extension fetches
   `chrome.runtime.getURL("pairing.json")` (`cache: no-store`) at startup and before every connection
-  attempt, so re-pairing (`bctl setup`, `bctl pair`) needs no reload. If the file exists, it overrides
+  attempt, so re-pairing (`bvl setup`, `bvl pair`) needs no reload. If the file exists, it overrides
   the secret and port stored in the extension. The file is not web-accessible.
 - **Manual (development builds loaded from `extension/dist`):** the extension generates the secret
-  and shows a pairing command, `bctl pair <secret>`.
+  and shows a pairing command, `bvl pair <secret>`.
 
-The CLI stores the secret in `<config_dir>/browser-bridge/config.json`
+The CLI stores the secret in `<config_dir>/browser-valet/config.json`
 (`{"secret": "...", "port": 47823}`; file mode 0600 on Unix). `config_dir` = `dirs::config_dir()`
 (`~/.config` on Linux, `~/Library/Application Support` on macOS, `%APPDATA%` on Windows).
 The proxy reads the secret from the same file at startup. The secret is never sent on the wire.
@@ -41,11 +41,13 @@ Origin rule (checked at WebSocket upgrade):
   This ID is pinned by the `key` in the extension manifest.
 - Any other `Origin` (web pages, other extensions) → reject with HTTP 403.
 
+The `bctl1` HMAC label below predates the rename to Browser Valet / `bvl` and is intentionally kept: it is a protocol tag, not branding.
+
 Handshake:
 
 1. Proxy → client: `{"t":"challenge","nonce":"<Np>"}` (Np = 32 random bytes, hex)
 2. Client → proxy: `{"t":"auth","role":"cli"|"ext","nonce":"<Nc>","mac":"<HMAC(key, "bctl1|client|" + role + "|" + Np + "|" + Nc)>","version":"<client version>","info":{...optional}}`
-3. Proxy verifies (constant-time). On failure: `{"t":"error","error":"authentication failed (re-pair with `bctl pair`)"}` then close.
+3. Proxy verifies (constant-time). On failure: `{"t":"error","error":"authentication failed (re-pair with `bvl pair`)"}` then close.
    On success: `{"t":"welcome","mac":"<HMAC(key, "bctl1|server|" + role + "|" + Nc + "|" + Np)>","version":"<proxy version>"}`
 4. Client verifies the server MAC and closes the connection if it is wrong (protects against
    another process squatting the port while the proxy is down).
@@ -58,8 +60,8 @@ Any message other than `auth` before authentication → close.
 
 - Only one extension connection is active. A newly authenticated `ext` replaces the old one
   (the old socket is closed).
-- `info` in the ext auth message: `{"browser": "Google Chrome 157", "extVersion": "0.3.0", "managed": true}`
-  (`managed` = `pairing.json` was found, so the extension runs from the folder `bctl` manages).
+- `info` in the ext auth message: `{"browser": "Google Chrome 157", "extVersion": "0.1.0", "managed": true}`
+  (`managed` = `pairing.json` was found, so the extension runs from the folder `bvl` manages).
 - The extension sends `{"t":"ping"}` every ~20 s to keep its service worker alive. The proxy ignores pings
   (they do **not** count as activity for the idle timer).
 
@@ -83,7 +85,7 @@ The extension then:
 Loop guard: the extension records the target version and time (`updateTried`). If it is still
 running a different version, it ignores another update to the same version for 10 minutes.
 
-The proxy never updates non-managed extensions; `bctl status` only reports their version mismatch.
+The proxy never updates non-managed extensions; `bvl status` only reports their version mismatch.
 ## CLI requests
 
 After `welcome`, the CLI sends exactly one message and waits:
@@ -96,12 +98,12 @@ After `welcome`, the CLI sends exactly one message and waits:
 
 ```json
 {
-  "argv": ["snapshot", "-i"],          // everything after `bctl`
+  "argv": ["snapshot", "-i"],          // everything after `bvl`
   "cwd": "/home/me/project",           // absolute
   "tmp": "/tmp",                       // absolute temp dir (std::env::temp_dir)
   "sep": "/",                          // path separator ("\\" on Windows)
   "platform": "linux",                 // linux | macos | windows
-  "session": "default",                // from env BCTL_SESSION, else "default"
+  "session": "default",                // from env BVL_SESSION, else "default"
   "stdin": "…"                         // only when argv contains "--stdin": all of stdin as UTF-8
 }
 ```
@@ -116,8 +118,8 @@ Proxy behaviour for `req`:
 4. If the extension disconnects before answering → `res` with `stderr` "browser extension disconnected", `exitCode` 1.
 5. Whenever the request ends without a final `res` from the extension (CLI disconnects, a write to the CLI fails) → send `{"t":"cancel","id":<id>}` to the extension and forget it.
 
-Each `req` counts as activity for the idle timer (default 600 s, `BCTL_IDLE_TIMEOUT` seconds or
-`bctl proxy --idle-timeout <secs>`; `0` disables). The idle timer is not reset while a request is in
+Each `req` counts as activity for the idle timer (default 600 s, `BVL_IDLE_TIMEOUT` seconds or
+`bvl proxy --idle-timeout <secs>`; `0` disables). The idle timer is not reset while a request is in
 flight. On idle expiry the proxy exits.
 
 `res` object (produced by the extension; the CLI just executes it):
@@ -161,6 +163,6 @@ start a proxy. `--fix` does only safe repairs: chmod 0600 on `config.json`, rewr
 folder, restart an idle proxy (never one with pending requests). It never re-pairs. Without
 `--quick` it starts the proxy on demand, like every other command.
 
-If the proxy is not reachable, the CLI starts `bctl proxy` detached (Unix: own process group;
+If the proxy is not reachable, the CLI starts `bvl proxy` detached (Unix: own process group;
 Windows: `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`), logging to
-`<config_dir>/browser-bridge/proxy.log`, then retries for up to 3 s.
+`<config_dir>/browser-valet/proxy.log`, then retries for up to 3 s.

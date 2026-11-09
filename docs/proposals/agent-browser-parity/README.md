@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Area:** automation, security
 
-This is the umbrella record for comparing bctl with agent-browser. It is based on the agent-browser
+This is the umbrella record for comparing bvl with agent-browser. It is based on the agent-browser
 core skill and on running agent-browser 0.41.2 against local fixtures
 ([observed-output.md](observed-output.md)). Each gap worth building has its own proposal. This page
 lists where each item stands and why.

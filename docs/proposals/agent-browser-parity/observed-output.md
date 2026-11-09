@@ -9,7 +9,7 @@ from the excerpts below. It is daemon noise and not worth copying.
 ## Snapshot
 
 The docs show `@e1 [heading] "Log in"` with a `Page:`/`URL:` header. **The binary does not print
-that.** It prints the same format as bctl:
+that.** It prints the same format as bvl:
 
 ```
 $ agent-browser snapshot -i
@@ -28,15 +28,15 @@ $ agent-browser snapshot -i
 - link "Privacy Policy" [ref=e4, url=http://localhost:8731/privacy]   # with -u
 ```
 
-Differences from bctl:
+Differences from bvl:
 
 - **Cursor-interactive elements:** a `<div onclick … style="cursor:pointer">` gets a ref and the suffix
   `clickable [cursor:pointer, onclick]`. In `-i` mode its text is lifted into the name
-  (`generic "Clickable div"`). bctl gives such a div no ref.
+  (`generic "Clickable div"`). bvl gives such a div no ref.
 - **Refs are stable and monotonic:** the full snapshot, the `-i` snapshot and later snapshots of the
   same page all give the same element the same ref. Numbers are not in document order. After a
   navigation the counter **keeps rising** (refs `e40…`, `e52…`, `e67…`), so a ref from an old page
-  fails with `✗ Unknown ref: e60` instead of hitting a different element. bctl renumbers from `e1`
+  fails with `✗ Unknown ref: e60` instead of hitting a different element. bvl renumbers from `e1`
   on every snapshot.
 - **Cross-site iframes are inlined** with working refs:
 
@@ -47,7 +47,7 @@ Differences from bctl:
   ```
 
 - `--json` data: `{ origin, refs: {eN: {name, role}}, removedRefs: [], snapshot }`.
-  bctl: `{ snapshot, refs, origin, title }`.
+  bvl: `{ snapshot, refs, origin, title }`.
 
 ### `--delta`
 
@@ -96,7 +96,7 @@ tag at the top-left of each box. The label number is the same as the ref number.
 
 | Command | Output |
 |---|---|
-| `open <url>` | `✓ <title>` / `  <url>` (same as bctl) |
+| `open <url>` | `✓ <title>` / `  <url>` (same as bvl) |
 | `click`, `fill`, `type`, `check`, `select`, `press`, `hover`, `scroll`, `dialog accept` | `✓ Done` |
 | `wait --text "Welcome back"` | `Welcome back` (prints what matched) |
 | `wait --url "**/dashboard"` | `http://localhost:8731/dashboard` (prints the matched URL) |
