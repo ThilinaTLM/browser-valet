@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Net</title>
+  </head>
+  <body>
+    <h1>Fixture Net</h1>
+    <button type="button" id="go">Fetch</button>
+    <script>
+      function run() {
+        fetch('/api/ok?access_token=QUERYSECRET&page=2', {
+          headers: { 'X-Api-Key': 'KEYSECRET', 'X-Trace': 'visible-trace' },
+        });
+        fetch('/api/missing');
+        fetch('/api/boom', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer BEARERSECRET' },
+          body: JSON.stringify({
+            user: 'ada',
+            password: 'PWSECRET',
+            nested: { client_secret: 'CSSECRET' },
+          }),
+        });
+        fetch('/api/ok', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'name=ada&password=FORMSECRET&q=1',
+        });
+      }
+      document.getElementById('go').addEventListener('click', run);
+      document.cookie = 'visible=ONE';
+    </script>
+  </body>
+</html>

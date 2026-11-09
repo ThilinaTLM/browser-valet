@@ -88,11 +88,30 @@ const MIME: Record<string, string> = {
   '.txt': 'text/plain',
 };
 
+/** Dynamic JSON routes for network tests: /api/ok (200 + Set-Cookie), /api/missing (404), /api/boom (500). */
+function serveApi(path: string, res: import('node:http').ServerResponse): void {
+  const routes: Record<string, [number, unknown]> = {
+    '/api/ok': [200, { message: 'hello', access_token: 'tok-SECRET-123', user: { id: 7 } }],
+    '/api/missing': [404, { error: 'not found', detail: 'validation failed' }],
+    '/api/boom': [500, { error: 'boom' }],
+  };
+  const [status, body] = routes[path] ?? [404, { error: 'no such route' }];
+  res.writeHead(status, {
+    'content-type': 'application/json',
+    'set-cookie': 'sid=SESSIONSECRET; HttpOnly',
+  });
+  res.end(JSON.stringify(body));
+}
+
 /** Serves test/e2e/fixtures/ on 127.0.0.1. */
 function serveFixtures(): Promise<{ server: Server; url: string }> {
   const root = join(import.meta.dirname, 'fixtures');
   const server = createServer((req, res) => {
     const path = new URL(req.url ?? '/', 'http://x').pathname;
+    if (path.startsWith('/api/')) {
+      serveApi(path, res);
+      return;
+    }
     const file = join(root, normalize(path === '/' ? '/index.html' : path));
     if (!file.startsWith(root)) {
       res.writeHead(403).end();
