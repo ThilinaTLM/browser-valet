@@ -42,7 +42,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 | [activity-log-redaction.md](activity-log-redaction.md) | security | Draft |
 | [stale-approvals.md](stale-approvals.md) | security | Draft |
 | [debugger-attach-conflict.md](debugger-attach-conflict.md) | automation | Draft |
-| [extension-tests.md](extension-tests.md) | development | Draft |
 | [agent-browser-parity/](agent-browser-parity/README.md) | automation, security | Draft (umbrella) |
 | [snapshot-delta.md](snapshot-delta.md) | automation | Draft |
 | [snapshot-parity.md](snapshot-parity.md) | automation | Draft |
@@ -64,7 +63,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 - [ ] Redact all free-text arguments in the activity log: [activity-log-redaction.md](activity-log-redaction.md)
 - [ ] Clear orphaned approvals after a service-worker restart: [stale-approvals.md](stale-approvals.md)
 - [ ] Detect DevTools holding the debugger: [debugger-attach-conflict.md](debugger-attach-conflict.md)
-- [ ] Add extension tests: [extension-tests.md](extension-tests.md)
 
 ### agent-browser parity
 

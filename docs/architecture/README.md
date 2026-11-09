@@ -4,8 +4,8 @@ Browser Bridge lets coding agents drive the user's **real**, day-to-day Chromium
 cookies, open tabs) through `bctl`, instead of a separate test instance. Its commands stay close to
 [agent-browser](https://github.com/vercel-labs/agent-browser), which agents already know. It has three parts: a thin Rust CLI, a stateless relay proxy (the same
 binary), and an MV3 TypeScript extension that owns all state and logic. It is pre-1.0 (0.x). CI
-builds and tests the CLI on Linux, macOS and Windows. The extension has no automated tests, and
-browser behaviour is verified by hand in Chrome only. Edge, Brave and other Chromium browsers are
+builds and tests the CLI on Linux, macOS and Windows. The extension has unit tests and a small
+Chrome-for-Testing E2E smoke suite on Linux; other browser behaviour is verified by hand. Edge, Brave and other Chromium browsers are
 expected to work, but they are not tested.
 
 ```mermaid
