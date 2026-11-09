@@ -16,6 +16,7 @@ import { inspectionCommands } from './commands/inspection';
 import { interactionCommands } from './commands/interaction';
 import { navigationCommands } from './commands/navigation';
 import { readCommands } from './commands/read';
+import { networkCommands } from './commands/network';
 import { UserError } from './dom';
 import { log, meta } from './state';
 
@@ -27,6 +28,7 @@ const COMMANDS: Command[] = [
   ...inspectionCommands,
   ...readCommands,
   ...extraCommands,
+  ...networkCommands,
 ];
 const GROUPS = ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging'];
 

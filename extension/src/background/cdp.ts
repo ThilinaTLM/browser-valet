@@ -17,6 +17,12 @@ const attached = new Set<number>();
 const events = new Map<number, TabEvents>();
 const listeners = new Set<(tabId: number, method: string, params: unknown) => void>();
 const MAX_BUFFER = 500;
+const detachListeners = new Set<(tabId: number) => void>();
+
+/** Called whenever a tab's debugger session ends (revoke, user detach, navigation swap). */
+export function onDetached(fn: (tabId: number) => void): void {
+  detachListeners.add(fn);
+}
 
 /** Called when the user dismisses Chrome's "is debugging this browser" bar. */
 let onUserDetach: (tabId: number) => void = () => undefined;
@@ -74,6 +80,7 @@ export async function attach(tabId: number): Promise<void> {
 export async function detach(tabId: number): Promise<void> {
   attached.delete(tabId);
   events.delete(tabId);
+  for (const fn of detachListeners) fn(tabId);
   try {
     await chrome.debugger.detach({ tabId });
   } catch {
@@ -142,5 +149,6 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   if (source.tabId === undefined) return;
   attached.delete(source.tabId);
   events.delete(source.tabId);
+  for (const fn of detachListeners) fn(source.tabId);
   if (reason === 'canceled_by_user') onUserDetach(source.tabId);
 });
