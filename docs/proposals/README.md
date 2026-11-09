@@ -40,7 +40,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 | Proposal | Area | Status |
 |---|---|---|
 | [agent-browser-parity/](agent-browser-parity/README.md) | automation, security | Draft (umbrella) |
-| [cross-origin-frames.md](cross-origin-frames.md) | automation | Draft |
 | [agent-guardrails.md](agent-guardrails.md) | security | Draft |
 | [page-audits.md](page-audits.md) | automation | Draft |
 
@@ -50,7 +49,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 
 Overview and priorities: [agent-browser-parity/](agent-browser-parity/README.md).
 
-- [ ] Cross-origin iframes and `frame`: [cross-origin-frames.md](cross-origin-frames.md)
 - [ ] Guardrails (needs security sign-off): [agent-guardrails.md](agent-guardrails.md)
 - [ ] `a11y` / `vitals`: [page-audits.md](page-audits.md)
 

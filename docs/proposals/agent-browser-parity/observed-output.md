@@ -192,6 +192,34 @@ Use tokens.
 …
 ```
 
+## Frames
+
+Fixture: `frames.html` (127.0.0.1) embeds `frame-inner.html` from `localhost` (cross-site, so out of
+process), which embeds `frame-deep.html`. Run on 0.41.2:
+
+```
+$ agent-browser snapshot -i
+- heading "Frames Host" [level=1, ref=e1]
+- button "Host button" [ref=e2]
+- Iframe "payment-frame" [ref=e3]         # -i keeps the Iframe line
+  - heading "Payment" [level=2, ref=e4]
+  - textbox "Card number " [ref=e7]
+  - button "Pay" [ref=e5]
+  - Iframe "deep-frame" [ref=e6]
+$ agent-browser frame @e3                 # ✓ Done; --json data {"frame":"payment-frame", lifecycle…}
+$ agent-browser snapshot -i               # now starts at the frame's document (no Iframe line)
+- heading "Payment" [level=2, ref=e4]
+…
+$ agent-browser get text h2               # Payment   (scoped)
+$ agent-browser eval 'location.href'      # still the MAIN page URL; get title: main title
+$ agent-browser wait --fn "document.title==='Frame Inner'"   # times out (main frame)
+$ agent-browser frame "#inner"            # ✗ Frame not found (also iframe#inner, name, url)
+$ agent-browser frame nonexist            # ✗ Could not find frame for selector
+$ agent-browser frame @e1                 # ✗ Ref does not point to an iframe element
+$ agent-browser frame                     # Missing arguments for: frame / Usage: agent-browser frame <selector|main>
+$ agent-browser frame main                # ✓ Done  (--json data {"frame":"main", …})
+```
+
 ## Help
 
 - `agent-browser --help`: a "Start here (for AI agents)" block pointing to `skills get core`, then

@@ -79,6 +79,12 @@ spans, `tabindex`) get a ref too, marked `clickable [cursor:pointer, onclick]` (
 `focusable [tabindex]`). In `-i` their text is the name. Listeners added with `addEventListener`
 are not detected; use `find text` or a CSS selector for those.
 
+Iframes (also cross-origin ones such as payment or SSO widgets) are inlined in the snapshot under
+their `Iframe` line, and their refs work with `click`, `fill`, etc. like any other. To use CSS
+selectors, `eval` or `get` inside one, scope to it: `bctl frame @e3` (or a selector, name or URL),
+and `bctl frame main` to go back. Navigation resets the scope. Dialogs inside cross-origin iframes
+are not auto-accepted, and `drag` does not work there.
+
 ## Reading prose
 
 For docs and articles use `bctl read [url]` (markdown of the main content, no nav) instead of a
@@ -88,7 +94,7 @@ snapshot: `--outline` lists headings, `--filter <text>` returns matching section
 ## Commands (summary)
 
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
-`select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`,
+`select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`, `frame`,
 `read`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 `screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
 Full list with arguments and global flags: `bctl skills get core --ref commands`.

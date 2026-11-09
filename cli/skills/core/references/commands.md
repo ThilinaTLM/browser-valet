@@ -11,6 +11,7 @@ scroll [up|down|left|right] [px] [--selector <t>]   scrollintoview <t>
 drag <src> <dst>   upload <t> <files...>
 mouse move <x> <y> [--duration ms] [--steps n]   mouse down|up [left|right|middle]   mouse wheel <dy> [dx]
 highlight <t>   pushstate <url>   session list|info
+frame <selector|@ref|name|url|main>   # scope snapshot, selectors, get, eval, wait --fn to an iframe
 find role|text|label|placeholder|alt|title|testid <value> <action> [value] [--name n] [--exact]
 find first|last <selector> <action> [value]   find nth <n> <selector> <action> [value]
 get text|html|value|attr|title|url|count|box [t] [attr]   get styles <t> [prop...] [--all]   is visible|enabled|checked <t>
@@ -28,6 +29,7 @@ network request <id>
 
 `<t>` is a ref (`@e3`), a CSS selector, or an XPath (starts with `/` or `(`, e.g. `//button[@type='submit']`).
 `get styles` prints a curated set (`--all` for every computed property, or name the properties).
+`frame` scopes later commands to an iframe until `frame main` or a navigation; `get title|url` stay on the tab.
 `highlight` outlines the element for 3 s. `pushstate` does client-side navigation (same origin only).
 `mouse` is for canvases, maps and sliders; on a background tab `mouse wheel` scrolls by script. Global flags: `--json`, `--session <name>`,
 `--timeout <ms>` (default 25000). `bctl <command> --help` shows details and examples.

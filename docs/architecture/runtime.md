@@ -19,7 +19,7 @@ Message formats: [protocol.md](protocol.md).
 | CLI | one command | — |
 | Proxy | started detached by the CLI on demand. Exits after `BCTL_IDLE_TIMEOUT` (default 600 s, `0` = never) with no requests in flight. Pings don't count as activity. | nothing; it holds no durable state |
 | Extension service worker | killed by Chrome when idle. The 20 s keep-alive ping and a 30 s alarm limit this. | `chrome.storage.session` |
-| `chrome.storage.session` `state` (tabs, grants, sessions, refs, approvals, log) | until the extension is reloaded or disabled, or the browser restarts | SW and proxy restarts; self-update (via handoff) |
+| `chrome.storage.session` `state` (tabs, grants, sessions, refs, iframe sessions, frame scope, approvals, log) | until the extension is reloaded or disabled, or the browser restarts | SW and proxy restarts; self-update (via handoff) |
 | `chrome.storage.local` (`secret`, `port`, `enabled`, `paired`, `handoff`, `updateTried`) | persistent | everything except uninstall |
 | In memory (debugger attachments, console/error and network buffers, approval waiters, in-flight requests, held modifier keys) | SW lifetime | nothing |
 

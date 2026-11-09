@@ -13,7 +13,7 @@ open/back/forward/reload/close, `tab` (list/new/label/switch/close), `snapshot -
 (line format identical to the binary), click/dblclick/hover/focus/fill/type/press/keydown/keyup/
 keyboard, check/uncheck/select, scroll/scrollintoview, drag, upload, `find` (all locators),
 `get text|html|value|attr|title|url|count|box`, `is`, `wait` (target/ms/text/url/load/fn/state),
-stable monotonic refs, `snapshot --delta/--full`, clickable (`cursor:pointer`/`onclick`) refs and `removedRefs`, `get styles` (curated by default), XPath targets, `mouse`, `highlight`, `pushstate`, `session list/info`,
+stable monotonic refs, `snapshot --delta/--full`, clickable (`cursor:pointer`/`onclick`) refs and `removedRefs`, `get styles` (curated by default), XPath targets, `mouse`, `highlight`, cross-site iframes inlined with working refs and `frame <selector|@ref|name|url|main>`, `pushstate`, `session list/info`,
 `wait` prints the match, stderr `⚠` warnings, JSON error `code`s, usage on missing args, help details/examples, upstream JSON field names, `screenshot [--full] [--annotate] [--if-changed] [--threshold]`, `read` (active tab/URL; no `--raw/--llms/--require-md`), `eval` (inline/-b/--stdin), `dialog`, `console`, `errors`, `--json`,
 `--session`, `--timeout`, the `skills` command.
 
@@ -21,13 +21,11 @@ stable monotonic refs, `snapshot --delta/--full`, clickable (`cursor:pointer`/`o
 
 | Proposal | What | Priority |
 |---|---|---|
-| [cross-origin-frames.md](../cross-origin-frames.md) | inline cross-site iframes; `frame` | 2 |
 | [agent-guardrails.md](../agent-guardrails.md) | allowed domains, content boundaries, max output, action confirmation | 3 (security sign-off) |
 | [page-audits.md](../page-audits.md) | `a11y`, `vitals` | 4 |
 
 ```mermaid
 flowchart LR
-  XF[cross-origin frames] -.-> AN[--annotate]
 ```
 
 ## Out of scope (by principle)
