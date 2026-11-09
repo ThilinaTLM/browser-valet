@@ -63,6 +63,8 @@ function decodeBase64(b64: string): string {
 export const inspectionCommands: Command[] = [
   {
     name: 'snapshot',
+    show: Infinity,
+    showFlags: ['depth', 'selector'],
     group: 'Reading',
     usage: 'snapshot [-i] [-c] [-d N] [-s <selector>] [-u] [@ref]',
     summary: 'Accessibility tree with @refs for interaction',
@@ -96,6 +98,7 @@ export const inspectionCommands: Command[] = [
   },
   {
     name: 'get',
+    show: Infinity,
     group: 'Reading',
     usage: 'get <text|html|value|attr|title|url|count|box> [target] [attr-name]',
     summary: 'Read text, HTML, values, attributes, title, URL, counts or boxes',
@@ -157,6 +160,7 @@ export const inspectionCommands: Command[] = [
   },
   {
     name: 'is',
+    show: Infinity,
     group: 'Reading',
     usage: 'is <visible|enabled|checked> <target>',
     summary: 'Check element state (prints true/false)',
@@ -176,6 +180,8 @@ export const inspectionCommands: Command[] = [
   },
   {
     name: 'wait',
+    show: Infinity,
+    showFlags: ['text', 'url', 'load', 'state'],
     group: 'Waiting',
     usage:
       'wait <target|ms> [--state visible|hidden|attached|detached] | --text <t> | --url <glob> | --load <state> | --fn <js>',
@@ -253,6 +259,7 @@ export const inspectionCommands: Command[] = [
   },
   {
     name: 'screenshot',
+    show: Infinity,
     group: 'Reading',
     usage: 'screenshot [path] [--full]',
     summary: 'Save a PNG (or .jpg) screenshot; without a path it goes to a temp file',
@@ -276,6 +283,19 @@ export const inspectionCommands: Command[] = [
   },
   {
     name: 'eval',
+    log(a, req) {
+      // Never log the script; its size is enough to tell commands apart.
+      let n = a.pos.join(' ').length;
+      if (a.has('stdin')) n = (req.stdin ?? '').length;
+      else if (a.str('base64') !== undefined) {
+        try {
+          n = decodeBase64(a.str('base64') ?? '').length;
+        } catch {
+          n = 0;
+        }
+      }
+      return [`(${n} chars)`];
+    },
     group: 'Reading',
     usage: 'eval <js> | eval -b <base64> | eval --stdin',
     summary: 'Run JavaScript in the page (awaits promises) and print the result',

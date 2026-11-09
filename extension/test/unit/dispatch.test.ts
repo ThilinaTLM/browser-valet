@@ -68,7 +68,7 @@ describe('help generation', () => {
   });
 });
 
-describe('activity log (describe) — current behaviour', () => {
+describe('activity log (describe)', () => {
   const lastCommand = () => stateMod.state.log[0]?.command;
 
   it('logs the command line without global flags', async () => {
@@ -76,7 +76,7 @@ describe('activity log (describe) — current behaviour', () => {
     expect(lastCommand()).toBe('open https://example.com');
   });
 
-  it('redacts text typed by fill, type and keyboard (everything after the first argument)', async () => {
+  it('redacts text typed by fill, type and keyboard', async () => {
     await run('fill', '@e2', 'hunter2');
     expect(lastCommand()).toBe('fill @e2 •••');
     await run('type', '@e2', 'hunter2');
@@ -85,9 +85,50 @@ describe('activity log (describe) — current behaviour', () => {
     expect(lastCommand()).toBe('keyboard type •••');
   });
 
-  it('does not redact other commands (known debt: activity-log-redaction proposal)', async () => {
+  it('redacts the value of a nested find action but keeps the locator and action', async () => {
     await run('find', 'label', 'Password', 'fill', 'hunter2');
-    expect(lastCommand()).toBe('find label Password fill hunter2');
+    expect(lastCommand()).toBe('find label Password fill •••');
+    await run('find', 'placeholder', 'Pw', 'type', 'hunter2', '--exact');
+    expect(lastCommand()).toBe('find placeholder Pw type ••• --exact');
+    await run('find', 'first', 'input', 'fill', 'hunter2');
+    expect(lastCommand()).toBe('find first input fill •••');
+    await run('find', 'nth', '2', 'input', 'fill', 'hunter2');
+    expect(lastCommand()).toBe('find nth 2 input fill •••');
+    await run('find', 'role', 'textbox', '--name', 'Email', 'select', 'x');
+    expect(lastCommand()).toBe('find role textbox select ••• --name Email');
+  });
+
+  it('redacts the text of dialog accept', async () => {
+    await run('dialog', 'accept', 'hunter2');
+    expect(lastCommand()).toBe('dialog accept •••');
+    await run('dialog', 'dismiss');
+    expect(lastCommand()).toBe('dialog dismiss');
+  });
+
+  it('logs eval only as its size, for inline, base64 and stdin scripts', async () => {
+    await run('eval', 'document.cookie');
+    expect(lastCommand()).toBe('eval (15 chars)');
+    await run('eval', '-b', btoa('1+1'));
+    expect(lastCommand()).toBe('eval (3 chars)');
+    await run('eval', '--stdin');
+    expect(lastCommand()).toBe('eval (0 chars)');
+    const r = req('eval', '--stdin');
+    await execute({ ...r, stdin: 'secret()' }, new AbortController().signal, () => undefined);
+    expect(lastCommand()).toBe('eval (8 chars)');
+  });
+
+  it('redacts string flag values and extra arguments unless the command opts in', async () => {
+    await run('wait', '--fn', 'document.title === "secret"');
+    expect(lastCommand()).toBe('wait --fn •••');
+    await run('wait', '--text', 'Welcome');
+    expect(lastCommand()).toBe('wait --text Welcome');
+    await run('select', '@e1', 'hunter2');
+    expect(lastCommand()).toBe('select @e1 •••');
+  });
+
+  it('logs only the command name when the arguments do not parse', async () => {
+    await run('fill', '--bogus', 'hunter2');
+    expect(lastCommand()).toBe('fill');
   });
 
   it('truncates long lines to 120 characters', async () => {

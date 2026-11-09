@@ -14,7 +14,7 @@ The wire details are in [protocol.md](protocol.md).
 - **MUST NOT** let `open <url>` navigate a shared tab. It opens an agent tab instead. *Why:* sharing a tab means "look and act here", not "replace my page".
 - **MUST** redact user-typed text from the activity log. *Why:* agents type passwords and personal data. The popup and session storage are visible to anyone at the machine.
 
-> **Known debt:** redaction only covers `fill`, `type` and `keyboard` by argument position (`SECRET_ARGS` in `dispatch.ts`). The text from `find … fill/type`, `dialog accept <text>` and `eval` is logged in plain (truncated to 120 chars). Do not extend this pattern. Fix: [proposal](../proposals/activity-log-redaction.md).
+- **MUST** declare redaction next to the parser: `Command.show` / `showFlags` / `log` (`logArgs` in `command.ts`). By default a command logs only its first positional argument and no flag values; everything else is `•••`. A command opts in to showing more (`show: Infinity` for targets, URLs and key names; `showFlags` for flag values that are never user text). `find … <action> <value>` logs the locator and the action but not the value, `dialog accept <text>` logs no text, and `eval` logs only `eval (N chars)`. Arguments that do not parse log the command name alone. *Why:* a new command is safe without remembering anything.
 
 ## Consent model
 

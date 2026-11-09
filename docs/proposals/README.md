@@ -39,7 +39,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 
 | Proposal | Area | Status |
 |---|---|---|
-| [activity-log-redaction.md](activity-log-redaction.md) | security | Draft |
 | [stale-approvals.md](stale-approvals.md) | security | Draft |
 | [debugger-attach-conflict.md](debugger-attach-conflict.md) | automation | Draft |
 | [agent-browser-parity/](agent-browser-parity/README.md) | automation, security | Draft (umbrella) |
@@ -60,7 +59,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 
 ### Debt
 
-- [ ] Redact all free-text arguments in the activity log: [activity-log-redaction.md](activity-log-redaction.md)
 - [ ] Clear orphaned approvals after a service-worker restart: [stale-approvals.md](stale-approvals.md)
 - [ ] Detect DevTools holding the debugger: [debugger-attach-conflict.md](debugger-attach-conflict.md)
 

@@ -193,6 +193,7 @@ export function setLabel(tabId: number, label: string): void {
 export const navigationCommands: Command[] = [
   {
     name: 'open',
+    show: Infinity,
     aliases: ['goto', 'navigate'],
     group: 'Navigation',
     usage: 'open [url]',
@@ -247,6 +248,7 @@ export const navigationCommands: Command[] = [
   },
   {
     name: 'close',
+    show: Infinity,
     aliases: ['quit', 'exit'],
     group: 'Navigation',
     usage: 'close',
@@ -275,6 +277,8 @@ export const navigationCommands: Command[] = [
   },
   {
     name: 'tab',
+    show: Infinity,
+    showFlags: ['label'],
     group: 'Tabs',
     usage: 'tab [list | new [--label L] [url] | <tN|label> | close [tN|label]]',
     summary: 'List tabs, open a tab, switch (asks the user for non-agent tabs), or close',

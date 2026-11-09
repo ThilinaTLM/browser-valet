@@ -1,4 +1,4 @@
-import { type Args, type Command, type Ctx, type Result } from '../command';
+import { type Args, type Command, type Ctx, REDACTED, type Result } from '../command';
 import * as cdp from '../cdp';
 import {
   call,
@@ -273,6 +273,7 @@ const target = (a: Args) => a.need(0, 'target (@ref or CSS selector)');
 export const interactionCommands: Command[] = [
   {
     name: 'click',
+    show: Infinity,
     group: 'Interaction',
     usage: 'click <target> [--new-tab] [--right]',
     summary: 'Click an element (@ref or CSS selector)',
@@ -295,6 +296,7 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'dblclick',
+    show: Infinity,
     group: 'Interaction',
     usage: 'dblclick <target>',
     summary: 'Double-click an element',
@@ -341,6 +343,7 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'press',
+    show: Infinity,
     aliases: ['key'],
     group: 'Interaction',
     usage: 'press <key>',
@@ -354,6 +357,7 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'keydown',
+    show: Infinity,
     group: 'Interaction',
     usage: 'keydown <key>',
     summary: 'Hold a key down (e.g. Shift)',
@@ -364,6 +368,7 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'keyup',
+    show: Infinity,
     group: 'Interaction',
     usage: 'keyup <key>',
     summary: 'Release a held key',
@@ -389,6 +394,7 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'check',
+    show: Infinity,
     group: 'Interaction',
     usage: 'check <target>',
     summary: 'Check a checkbox / radio / switch',
@@ -398,6 +404,7 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'uncheck',
+    show: Infinity,
     group: 'Interaction',
     usage: 'uncheck <target>',
     summary: 'Uncheck a checkbox / switch',
@@ -417,6 +424,8 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'scroll',
+    show: Infinity,
+    showFlags: ['selector'],
     group: 'Interaction',
     usage: 'scroll [up|down|left|right] [px] [--selector <target>]',
     summary: 'Scroll the page or an element (default: down 300)',
@@ -445,6 +454,7 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'scrollintoview',
+    show: Infinity,
     aliases: ['scrollinto'],
     group: 'Interaction',
     usage: 'scrollintoview <target>',
@@ -457,6 +467,7 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'drag',
+    show: Infinity,
     group: 'Interaction',
     usage: 'drag <source> <target>',
     summary: 'Drag one element onto another',
@@ -471,6 +482,7 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'upload',
+    show: Infinity,
     group: 'Interaction',
     usage: 'upload <target> <file> [more…]',
     summary: 'Set files on an <input type=file>',
@@ -484,6 +496,17 @@ export const interactionCommands: Command[] = [
   },
   {
     name: 'find',
+    showFlags: ['name'],
+    // Show the locator and the action; redact the action's value (typed text) after it.
+    log(a) {
+      const [kind = '', ...rest] = a.pos;
+      const actionAt = kind === 'nth' ? 3 : 2; // find nth <n> <selector> <action>
+      const pos = [kind, ...rest].map((p, i) => (i <= actionAt ? p : REDACTED));
+      const flags = a
+        .given()
+        .flatMap(([n, v]) => [`--${n}`, ...(v === true ? [] : [n === 'name' ? v : REDACTED])]);
+      return [...pos, ...flags];
+    },
     group: 'Interaction',
     usage: FIND_HELP,
     summary: 'Find an element semantically (no snapshot needed) and act on it',

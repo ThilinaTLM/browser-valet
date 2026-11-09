@@ -2,7 +2,15 @@
 
 import type { CliRequest, CliResponse } from '../shared';
 import * as cdp from './cdp';
-import { type Command, Ctx, GLOBAL_FLAGS, parseArgs, type Result } from './command';
+import {
+  type Args,
+  type Command,
+  Ctx,
+  GLOBAL_FLAGS,
+  logArgs,
+  parseArgs,
+  type Result,
+} from './command';
 import { inspectionCommands } from './commands/inspection';
 import { interactionCommands } from './commands/interaction';
 import { navigationCommands } from './commands/navigation';
@@ -88,22 +96,10 @@ function errorMessage(e: unknown): string {
   return msg;
 }
 
-const SECRET_ARGS: Record<string, number> = { fill: 1, type: 1, keyboard: 1 };
-
-function describe(argv: string[]): string {
-  const { name, rest } = splitCommand(argv);
-  if (!name) return 'help';
-  const redactFrom = SECRET_ARGS[name];
-  // Drop global flags (and their values) from the log line.
-  const shown: string[] = [];
-  for (let i = 0; i < rest.length; i++) {
-    const t = rest[i] ?? '';
-    if (t === '--session' || t === '--timeout') i++;
-    else if (!t.startsWith('--session=') && !t.startsWith('--timeout=') && t !== '--json') {
-      shown.push(redactFrom !== undefined && shown.length >= redactFrom ? '•••' : t);
-    }
-  }
-  const s = [name, ...shown].join(' ');
+/** The activity-log line: the command name plus its redacted arguments (`logArgs`). */
+export function describe(cmd: Command, req: CliRequest, args: Args | undefined): string {
+  const tail = args ? logArgs(cmd, args, req) : [];
+  const s = [cmd.name, ...tail].join(' ');
   return s.length > 120 ? `${s.slice(0, 119)}…` : s;
 }
 
@@ -166,9 +162,10 @@ export async function execute(
   if (!cmd) return fail(`Unknown command: ${name}. Run \`bctl help\`.`);
 
   let ctx: Ctx | undefined;
+  let args: Args | undefined;
   let response: CliResponse;
   try {
-    const args = parseArgs(rest, cmd.flags ?? []);
+    args = parseArgs(rest, cmd.flags ?? []);
     if (args.has('help')) return ok(commandHelp(cmd), null);
     const session = args.str('session') ?? req.session;
     ctx = new Ctx(req, session, json, args.num('timeout') ?? DEFAULT_TIMEOUT, signal, progress);
@@ -181,7 +178,7 @@ export async function execute(
   log({
     ts: Date.now(),
     session: ctx?.session ?? req.session,
-    command: describe(req.argv),
+    command: describe(cmd, req, args),
     tid: ctx?.tabId !== undefined ? meta(ctx.tabId).tid : undefined,
     ok: response.exitCode === 0,
     error: lastError,

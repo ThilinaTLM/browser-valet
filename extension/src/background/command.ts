@@ -21,6 +21,16 @@ export interface Command {
   usage: string;
   summary: string;
   flags?: Flag[];
+  /**
+   * Activity-log redaction (see security.md). By default only the first `show` positional
+   * arguments (default 1: the target or subcommand) and the flags named in `showFlags` are
+   * logged; every other argument is replaced by `•••`. A new command therefore logs no free
+   * text until it opts in. Use `Infinity` for commands whose arguments are never user text.
+   */
+  show?: number;
+  showFlags?: string[];
+  /** Full override of the logged arguments (after the command name), for nested or special syntax. */
+  log?(a: Args, req: CliRequest): string[];
   run(ctx: Ctx, args: Args): Promise<Result | undefined>;
 }
 
@@ -47,6 +57,11 @@ export class Args {
     private readonly flags: Map<string, string | true>,
   ) {}
 
+  /** Flags that were given, in the order of the command line, excluding the global ones. */
+  given(): [name: string, value: string | true][] {
+    return [...this.flags].filter(([n]) => !GLOBAL_FLAGS.some((f) => f.name === n));
+  }
+
   has(name: string): boolean {
     return this.flags.has(name);
   }
@@ -70,6 +85,20 @@ export class Args {
     if (v === undefined) throw new UserError(`Missing ${what}`);
     return v;
   }
+}
+
+export const REDACTED = '•••';
+
+/** The arguments of `cmd` as the activity log shows them (secrets and free text redacted). */
+export function logArgs(cmd: Command, a: Args, req: CliRequest): string[] {
+  if (cmd.log) return cmd.log(a, req);
+  const show = cmd.show ?? 1;
+  const out = a.pos.map((p, i) => (i < show ? p : REDACTED));
+  for (const [n, v] of a.given()) {
+    out.push(`--${n}`);
+    if (v !== true) out.push(cmd.showFlags?.includes(n) ? v : REDACTED);
+  }
+  return out;
 }
 
 export function parseArgs(argv: string[], flags: Flag[]): Args {
