@@ -2,8 +2,16 @@
 // Fixtures: frames.html on 127.0.0.1 embeds frame-inner.html from localhost (another site, so
 // another renderer process), which embeds frame-deep.html (same process as its parent).
 
-import { describe, expect, it } from 'vitest';
-import { bctl, bctlJson, fixture, framesPage, restartExtensionWorker, useBrowser } from './harness';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  bctl,
+  bctlJson,
+  fixture,
+  framesPage,
+  restartExtensionWorker,
+  setGuardrails,
+  useBrowser,
+} from './harness';
 
 const browser = useBrowser();
 
@@ -249,5 +257,24 @@ describe('service-worker restart', () => {
     await restartExtensionWorker();
     expect((await bctl('eval', 'document.title')).stdout.trim()).toBe('"Frame Inner"');
     await bctl('frame', 'main');
+  });
+});
+
+describe('with an allowed-domains policy', () => {
+  afterEach(async () => {
+    await setGuardrails({});
+  });
+
+  it('cross-site iframes still load and work; only top-level navigations are guarded', async () => {
+    // frames.html is on 127.0.0.1 and embeds a frame from localhost, which the policy does not list.
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    await openFrames(); // fails if the iframe never shows up
+    const snap = (await bctl('snapshot', '-i')).stdout;
+    const pay = refOf(snap, /button "Pay"/);
+    expect((await bctl('click', `@${pay}`)).code).toBe(0);
+    // Top-level navigation to the same unlisted site is still refused.
+    const out = fixture('/form.html').replace('127.0.0.1', 'localhost');
+    const r = await bctlJson('open', out);
+    expect(r).toMatchObject({ success: false, code: 'domain_blocked' });
   });
 });

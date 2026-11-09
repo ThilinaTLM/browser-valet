@@ -19,16 +19,19 @@ const fireEvent = (tabId: number, method: string, params: unknown) => {
     params,
   );
 };
-const paused = async (tabId: number, url: string, requestId = 'r1') => {
+const paused = async (tabId: number, url: string, requestId = 'r1', frameId?: string) => {
   vi.mocked(mock.chrome.debugger.sendCommand).mockClear();
   fireEvent(tabId, 'Fetch.requestPaused', {
     requestId,
+    frameId,
     request: { url },
     resourceType: 'Document',
   });
   await mock.flush();
   await mock.flush();
-  return sent().map((s) => s.method);
+  return sent()
+    .map((s) => s.method)
+    .filter((m) => m.startsWith('Fetch.'));
 };
 
 beforeEach(async () => {
@@ -101,6 +104,27 @@ describe('Fetch interception', () => {
     const fail = sent()[0];
     expect(fail?.params).toEqual({ requestId: 'r1', errorReason: 'BlockedByClient' });
     expect(await paused(5, 'https://www.example.com/ok', 'r2')).toEqual(['Fetch.continueRequest']);
+  });
+
+  it('blocks main-frame documents only; iframe documents continue', async () => {
+    await g.updateGuardrails({ allowedDomains: ['example.com'] });
+    const send = mock.chrome.debugger.sendCommand as unknown as ReturnType<typeof vi.fn>;
+    send.mockImplementation(((_t: unknown, method: string): unknown =>
+      Promise.resolve(
+        method === 'Page.getFrameTree' ? { frameTree: { frame: { id: 'MAIN' } } } : {},
+      )) as never);
+    await cdp.attach(5); // learns the main frame id when Fetch is enabled
+    await mock.flush();
+    expect(await paused(5, 'https://evil.test/', 'r1', 'MAIN')).toEqual(['Fetch.failRequest']);
+    expect(await paused(5, 'https://evil.test/pay', 'r2', 'CHILD')).toEqual([
+      'Fetch.continueRequest',
+    ]);
+    // frameNavigated keeps the id current; an unknown main frame fails closed
+    fireEvent(5, 'Page.frameNavigated', { frame: { id: 'MAIN2' } });
+    expect(await paused(5, 'https://evil.test/', 'r3', 'MAIN2')).toEqual(['Fetch.failRequest']);
+    fireEvent(5, 'Page.frameNavigated', { frame: { id: 'SUB', parentId: 'MAIN2' } });
+    expect(await paused(5, 'https://evil.test/', 'r4', 'SUB')).toEqual(['Fetch.continueRequest']);
+    expect(await paused(5, 'https://evil.test/', 'r5')).toEqual(['Fetch.failRequest']);
   });
 
   it('continues everything when the policy is off or the tab is shared (never hang a request)', async () => {

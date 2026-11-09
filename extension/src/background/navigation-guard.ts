@@ -1,6 +1,6 @@
 // Allowed-domains policy, layer 2: navigations the page starts (redirects, `location = …`, link
 // clicks, popups). On agent tabs, while a policy is active, `Fetch.enable` pauses *document*
-// requests only and fails the ones whose host is not allowed. Nothing is mocked or modified:
+// requests only and fails the main-frame ones whose host is not allowed (iframes load freely). Nothing is mocked or modified:
 // allowed requests continue untouched, and only Document requests are ever paused (never
 // scripts, images, XHR or fetch). See security.md ("Guardrails").
 //
@@ -87,6 +87,7 @@ export async function syncTab(tabId: number): Promise<void> {
   const want = shouldGuard(tabId);
   try {
     if (want) {
+      if (!mainFrames.has(tabId)) await rememberMainFrame(tabId);
       await chrome.debugger.sendCommand({ tabId }, 'Fetch.enable', {
         patterns: [{ resourceType: 'Document', requestStage: 'Request' }],
       });
@@ -138,6 +139,31 @@ export async function assertLanded(ctx: Ctx, tabId: number): Promise<void> {
   );
 }
 
+/** The main frame id of each guarded tab (read before Fetch is enabled, kept by frameNavigated). */
+const mainFrames = new Map<number, string>();
+
+async function rememberMainFrame(tabId: number): Promise<void> {
+  try {
+    const tree: { frameTree?: { frame?: { id?: string } } } | undefined =
+      await chrome.debugger.sendCommand({ tabId }, 'Page.getFrameTree');
+    const id = tree?.frameTree?.frame?.id;
+    if (id) mainFrames.set(tabId, id);
+  } catch {
+    // unknown: treated as the main frame below
+  }
+}
+
+/**
+ * Is `frameId` the tab's main frame? Only top-level navigations are blocked: a cross-site iframe
+ * (SSO, captcha, payment) on an allowed page keeps loading, since subresources are not blocked
+ * either and the agent never navigates a frame by itself. The id is cached rather than asked for
+ * here, because commands sent while a request is paused can stall. Unknown → true (fail closed).
+ */
+function isMainFrame(tabId: number, frameId: string | undefined): boolean {
+  const main = mainFrames.get(tabId);
+  return !frameId || main === undefined || main === frameId;
+}
+
 // --- events ------------------------------------------------------------------------------------
 
 cdp.onAttached((tabId) => {
@@ -146,17 +172,31 @@ cdp.onAttached((tabId) => {
 
 cdp.onDetached((tabId) => {
   guarded.delete(tabId);
+  mainFrames.delete(tabId);
   unreported.delete(tabId);
 });
 
 cdp.onEvent((tabId, method, params) => {
+  if (method === 'Page.frameNavigated') {
+    const f = (params as { frame?: { id?: string; parentId?: string } }).frame;
+    if (f?.id && !f.parentId) mainFrames.set(tabId, f.id);
+    return;
+  }
   if (method !== 'Fetch.requestPaused') return;
   void (async () => {
-    const p = params as { requestId: string; request: { url: string }; resourceType?: string };
+    const p = params as {
+      requestId: string;
+      frameId?: string;
+      request: { url: string };
+      resourceType?: string;
+    };
     let block = true; // fail closed: a surprise here must not let a navigation through
     try {
       await ready;
-      block = shouldGuard(tabId) && refusedOn(tabId, p.request.url) !== undefined;
+      block =
+        shouldGuard(tabId) &&
+        refusedOn(tabId, p.request.url) !== undefined &&
+        isMainFrame(tabId, p.frameId);
     } catch {
       // keep block = true
     }
