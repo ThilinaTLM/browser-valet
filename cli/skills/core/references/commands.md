@@ -18,6 +18,8 @@ wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob |
 read [url] [--outline] [--filter <text>] [--max-output <chars>]
 screenshot [path] [--full]   eval <js> | eval -b <base64> | eval --stdin
 dialog status|accept [text]|dismiss   console [--clear]   errors [--clear]
+network requests [--filter <text>] [--type xhr,fetch,document] [--method <m>] [--status 200|2xx|400-499] [--clear]
+network request <id>
 ```
 
 `<t>` is a ref (`@e3`), a CSS selector, or an XPath (starts with `/` or `(`, e.g. `//button[@type='submit']`).

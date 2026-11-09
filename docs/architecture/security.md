@@ -27,6 +27,17 @@ The wire details are in [protocol.md](protocol.md).
 
 - **MUST** answer or drop every pending approval: the waiter lives in memory only, so `loadState` never restores approvals (a restarted service worker starts with none, and the CLI request that asked has already failed with "browser extension disconnected"), and closing the tab rejects the waiter with "The tab was closed while waiting for the user to allow control" (`failApprovals` in `tabs.ts`). *Why:* an approval card with nothing behind it does nothing, and a CLI waiting for a closed tab would hang for 120 s.
 
+## Network observation
+
+`network requests` / `network request <id>` (`network.ts`, `commands/network.ts`) are read-only: they change no traffic and nothing in the profile. They still expose what page JS cannot read (`HttpOnly` cookies, `Authorization`), so:
+
+- **MUST** redact credentials at ingestion, with no flag that reveals them: the headers `Cookie`, `Set-Cookie`, `Authorization`, `Proxy-Authorization`, `X-Api-Key`, `X-Csrf-Token`, `X-Xsrf-Token` and any header whose name looks like a token, secret, key, session, csrf/xsrf or `auth`; secret-like query values in URLs; `password`/`token`/`secret`/`api key`/`csrf`-like fields in JSON, urlencoded and multipart request bodies. *Why:* the buffer, `--json` output and the agent's context must never hold the user's session.
+- **MUST** redact the obvious token fields (`access_token`, `refresh_token`, `id_token`, `token`, `secret`, `password`, `client_secret`, at any depth) of JSON response bodies before output. Other body content (HTML, free text, non-listed JSON keys) is returned as is: it is page content, like `get text`. *Why:* OAuth token endpoints answer with bearer tokens.
+- **MUST** show text bodies only, capped at 32 KB; binary bodies are not returned. *Why:* size, and secrets in binary blobs cannot be redacted.
+- **MUST** keep bodies out of the activity log: `network` logs `network requests` (with `--type/--method/--status` values) or `network request <id>`; `--filter` text is redacted.
+- **MUST** use `ctx.tab()` (controlled tabs only), record lazily (`Network.enable` on the first `network` command per tab) and keep at most 500 entries per tab in memory. The buffer is dropped when the debugger session ends (`cdp.onDetached`: revoke, user detach, a navigation that swaps the renderer, tab close). *Why:* no recording on tabs the agent never asked about, and nothing survives a revoke.
+- Not built: `network route`/`unroute` (interception) and `har` (would write whole bodies and headers to disk).
+
 ## Trust boundaries
 
 - **The extension is trusted by the CLI.** The CLI writes `res.files[].path` without confining it. `upload` reads any path the CLI resolves. Anyone who can authenticate as `ext` can write files as the user, which is why the auth rules above are MUST.

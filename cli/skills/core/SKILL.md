@@ -100,5 +100,9 @@ Full list with arguments and global flags: `bctl skills get core --ref commands`
 - A `confirm`/`prompt` dialog pauses the page: `bctl dialog accept` or `bctl dialog dismiss`.
   Alerts are accepted automatically.
 - For scripts with quotes, use `eval --stdin` with a quoted heredoc.
-- Not supported: cookies/storage/state commands, network interception, device emulation,
+- `network requests [--filter --type --method --status 4xx --clear]` / `network request <id>` show what the
+  page sent and received (read-only). Recording starts at the first `network` command on a tab, so
+  reload or repeat the action afterwards. Cookie, Authorization and similar headers, secret fields in
+  request bodies and token fields in JSON responses are always shown as `[redacted]`.
+- Not supported: cookies/storage/state commands, network interception (routing/mocking), device emulation,
   video/trace/pdf — they would modify the user's real profile or aren't needed here.

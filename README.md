@@ -95,7 +95,7 @@ Global flags: `--json` (`{success, data, error}`), `--session <name>` (or `BCTL_
 `--timeout <ms>`. CLI-local commands: `setup`, `skills`, `pair`, `unpair`, `status`, `stop`,
 `proxy`, `version`.
 
-Deliberately left out: cookies/storage/state, network interception, emulation, video/trace/pdf —
+Deliberately left out: cookies/storage/state, network interception (read-only `network requests` is available), emulation, video/trace/pdf —
 they would modify your real profile or aren't needed for driving pages.
 
 ## The extension popup

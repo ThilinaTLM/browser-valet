@@ -21,7 +21,7 @@ Message formats: [protocol.md](protocol.md).
 | Extension service worker | killed by Chrome when idle. The 20 s keep-alive ping and a 30 s alarm limit this. | `chrome.storage.session` |
 | `chrome.storage.session` `state` (tabs, grants, sessions, refs, approvals, log) | until the extension is reloaded or disabled, or the browser restarts | SW and proxy restarts; self-update (via handoff) |
 | `chrome.storage.local` (`secret`, `port`, `enabled`, `paired`, `handoff`, `updateTried`) | persistent | everything except uninstall |
-| In memory (debugger attachments, console/error buffers, approval waiters, in-flight requests, held modifier keys) | SW lifetime | nothing |
+| In memory (debugger attachments, console/error and network buffers, approval waiters, in-flight requests, held modifier keys) | SW lifetime | nothing |
 
 ## Persisted files (CLI side)
 

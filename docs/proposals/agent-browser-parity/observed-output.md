@@ -113,7 +113,8 @@ tag at the top-left of each box. The label number is the same as the ref number.
 | `close` | `✓ Browser closed` |
 | `console` | `[log] hello from page` |
 | `errors` | prints `✗ ` with an empty message (an upstream bug); the JSON has `{text, line, column, url}` |
-| `network requests` | `[<requestId>] GET <url> (Document) 200`, recorded from the start |
+| `network requests` | `[<requestId>] GET <url> (Document) 200`, recorded from the start. Flags `--filter --type --method --status 200\|2xx\|400-499 --clear`. Empty: `No requests captured`; `--clear`: `✓ Request log cleared` |
+| `network request <id>` | text prints only the URL (JSON has headers, `postData`, body); unknown id: `✗ Request not found` |
 | `session list` | `Active sessions:` / `→ name` |
 
 ### A click that opens a confirm dialog
