@@ -3,6 +3,8 @@ name = "browser-valet"
 version = "0.1.0"
 edition = "2021"
 description = "Control your real Chrome browser from the command line via a companion extension"
+license = "Apache-2.0"
+repository = "https://github.com/ThilinaTLM/browser-valet"
 
 [[bin]]
 name = "bvl"

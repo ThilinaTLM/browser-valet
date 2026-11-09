@@ -12,7 +12,8 @@ Build, embedding, CI and testing. Everyday commands are in the root [README](../
 ## Design
 
 - Without `extension/dist`, the CLI still builds (with a cargo warning). `EXT_VERSION` is `None`, and `bvl setup` reports that this build has no extension. Such a binary never triggers updates.
-- CI builds the extension once, shares `dist` as an artifact with the three CLI jobs, and uploads `bvl` per OS. There is no release or signing pipeline.
+- CI (`.github/workflows/ci.yml`) runs on pushes to `main` and on pull requests. It builds the extension once, shares `dist` as an artifact with the three CLI jobs, and uploads `bvl` per OS.
+- Releasing: bump the three versions, commit, then push a `vX.Y.Z` tag. `.github/workflows/release.yml` checks that the tag matches all three versions, reruns the whole CI workflow (`workflow_call`), builds `bvl` with the CI's `extension-dist` embedded for `x86_64`/`aarch64` Linux (static musl), `x86_64`/`aarch64` macOS and `x86_64` Windows, and creates a GitHub release with `bvl-<target>.tar.gz` (`.zip` on Windows), `SHA256SUMS` and generated notes. Tags with a `-` (e.g. `v0.2.0-rc.1`) become pre-releases. Asset names carry no version so `releases/latest/download/…` links stay stable. Binaries are not code-signed or notarized.
 - Developing the extension: load `extension/dist` unpacked, run `bvl pair <code>`, and use `pnpm watch` plus a manual reload. Remove the managed copy first: Chrome rejects two unpacked extensions with the same ID.
 - Toolchains: Rust stable (edition 2021), Node 22 with pnpm (`packageManager` in `package.json`), TypeScript strict via `tsc --noEmit`, esbuild bundle (ESM).
 
@@ -36,3 +37,4 @@ Build, embedding, CI and testing. Everyday commands are in the root [README](../
 |---|---|---|
 | `build.rs` embedding and version assert | Medium | a bad embed ships a broken managed folder to every user on update |
 | CI workflow | Low | keep all three OS jobs and the E2E job |
+| Release workflow | Medium | keep the CI gate, the version check and the embedded extension; asset names are used by the README install commands |

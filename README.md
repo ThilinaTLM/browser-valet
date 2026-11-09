@@ -1,5 +1,10 @@
 # Browser Valet
 
+[![CI](https://github.com/ThilinaTLM/browser-valet/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ThilinaTLM/browser-valet/actions/workflows/ci.yml)
+[![Release](https://github.com/ThilinaTLM/browser-valet/actions/workflows/release.yml/badge.svg)](https://github.com/ThilinaTLM/browser-valet/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/ThilinaTLM/browser-valet?sort=semver)](https://github.com/ThilinaTLM/browser-valet/releases/latest)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Let coding agents use your **real** Chrome — your logins, cookies and open tabs — through a small
 CLI, `bvl`, whose commands mirror [agent-browser](https://github.com/vercel-labs/agent-browser).
 You stay in control: agents only touch tabs they opened or tabs you explicitly approve.
@@ -24,8 +29,42 @@ flowchart LR
 
 ## Install
 
-You only need the `bvl` binary (from a release, or `cargo install --path cli` after building the
-extension; see [Development](#development)). Then:
+You only need the `bvl` binary. Prebuilt binaries for every
+[GitHub release](https://github.com/ThilinaTLM/browser-valet/releases) include the extension and the skills:
+
+| Platform | Asset |
+|---|---|
+| Linux x86_64 / ARM64 (static) | `bvl-x86_64-unknown-linux-musl.tar.gz` / `bvl-aarch64-unknown-linux-musl.tar.gz` |
+| macOS Intel / Apple Silicon | `bvl-x86_64-apple-darwin.tar.gz` / `bvl-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `bvl-x86_64-pc-windows-msvc.zip` |
+
+**Linux / macOS** (pick the target from the table; `~/.local/bin` must be on your `PATH`):
+
+```sh
+target=aarch64-apple-darwin
+mkdir -p ~/.local/bin
+curl -fsSL https://github.com/ThilinaTLM/browser-valet/releases/latest/download/bvl-$target.tar.gz \
+  | tar -xz -C ~/.local/bin bvl
+bvl version
+```
+
+**Windows** (PowerShell):
+
+```powershell
+$dir = "$env:LOCALAPPDATA\Programs\bvl"
+Invoke-WebRequest https://github.com/ThilinaTLM/browser-valet/releases/latest/download/bvl-x86_64-pc-windows-msvc.zip -OutFile "$env:TEMP\bvl.zip"
+Expand-Archive "$env:TEMP\bvl.zip" -DestinationPath $dir -Force
+[Environment]::SetEnvironmentVariable("Path", "$([Environment]::GetEnvironmentVariable('Path','User'));$dir", "User")
+# open a new terminal, then:
+bvl version
+```
+
+Each release has a `SHA256SUMS` file for verifying downloads. For a specific version, replace
+`latest/download` with `download/vX.Y.Z`. The binaries are not code-signed: if macOS blocks a copy
+downloaded with a browser, run `xattr -d com.apple.quarantine bvl`. To build from source instead,
+build the extension and run `cargo install --path cli` (see [Development](#development)).
+
+Then:
 
 ```sh
 bvl setup
@@ -153,6 +192,9 @@ pnpm watch                                   # rebuild on change, then reload th
 - The manifest `key` pins the extension ID to `fekhggniifjffgnkljlblgfcoolaonbm`, and the proxy only
   accepts that origin. Chrome rejects a second unpacked copy with the same ID, so for development
   remove the `bvl setup` copy and load `extension/dist` instead (or the other way round).
+- Releasing: bump the version in `cli/Cargo.toml`, `extension/package.json` and
+  `extension/static/manifest.json`, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The
+  release workflow runs CI, builds `bvl` for Linux, macOS and Windows, and publishes a GitHub release.
 - The matching private key (`extension/key.pem`, gitignored) is only needed to pack a `.crx` or to
   keep the same ID on a first Web Store upload.
 
@@ -162,3 +204,7 @@ pnpm watch                                   # rebuild on change, then reload th
 - Chrome pages (`chrome://…`, the Web Store) can't be controlled.
 - One browser connects at a time (the most recent one wins).
 - Firefox isn't supported (no `chrome.debugger`).
+
+## License
+
+[Apache License 2.0](LICENSE)

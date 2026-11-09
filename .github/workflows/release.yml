@@ -1,0 +1,103 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # Full CI (fmt, clippy, tests on all OSes, extension checks, E2E). Also produces the
+  # `extension-dist` artifact that every release binary embeds.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the CLI, extension and manifest versions
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cli=$(grep -m1 '^version' cli/Cargo.toml | cut -d'"' -f2)
+          pkg=$(jq -r .version extension/package.json)
+          man=$(jq -r .version extension/static/manifest.json)
+          echo "tag=$tag cli=$cli package.json=$pkg manifest.json=$man"
+          [ "$tag" = "$cli" ] && [ "$tag" = "$pkg" ] && [ "$tag" = "$man" ] || {
+            echo "::error::tag $GITHUB_REF_NAME does not match the versions in the repo"; exit 1; }
+
+  build:
+    needs: [ci, version]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: extension-dist
+          path: extension/dist
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+          key: ${{ matrix.target }}
+      - name: Build
+        working-directory: cli
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          name="bvl-${{ matrix.target }}"
+          mkdir -p "pkg/$name" out
+          cp LICENSE README.md "pkg/$name/"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "cli/target/${{ matrix.target }}/release/bvl.exe" "pkg/$name/"
+            (cd "pkg/$name" && 7z a "../../out/$name.zip" .)
+          else
+            cp "cli/target/${{ matrix.target }}/release/bvl" "pkg/$name/"
+            tar -czf "out/$name.tar.gz" -C "pkg/$name" .
+          fi
+          ls -l out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: out/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: out
+          merge-multiple: true
+      - name: Checksums
+        working-directory: out
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag \
+            "${flags[@]}"

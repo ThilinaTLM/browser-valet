@@ -2,6 +2,7 @@
   "name": "browser-valet-extension",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "Chrome extension that lets the local `bvl` CLI control this browser.",
   "scripts": {
