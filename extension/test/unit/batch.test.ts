@@ -82,6 +82,19 @@ describe('rejectItem', () => {
     expect(batch.rejectItem(['eval', '--stdin'])).toMatch(/--stdin/);
     expect(batch.rejectItem(['batch', 'help'])).toMatch(/nested/);
     expect(batch.rejectItem([])).toBe('Empty command');
+    const set = new Set(['allowed-domains', 'confirm-actions']);
+    expect(batch.rejectItem(['open', 'x', '--allowed-domains', 'a.com'], set)).toMatch(
+      /cannot be repeated/,
+    );
+    expect(batch.rejectItem(['eval', '1', '--confirm-actions=eval'], set)).toMatch(
+      /--confirm-actions/,
+    );
+    // not set on the batch: an item may narrow its own run
+    expect(batch.rejectItem(['open', 'x', '--allowed-domains', 'a.com'])).toBeUndefined();
+    // --max-output and --content-boundaries are not policy: an item may set its own
+    expect(
+      batch.rejectItem(['get', 'text', '--max-output', '5'], new Set(['max-output'])),
+    ).toBeUndefined();
     expect(batch.rejectItem(['eval', '-b', 'MQ=='])).toBeUndefined();
   });
 });

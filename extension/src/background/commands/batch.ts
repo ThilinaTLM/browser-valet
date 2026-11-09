@@ -7,6 +7,7 @@ import { UserError } from '../errors';
 /** What `execute` reports about one run, besides the response (filled in when passed). */
 export interface Outcome {
   data?: unknown;
+  boundary?: unknown;
   error?: string;
 }
 
@@ -61,6 +62,8 @@ export interface Item {
   success: boolean;
   result: unknown;
   error: string | null;
+  /** `--content-boundaries`: the nonce and origin of this item's markers (JSON mode). */
+  _boundary?: unknown;
 }
 
 /** Upstream's `--json` shape: a top-level array; `--omit-command` swaps `command` for `index`. */
@@ -71,6 +74,7 @@ export function formatBatchJson(items: Item[], omitCommand: boolean): string {
       success: it.success,
       result: it.result,
       error: it.error,
+      ...(it._boundary ? { _boundary: it._boundary } : {}),
     })),
   );
 }
@@ -81,8 +85,18 @@ export function formatBatchText(stdouts: string[]): string {
 }
 
 /** Why an item may not run inside a batch, or undefined. */
-export function rejectItem(argv: string[]): string | undefined {
+export function rejectItem(
+  argv: string[],
+  batchFlags: ReadonlySet<string> = new Set(),
+): string | undefined {
   if (argv.length === 0) return 'Empty command';
+  // A flag the batch already carries must not be repeated on an item: for the policy flags the
+  // last value would win and could widen what the batch allows.
+  for (const f of POLICY_FLAGS) {
+    if (batchFlags.has(f) && argv.some((t) => t === `--${f}` || t.startsWith(`--${f}=`))) {
+      return `--${f} is set on the batch and applies to every item; it cannot be repeated on an item`;
+    }
+  }
   if (argv.some((t) => t === '--session' || t.startsWith('--session='))) {
     return '--session is not allowed on a batch item; put it on the batch itself';
   }
@@ -93,6 +107,11 @@ export function rejectItem(argv: string[]): string | undefined {
   return undefined;
 }
 
+/** Guardrail flags that restrict the agent; a batch's value must not be overridden by an item. */
+const POLICY_FLAGS = ['allowed-domains', 'confirm-actions'];
+/** Global flags given to `batch` that every item inherits (output shaping and guardrails). */
+const INHERITED = ['max-output', 'allowed-domains', 'confirm-actions'];
+
 export const batchCommands: Command[] = [
   {
     name: 'batch',
@@ -100,7 +119,7 @@ export const batchCommands: Command[] = [
     usage: 'batch [--bail] [--omit-command] ["<cmd>" …] [--stdin]',
     summary: 'Run several commands in one call',
     details:
-      'Each quoted argument (or each line of stdin) is one command, split like a shell would (quotes and backslashes, no expansion). Items run in order through the normal path, so consent, dialogs, errors and the activity log work as for single calls. --session, --timeout (per item) and --json apply to every item; --session on an item is rejected. A confirm/prompt dialog ends the batch. Exit code 1 if any item failed. --json prints a top-level array of {command, success, result, error}; --omit-command replaces command with index. Not allowed inside a batch: batch, --stdin (eval -b still works).',
+      'Each quoted argument (or each line of stdin) is one command, split like a shell would (quotes and backslashes, no expansion). Items run in order through the normal path, so consent, dialogs, errors and the activity log work as for single calls. --max-output, --content-boundaries, --allowed-domains and --confirm-actions on the batch apply to every item (output is truncated and wrapped per item; an item cannot repeat --allowed-domains or --confirm-actions). --session, --timeout (per item) and --json apply to every item; --session on an item is rejected. A confirm/prompt dialog ends the batch. Exit code 1 if any item failed. --json prints a top-level array of {command, success, result, error}; --omit-command replaces command with index. Not allowed inside a batch: batch, --stdin (eval -b still works).',
     examples: [
       'bctl batch "fill @e1 user@example.com" "fill @e2 hunter2" "click @e3" "wait --url **/home"',
       'bctl batch --bail "open https://example.com" "snapshot -i"',
@@ -141,6 +160,16 @@ export async function runBatch(
   const session = args.str('session') ?? req.session;
   const globals = [...(args.has('timeout') ? ['--timeout', args.str('timeout') ?? ''] : [])];
   if (json) globals.push('--json');
+  // Guardrail flags given to the batch apply to every item (see security.md, "Guardrails").
+  const batchFlags = new Set<string>();
+  for (const f of INHERITED) {
+    const v = args.str(f);
+    if (v !== undefined) {
+      globals.push(`--${f}`, v);
+      batchFlags.add(f);
+    }
+  }
+  if (args.has('content-boundaries')) globals.push('--content-boundaries');
 
   const items: Item[] = [];
   const stdouts: string[] = [];
@@ -155,7 +184,7 @@ export async function runBatch(
     const outcome: Outcome = {};
     try {
       command = tokenize(line);
-      const why = rejectItem(command);
+      const why = rejectItem(command, batchFlags);
       if (why) throw new UserError(why, 'bad_args');
       res = await execute(
         { ...req, argv: [...globals, ...command], session, stdin: undefined },
@@ -174,6 +203,7 @@ export async function runBatch(
       success,
       result: success ? (outcome.data ?? null) : null,
       error: success ? null : (outcome.error ?? 'Failed'),
+      ...(outcome.boundary ? { _boundary: outcome.boundary } : {}),
     });
     stdouts.push(json ? '' : res.stdout);
     stderrs.push(res.stderr);

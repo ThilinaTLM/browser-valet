@@ -210,7 +210,10 @@ export async function execute(
     warning?: string | string[],
     envelope: Record<string, unknown> = {},
   ): CliResponse => {
-    if (outcome) outcome.data = data ?? null;
+    if (outcome) {
+      outcome.data = data ?? null;
+      outcome.boundary = envelope._boundary;
+    }
     return okResponse(text, data, warning, envelope);
   };
   const okResponse = (

@@ -386,3 +386,97 @@ describe('allowed domains (navigation guard on agent tabs)', () => {
     expect(r).toMatchObject({ success: false, code: 'domain_blocked' });
   });
 });
+
+describe('batch', () => {
+  const S = ['--session', 'guard-batch'];
+  interface Item {
+    success: boolean;
+    result: unknown;
+    error: string | null;
+    _boundary?: { nonce: string };
+  }
+  const items = async (...args: string[]) =>
+    JSON.parse((await bctl('batch', '--json', ...S, ...args)).stdout) as Item[];
+
+  it('--max-output and --content-boundaries on the batch apply to every item, per item', async () => {
+    await bctl('open', fixture('/prose.html'), ...S);
+    const r = await bctl(
+      'batch',
+      '--max-output',
+      '20',
+      '--content-boundaries',
+      ...S,
+      'get text body',
+      'get title',
+      'get text h1',
+    );
+    expect(r.code).toBe(0);
+    const blocks =
+      r.stdout.match(
+        /--- AGENT_BROWSER_PAGE_CONTENT nonce=([0-9a-f]{32}) [\s\S]*?--- END_AGENT_BROWSER_PAGE_CONTENT nonce=\1 ---/g,
+      ) ?? [];
+    expect(blocks).toHaveLength(2); // get title is not page content
+    expect(blocks[0]).toContain('[truncated: showing 20 of ');
+    expect(blocks[1]).toContain('Readable prose');
+    expect(blocks[1]).not.toContain('truncated');
+    const nonces = blocks.map((b) => /nonce=([0-9a-f]{32})/.exec(b)?.[1]);
+    expect(nonces[0]).not.toBe(nonces[1]);
+  });
+
+  it('--json: per-item truncation and a _boundary on the wrapped items', async () => {
+    const out = await items(
+      '--max-output',
+      '20',
+      '--content-boundaries',
+      'get text body',
+      'get title',
+    );
+    expect((out[0]?.result as { truncated?: boolean }).truncated).toBe(true);
+    expect(out[0]?._boundary?.nonce).toMatch(/^[0-9a-f]{32}$/);
+    expect(out[1]?._boundary).toBeUndefined();
+  });
+
+  it('--allowed-domains on the batch applies to every item; items cannot repeat or widen it', async () => {
+    await bctl('open', fixture('/prose.html'), ...S);
+    const outside = fixture('/form.html').replace('127.0.0.1', 'localhost');
+    const out = await items(
+      '--allowed-domains',
+      '127.0.0.1',
+      `open ${outside}`,
+      `open ${fixture('/prose.html')}`,
+      `open ${outside} --allowed-domains localhost`,
+    );
+    expect(out[0]).toMatchObject({ success: false });
+    expect(out[0]?.error).toContain('--allowed-domains');
+    expect(out[1]).toMatchObject({ success: true });
+    expect(out[2]?.error).toContain('cannot be repeated');
+  });
+
+  it('an item flag cannot widen the popup policy either', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    const outside = fixture('/form.html').replace('127.0.0.1', 'localhost');
+    const out = await items(`open ${outside} --allowed-domains localhost,127.0.0.1`);
+    expect(out[0]).toMatchObject({ success: false });
+    expect(out[0]?.error).toContain("the user's allowed-domains policy");
+  });
+
+  it('--confirm-actions on the batch asks for every matching item', async () => {
+    await bctl('open', fixture('/prose.html'), ...S);
+    const pending = bctl(
+      'batch',
+      '--confirm-actions',
+      'eval',
+      ...S,
+      'eval 1+1',
+      'get title',
+      'eval 2+2',
+    );
+    await approveNextConsent('allow');
+    await approveNextConsent('deny');
+    const r = await pending;
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain('2');
+    expect(r.stdout).toContain('Prose');
+    expect(r.stderr).toContain('denied');
+  });
+});
