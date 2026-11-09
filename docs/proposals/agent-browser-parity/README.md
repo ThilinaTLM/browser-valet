@@ -21,7 +21,6 @@ stable monotonic refs, `snapshot --delta/--full`, clickable (`cursor:pointer`/`o
 
 | Proposal | What | Priority |
 |---|---|---|
-| [agent-guardrails.md](../agent-guardrails.md) | allowed domains, content boundaries, max output, action confirmation | 3 (security sign-off) |
 | [page-audits.md](../page-audits.md) | `a11y`, `vitals` | 4 |
 
 ## Out of scope (by principle)

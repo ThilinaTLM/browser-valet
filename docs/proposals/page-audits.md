@@ -31,8 +31,7 @@ accessibility and performance checks. agent-browser has `a11y` (axe-core audit; 
 
 ## Priority
 
-Low. Useful for web developers, but not needed for general browsing. Do it after the parity and
-guardrails work.
+Low. Useful for web developers, but not needed for general browsing. Do it after the parity work.
 
 ## Open questions
 
