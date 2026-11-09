@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Form</title>
+  </head>
+  <body>
+    <h1>Fixture Form</h1>
+    <label for="name">Name</label>
+    <input id="name" type="text" />
+    <button id="inc" type="button">Increment</button>
+    <p id="count">Count: 0</p>
+    <p id="echo"></p>
+    <script>
+      let n = 0;
+      document.getElementById('inc').addEventListener('click', () => {
+        n += 1;
+        document.getElementById('count').textContent = `Count: ${n}`;
+      });
+      document.getElementById('name').addEventListener('input', (e) => {
+        document.getElementById('echo').textContent = `Hello, ${e.target.value}!`;
+      });
+    </script>
+  </body>
+</html>

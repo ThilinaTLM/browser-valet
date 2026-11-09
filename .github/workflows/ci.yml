@@ -52,8 +52,41 @@ jobs:
           cache-dependency-path: extension/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm check # typecheck + eslint + prettier
+      - run: pnpm test # unit tests (Vitest, mocked chrome.*)
       - run: pnpm build
       - uses: actions/upload-artifact@v4
         with:
           name: extension-dist
           path: extension/dist
+
+  # Real Chrome for Testing + the real extension + a real bctl, headless. Branded Chrome 137+
+  # ignores --load-extension, so install Chrome for Testing explicitly.
+  e2e:
+    needs: extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: extension/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chrome for Testing
+        working-directory: ${{ runner.temp }} # npx misbehaves inside the pnpm project
+        run: |
+          out=$(npx --yes @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome")
+          echo "CHROME_PATH=${out#* }" >> "$GITHUB_ENV"
+      - run: pnpm test:e2e # builds the extension and `cargo build`s bctl itself
+        env:
+          CI: true
