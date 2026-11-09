@@ -80,3 +80,29 @@ describe('JSON error codes', () => {
     expect(e).not.toHaveProperty('code');
   });
 });
+
+describe('wait prints what it matched', () => {
+  it('--text prints the text, --url prints the final URL, others stay ✓ Done', async () => {
+    await bctl('open', fixture('/form.html'));
+    await bctl('eval', 'setTimeout(() => document.body.append("Zebra marker"), 200)');
+    expect((await bctl('wait', '--text', 'Zebra marker')).stdout).toBe('Zebra marker\n');
+
+    await bctl('eval', 'setTimeout(() => history.pushState({}, "", "/dashboard"), 200)');
+    const url = await bctl('wait', '--url', '**/dashboard');
+    expect(url.stdout).toBe(`${fixture('/dashboard')}\n`);
+
+    expect((await bctl('wait', '--url', 'dashboard', '--json')).stdout).toContain(
+      JSON.stringify({ url: fixture('/dashboard') }),
+    );
+    expect(JSON.parse((await bctl('wait', '--text', 'Zebra marker', '--json')).stdout)).toEqual({
+      success: true,
+      data: { text: 'Zebra marker' },
+      error: null,
+    });
+
+    expect((await bctl('wait', 'h1')).stdout).toBe('✓ Done\n');
+    expect((await bctl('wait', '--fn', 'true')).stdout).toBe('✓ Done\n');
+    expect((await bctl('wait', '50')).stdout).toBe('✓ Done\n');
+    expect((await bctl('wait', '--load', 'load')).stdout).toBe('✓ Done\n');
+  });
+});

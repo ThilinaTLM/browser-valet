@@ -1,4 +1,4 @@
-import { type Command, type Ctx } from '../command';
+import { type Command, type Ctx, type Result } from '../command';
 import * as cdp from '../cdp';
 import {
   call,
@@ -273,6 +273,7 @@ export const inspectionCommands: Command[] = [
       const url = a.str('url');
       const load = a.str('load');
       const fn = a.str('fn');
+      let result: Result = { text: '✓ Done' };
       if (first !== undefined) {
         const st = a.str('state') ?? 'visible';
         const visible = async () => call<boolean>(await resolve(id, first), VISIBLE);
@@ -294,10 +295,14 @@ export const inspectionCommands: Command[] = [
       } else if (text !== undefined) {
         const expr = `document.body?.innerText.includes(${JSON.stringify(text)}) ?? false`;
         await poll(ctx, `text "${text}"`, async () => (await evaluate(id, expr)).value === true);
+        result = { text, data: { text } };
       } else if (url !== undefined) {
-        await poll(ctx, `URL ${url}`, async () =>
-          urlMatches((await chrome.tabs.get(id)).url ?? '', url),
-        );
+        let matched = '';
+        await poll(ctx, `URL ${url}`, async () => {
+          matched = (await chrome.tabs.get(id)).url ?? '';
+          return urlMatches(matched, url);
+        });
+        result = { text: matched, data: { url: matched } };
       } else if (fn !== undefined) {
         await poll(ctx, `condition ${fn}`, async () => Boolean((await evaluate(id, fn)).value));
       } else if (load !== undefined) {
@@ -324,7 +329,7 @@ export const inspectionCommands: Command[] = [
       } else {
         throw new UserError('Usage: wait <target|ms> | --text | --url | --load | --fn', 'bad_args');
       }
-      return { text: '✓ Done' };
+      return result;
     },
   },
   {
