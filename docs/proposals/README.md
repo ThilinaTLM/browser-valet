@@ -39,7 +39,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 
 | Proposal | Area | Status |
 |---|---|---|
-| [debugger-attach-conflict.md](debugger-attach-conflict.md) | automation | Draft |
 | [agent-browser-parity/](agent-browser-parity/README.md) | automation, security | Draft (umbrella) |
 | [snapshot-delta.md](snapshot-delta.md) | automation | Draft |
 | [snapshot-parity.md](snapshot-parity.md) | automation | Draft |
@@ -55,10 +54,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 | [page-audits.md](page-audits.md) | automation | Draft |
 
 ## Roadmap
-
-### Debt
-
-- [ ] Detect DevTools holding the debugger: [debugger-attach-conflict.md](debugger-attach-conflict.md)
 
 ### agent-browser parity
 

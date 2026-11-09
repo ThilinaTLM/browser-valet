@@ -52,7 +52,7 @@ pass `Ctx.tab()`, and must be dropped on revoke or detach.
 - State shape change (`RefInfo.sessionId`, session `frame`). They need defaults for the handoff
   (`restoreHandoff`). Child sessions don't survive a service-worker restart, so re-establish them
   lazily on the next command.
-- Interaction with [debugger-attach-conflict.md](debugger-attach-conflict.md): child-session errors
+- Interaction with the attach probe in [automation.md](../architecture/automation.md): child-session errors
   must not be mistaken for "already attached".
 
 ## Open questions

@@ -52,8 +52,17 @@ export async function attach(tabId: number): Promise<void> {
         },
       );
     }
-    // Still attached from before a service-worker restart: carry on.
     if (!/already attached/i.test(msg)) throw e;
+    // Chrome words "already attached" the same way for our own attachment (kept across a
+    // service-worker restart) and for another debugger. Only our own session accepts commands.
+    try {
+      await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', { expression: '0' });
+    } catch (probe) {
+      throw new Error(
+        'Another debugger is attached to this tab (DevTools or another extension). Close DevTools on this tab, or disable the other extension, then retry.',
+        { cause: probe },
+      );
+    }
   }
   attached.add(tabId);
   await Promise.all([

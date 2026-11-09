@@ -1,7 +1,7 @@
 // Smoke suite: the commands and the consent flow end to end, with a real Chrome, the real
 // extension and the real bctl binary. Add new E2E files next to this one (see harness.ts).
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, inject } from 'vitest';
 import {
   approveNextConsent,
   bctl,
@@ -13,7 +13,7 @@ import {
   useBrowser,
 } from './harness';
 
-useBrowser();
+const browser = useBrowser();
 
 /** The ref of the first snapshot line matching `re`, e.g. `@e2`. */
 function refOf(snapshot: string, re: RegExp): string {
@@ -131,5 +131,25 @@ describe('consent', () => {
     expect(r.code).toBe(1);
     expect(r.stderr).toContain('closed while waiting');
     expect(Date.now() - started).toBeLessThan(30_000);
+  });
+});
+
+describe('debugger', () => {
+  it('commands keep working after the service worker is restarted', async () => {
+    expect((await bctl('open', fixture('/form.html'))).code).toBe(0);
+    const sw = await browser.current.waitForTarget(
+      (t) => (t.type() as string) === 'service_worker' && t.url().includes('background'),
+    );
+    // Kill the worker: its in-memory state (including which tabs it attached) is gone.
+    const session = await browser.current.target().createCDPSession();
+    const targetId = (sw as unknown as { _targetId: string })._targetId;
+    await session.send('Target.closeTarget', { targetId });
+    // Opening the popup wakes the worker again.
+    const popup = await browser.current.newPage();
+    await popup.goto(`${inject('e2e').extensionOrigin}/popup.html`);
+    await new Promise((r) => setTimeout(r, 1500));
+    await popup.close();
+    const r = await bctl('snapshot', '-i');
+    expect(r.code).toBe(0);
   });
 });
