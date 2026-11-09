@@ -7,7 +7,7 @@ Message formats: [protocol.md](protocol.md).
 ## Rules
 
 - **MUST** keep the proxy free of durable state. Its memory holds only the extension connection, pending requests and the idle clock. *Why:* the CLI starts it on demand and it exits when idle. Anything stored there would be lost silently.
-- **MUST** keep the managed folder path (`<config>/browser-valet/extension`) and the `config.json` / `pairing.json` keys (`secret`, `port`) stable. *Why:* the user picked that folder once in Load unpacked. Moving it or renaming keys strands every install.
+- **MUST** keep the managed folder path (`<data>/browser-valet/extension`) and the `config.json` / `pairing.json` keys (`secret`, `port`) stable once released. *Why:* the user picked that folder once in Load unpacked. Moving it or renaming keys strands every install. (It moved from `<config>` to `<data>` before the first release.)
 - **MUST** auto-update only managed extensions, and only when the binary embeds an extension of a different version. *Why:* a dev build loaded from `extension/dist` must never be overwritten. `bvl status` only reports its mismatch.
 - **Default:** new fields in the extension's `State` must have a default in `initial()`. *Why:* stored and handed-off state is spread over `initial()`, so state from an older version lacks the field.
 - **Default:** `State.sessions[s].sites` (hosts the session has visited, for `navigate-new-site`) and `Approval.action` are optional; code treats a missing value as empty/none, so state from an older version still loads.
@@ -27,15 +27,23 @@ Message formats: [protocol.md](protocol.md).
 
 ## Persisted files (CLI side)
 
-All under `<config>/browser-valet` (`dirs::config_dir()`, overridable with `BVL_CONFIG_DIR`):
+Only settings live in the config directory. Files `bvl` generates go to the data directory, logs to the state directory (`cli/src/main.rs`: `config_dir`, `data_dir`, `state_dir`):
 
-| File | Content | Notes |
-|---|---|---|
-| `config.json` | `{secret, port}` | mode 0600; a missing secret means "not paired" |
-| `extension/` | the embedded extension, written by `setup` and the proxy | managed folder; stale files are removed, except `pairing.json` |
-| `extension/pairing.json` | `{secret, port}` | mode 0600; written last, after the files are consistent |
-| `skills/<name>/`, `skills/.version` | expanded skills | rewritten when `.version` differs |
-| `proxy.log` | stderr of the detached proxy | for humans only |
+| Directory | Source | Linux | macOS | Windows |
+|---|---|---|---|---|
+| `<config>` | `dirs::config_dir()` | `~/.config/browser-valet` | `~/Library/Application Support/browser-valet` | `%APPDATA%\browser-valet` |
+| `<data>` | `dirs::data_local_dir()` | `~/.local/share/browser-valet` | `~/Library/Application Support/browser-valet` | `%LOCALAPPDATA%\browser-valet` |
+| `<state>` | `dirs::state_dir()`, else `data_local_dir()` | `~/.local/state/browser-valet` | `~/Library/Application Support/browser-valet` | `%LOCALAPPDATA%\browser-valet` |
+
+Linux honours `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME` and `$XDG_STATE_HOME`. The data dir is Local, not Roaming, on Windows, because the browser loads the managed folder from this machine. Overrides: `BVL_CONFIG_DIR` replaces `<config>`; `BVL_DATA_DIR` replaces `<data>` and `<state>`. If only `BVL_CONFIG_DIR` is set, `<data>` and `<state>` use it too, so a test that sets only that never touches the user's real folders.
+
+| File | Dir | Content | Notes |
+|---|---|---|---|
+| `config.json` | config | `{secret, port}` | mode 0600; a missing secret means "not paired" |
+| `extension/` | data | the embedded extension, written by `setup` and the proxy | managed folder; stale files are removed, except `pairing.json` |
+| `extension/pairing.json` | data | `{secret, port}` | mode 0600; written last, after the files are consistent |
+| `skills/<name>/`, `skills/.version` | data | expanded skills | rewritten when `.version` differs |
+| `proxy.log` | state | stderr of the detached proxy | for humans only |
 
 ## Version alignment and self-update
 

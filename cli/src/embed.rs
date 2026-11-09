@@ -1,5 +1,5 @@
 //! Embedded extension + skills: the managed extension folder, and the `skills` command.
-use crate::{dir, VERSION};
+use crate::{data_dir, VERSION};
 use anyhow::{bail, Context, Result};
 use serde_json::json;
 use std::io::Write;
@@ -16,8 +16,9 @@ pub const PAIRING: &str = "pairing.json";
 pub const NO_EXT: &str =
     "this bvl build doesn't include the extension; build it with `cd extension && pnpm build` and rebuild bvl";
 
+/// The managed extension folder: `<data dir>/extension`.
 pub fn ext_dir() -> PathBuf {
-    dir().join("extension")
+    data_dir().join("extension")
 }
 
 /// Write a secret file (mode 0600 on unix).
@@ -110,9 +111,9 @@ fn references(name: &str) -> Vec<(&'static str, &'static [u8])> {
         .collect()
 }
 
-/// Write skills to `<config dir>/skills/<name>/` (refreshing when the bvl version changed).
+/// Write skills to `<data dir>/skills/<name>/` (refreshing when the bvl version changed).
 fn materialize(only: Option<&str>) -> Result<PathBuf> {
-    let root = dir().join("skills");
+    let root = data_dir().join("skills");
     let stamp = root.join(".version");
     let fresh = std::fs::read_to_string(&stamp).is_ok_and(|v| v.trim() == VERSION);
     for name in skill_names() {

@@ -8,7 +8,7 @@
 //     expect(r.code).toBe(0);
 //   });
 //
-// All bvl subprocesses run against the temp config dir and non-default port created by
+// All bvl subprocesses run against the temp config and data dirs and the non-default port created by
 // global-setup.ts, never against the developer's real bvl or browser.
 
 import { spawn } from 'node:child_process';

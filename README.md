@@ -168,11 +168,17 @@ Controlled tabs show an **AI** badge on the toolbar icon.
 | `BVL_PORT` | Proxy port (default `47823`; set it before `bvl setup`, or use `bvl pair --port` / the popup's Settings for manual pairing) |
 | `BVL_SESSION` | Default session name |
 | `BVL_IDLE_TIMEOUT` | Proxy idle shutdown in seconds (default 600, `0` = never) |
-| `BVL_CONFIG_DIR` | Override the config directory (tests) |
+| `BVL_CONFIG_DIR` | Override the config directory (tests); also the data directory unless `BVL_DATA_DIR` is set |
+| `BVL_DATA_DIR` | Override the data directory (extension, skills, `proxy.log`) |
 
-Config lives in `~/.config/browser-valet` (Linux), `~/Library/Application Support/browser-valet`
-(macOS) or `%APPDATA%\browser-valet` (Windows). The proxy logs to `proxy.log` there; the
-extension lives in `extension/` and expanded skills in `skills/`.
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| `config.json` | `~/.config/browser-valet` | `~/Library/Application Support/browser-valet` | `%APPDATA%\browser-valet` |
+| `extension/`, `skills/` | `~/.local/share/browser-valet` | `~/Library/Application Support/browser-valet` | `%LOCALAPPDATA%\browser-valet` |
+| `proxy.log` | `~/.local/state/browser-valet` | `~/Library/Application Support/browser-valet` | `%LOCALAPPDATA%\browser-valet` |
+
+Linux honours `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME` and `$XDG_STATE_HOME`. `bvl setup` prints the
+extension folder to load.
 
 ## Development
 
