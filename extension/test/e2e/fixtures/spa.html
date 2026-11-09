@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture SPA</title>
+  </head>
+  <body>
+    <p id="route"></p>
+    <script>
+      window.routes = [];
+      const show = () => {
+        routes.push(location.pathname + location.search + location.hash);
+        document.getElementById('route').textContent = 'route ' + location.pathname;
+      };
+      addEventListener('popstate', show);
+      show();
+    </script>
+  </body>
+</html>

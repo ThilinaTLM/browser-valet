@@ -1,10 +1,11 @@
-// Small agent-browser parity commands: mouse, highlight, get styles helper (see automation.md).
+// Small agent-browser parity commands: mouse, highlight, get styles helper, pushstate, session (see automation.md).
 
 import * as cdp from '../cdp';
 import { type Command, type Ctx } from '../command';
 import { call, evaluate, type Handle, resolve, UserError } from '../dom';
 import { heldModifiers, prime, sendInput } from '../input';
-import { sleep } from '../tabs';
+import { meta, state } from '../state';
+import { isControlled, sleep } from '../tabs';
 
 const DONE = { text: '✓ Done' };
 
@@ -263,4 +264,137 @@ export async function computedStyles(
   return out;
 }
 
-export const extraCommands: Command[] = [mouse, highlight];
+// ---------------------------------------------------------------------------
+// pushstate
+// ---------------------------------------------------------------------------
+
+const pushstate: Command = {
+  name: 'pushstate',
+  group: 'Navigation',
+  usage: 'pushstate <url>',
+  summary: 'Client-side (SPA) navigation to a same-origin URL',
+  async run(ctx, a) {
+    const input = a.need(0, 'url');
+    const id = await ctx.tab();
+    const r = await evaluate(
+      id,
+      `((input) => {
+        try {
+          const url = new URL(input, location.href);
+          if (url.origin !== location.origin) {
+            return { error: 'pushstate is same-origin only: ' + url.origin + ' is not ' + location.origin };
+          }
+          const router = window.next && window.next.router;
+          if (router && typeof router.push === 'function') {
+            router.push(url.href);
+          } else {
+            history.pushState(null, '', url.href);
+            dispatchEvent(new PopStateEvent('popstate', { state: history.state }));
+          }
+          return { url: url.href };
+        } catch (e) {
+          return { error: String(e && e.message || e) };
+        }
+      })(${JSON.stringify(input)})`,
+    );
+    const v = r.value as { url?: string; error?: string } | undefined;
+    if (!v || v.error !== undefined) throw new UserError(v?.error ?? 'pushstate failed');
+    return { text: v.url, data: { url: v.url } };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// session list / info (read-only)
+// ---------------------------------------------------------------------------
+
+function ago(ts: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
+}
+
+function ownedTids(name: string): string[] {
+  return Object.values(state.tabs)
+    .filter((m) => m.owner === name)
+    .map((m) => m.tid);
+}
+
+function lastActivity(name: string): number | undefined {
+  return state.log.find((e) => e.session === name)?.ts;
+}
+
+const sessionCmd: Command = {
+  name: 'session',
+  show: Infinity,
+  group: 'Tabs',
+  usage: 'session <list|info>',
+  summary: 'Show sessions (list) or the current one (info)',
+  async run(ctx, a) {
+    const what = a.pos[0] ?? 'info';
+    if (what === 'list') {
+      const names = [...new Set([ctx.session, ...Object.keys(state.sessions)])].sort();
+      const sessions = names.map((name) => {
+        const tabId = state.sessions[name]?.tab;
+        const m = tabId === undefined ? undefined : state.tabs[tabId];
+        return {
+          name,
+          current: name === ctx.session,
+          tab: tabId !== undefined && m && isControlled(tabId) ? m.tid : null,
+          owned: ownedTids(name),
+          lastActivity: lastActivity(name) ?? null,
+        };
+      });
+      const lines = sessions.map((s) => {
+        const parts = [`tab ${s.tab ?? '-'}`];
+        if (s.owned.length) parts.push(`owns ${s.owned.join(',')}`);
+        if (s.lastActivity !== null) parts.push(`last ${ago(s.lastActivity)}`);
+        return `${s.current ? '→' : ' '} ${s.name}  ${parts.join('  ')}`;
+      });
+      return { text: ['Active sessions:', ...lines].join('\n'), data: { sessions } };
+    }
+    if (what === 'info') {
+      const tabId = state.sessions[ctx.session]?.tab;
+      let tab: string | null = null;
+      let label: string | null = null;
+      let title: string | null = null;
+      let url: string | null = null;
+      let note = '';
+      if (tabId !== undefined) {
+        const m = meta(tabId);
+        tab = m.tid;
+        label = m.label ?? null;
+        const t = await chrome.tabs.get(tabId).catch(() => undefined);
+        if (!t) note = ' (closed)';
+        else if (!isControlled(tabId)) note = ' (not shared)';
+        else {
+          title = t.title ?? null;
+          url = t.url ?? null;
+        }
+      }
+      const text = [
+        `Session: ${ctx.session}`,
+        `Tab: ${tab === null ? '-' : tab + note}`,
+        ...(label ? [`Label: ${label}`] : []),
+        ...(url !== null ? [`Title: ${title ?? ''}`, `URL: ${url}`] : []),
+        'Frame: main',
+      ].join('\n');
+      return {
+        text,
+        data: {
+          session: ctx.session,
+          tab,
+          label,
+          title,
+          url,
+          frame: 'main',
+          owned: ownedTids(ctx.session),
+          lastActivity: lastActivity(ctx.session) ?? null,
+        },
+      };
+    }
+    throw new UserError(`Unknown: session ${what}`);
+  },
+};
+
+export const extraCommands: Command[] = [mouse, highlight, pushstate, sessionCmd];

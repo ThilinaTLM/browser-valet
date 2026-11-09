@@ -1,7 +1,7 @@
 // Small parity commands: mouse, highlight, get styles, XPath, pushstate, session.
 
 import { describe, expect, it } from 'vitest';
-import { bctl, bctlJson, fixture, useBrowser } from './harness';
+import { bctl, bctlJson, bctlWith, fixture, useBrowser } from './harness';
 
 useBrowser();
 
@@ -104,5 +104,55 @@ describe('XPath selectors', () => {
     expect((await bctl('get', 'text', '#out')).stdout).toContain('clicked');
     expect((await bctl('get', 'text', '//nothing')).stderr).toContain('Element not found');
     expect((await bctl('get', 'text', '//[')).stderr).toContain('Invalid selector');
+  });
+});
+
+describe('pushstate', () => {
+  it('navigates client-side and fires popstate; rejects other origins', async () => {
+    await bctl('open', fixture('/spa.html'));
+    const r = await bctl('pushstate', '/app/settings?x=1#top');
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim()).toBe(fixture('/app/settings?x=1#top'));
+    expect((await bctl('get', 'text', '#route')).stdout).toContain('route /app/settings');
+    expect((await bctl('get', 'url')).stdout.trim()).toBe(fixture('/app/settings?x=1#top'));
+    // same document: no reload happened
+    expect((await bctl('eval', 'window.routes.length')).stdout.trim()).toBe('2');
+
+    const json = await bctlJson('pushstate', '/other');
+    expect(json).toMatchObject({ success: true, data: { url: fixture('/other') } });
+
+    const bad = await bctl('pushstate', 'https://example.com/x');
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toContain('same-origin only');
+  });
+});
+
+describe('session', () => {
+  it('list and info are read-only views of the sessions', async () => {
+    const env = { BCTL_SESSION: 'e2e-sessions' };
+    await bctlWith(env, 'open', fixture('/styled.html'));
+
+    const info = await bctlWith(env, 'session', 'info');
+    expect(info.code).toBe(0);
+    expect(info.stdout).toContain('Session: e2e-sessions');
+    expect(info.stdout).toMatch(/Tab: t\d+/);
+    expect(info.stdout).toContain(`URL: ${fixture('/styled.html')}`);
+    expect(info.stdout).toContain('Frame: main');
+
+    const list = await bctlWith(env, 'session', 'list');
+    expect(list.stdout).toContain('Active sessions:');
+    expect(list.stdout).toMatch(/→ e2e-sessions {2}tab t\d+/);
+
+    const json = JSON.parse((await bctlWith(env, 'session', 'list', '--json')).stdout) as {
+      data: { sessions: { name: string; current: boolean; tab: string; owned: string[] }[] };
+    };
+    const mine = json.data.sessions.find((s) => s.name === 'e2e-sessions');
+    expect(mine).toMatchObject({ current: true });
+    expect(mine?.owned).toContain(mine?.tab);
+
+    // a fresh session has no tab
+    const none = await bctlWith({ BCTL_SESSION: 'e2e-empty' }, 'session', 'info');
+    expect(none.stdout).toContain('Tab: -');
+    expect((await bctl('session', 'nope')).stderr).toContain('Unknown: session nope');
   });
 });
