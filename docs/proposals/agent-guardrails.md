@@ -82,8 +82,8 @@ trusted UI that upstream lacks: the **popup**. Proposal:
   a 120 s timeout). The card shows the session, command and target, with the arguments **redacted**
   as in the activity log.
 - Agent flag `--confirm-actions eval,upload` can add categories, never remove them.
-- Depends on fixing [stale-approvals.md](stale-approvals.md), because more approvals make stale
-  cards more likely.
+- Builds on the approval rules in [security.md](../architecture/security.md) (approvals are never
+  restored after a worker restart; closing the tab fails the waiter).
 
 ## Impact
 

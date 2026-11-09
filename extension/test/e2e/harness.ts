@@ -84,6 +84,10 @@ function browser(): Browser {
 
 /** Open a page as the *user* would (a tab the agent has no access to until approved). */
 export async function openUserTab(url: string): Promise<Page> {
+  // Chrome gives a new tab the active tab as its opener, and the extension treats a tab opened
+  // by a controlled tab as the agent's. Activate the untouched about:blank tab first.
+  const blank = (await browser().pages()).find((p) => p.url() === 'about:blank');
+  await blank?.bringToFront().catch(() => undefined);
   const page = await browser().newPage();
   await page.goto(url);
   return page;

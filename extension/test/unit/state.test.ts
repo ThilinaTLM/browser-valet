@@ -39,6 +39,17 @@ describe('loadState', () => {
     expect(s.state.refs).toEqual({});
   });
 
+  it('drops stored approvals: their waiters died with the previous service worker', async () => {
+    mock.session.data.state = {
+      nextTid: 4,
+      tabs: { 1: { tid: 't3' } },
+      approvals: [{ id: 'a1', tabId: 1, session: 'default', ts: 1 }],
+    };
+    await s.loadState();
+    expect(s.state.approvals).toEqual([]);
+    expect(s.state.tabs[1]?.tid).toBe('t3');
+  });
+
   it('prefers a stored secret and port', async () => {
     mock.local.data = { secret: 'abc', port: 5000, enabled: false, paired: true };
     await s.loadState();

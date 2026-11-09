@@ -114,7 +114,9 @@ async function restoreHandoff(): Promise<void> {
 
 export async function loadState(): Promise<void> {
   const stored = await chrome.storage.session.get<{ state?: State }>('state');
-  state = { ...initial(), ...stored.state };
+  // Approvals are never restored: their waiters lived in the previous service worker, so
+  // nothing could answer them (the CLI request that asked has already failed).
+  state = { ...initial(), ...stored.state, approvals: [] };
   await restoreHandoff();
   const local = await chrome.storage.local.get<Partial<Settings & { paired: boolean }>>([
     'secret',

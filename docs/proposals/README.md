@@ -39,7 +39,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 
 | Proposal | Area | Status |
 |---|---|---|
-| [stale-approvals.md](stale-approvals.md) | security | Draft |
 | [debugger-attach-conflict.md](debugger-attach-conflict.md) | automation | Draft |
 | [agent-browser-parity/](agent-browser-parity/README.md) | automation, security | Draft (umbrella) |
 | [snapshot-delta.md](snapshot-delta.md) | automation | Draft |
@@ -59,7 +58,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 
 ### Debt
 
-- [ ] Clear orphaned approvals after a service-worker restart: [stale-approvals.md](stale-approvals.md)
 - [ ] Detect DevTools holding the debugger: [debugger-attach-conflict.md](debugger-attach-conflict.md)
 
 ### agent-browser parity

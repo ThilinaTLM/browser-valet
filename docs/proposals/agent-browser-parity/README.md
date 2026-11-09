@@ -40,7 +40,6 @@ flowchart LR
   SP[snapshot-parity] --> DL
   OC[output conventions] --> B[batch]
   OC --> G[guardrails]
-  SA[stale-approvals fix] --> G
   XF[cross-origin frames] -.-> AN
 ```
 

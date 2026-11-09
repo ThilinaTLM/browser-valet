@@ -71,7 +71,7 @@ export interface ChromeMock {
   /** Manifest returned by `chrome.runtime.getManifest()`. */
   manifest: { version: string };
   events: {
-    tabsOnRemoved: MockEvent;
+    tabsOnRemoved: MockEvent<(tabId: number) => void>;
     tabsOnCreated: MockEvent;
     tabsOnUpdated: MockEvent;
     debuggerOnEvent: MockEvent;
@@ -86,7 +86,7 @@ export function installChromeMock(): ChromeMock {
   const local = new MockStorageArea();
   const manifest = { version: '0.0.0-test' };
   const events = {
-    tabsOnRemoved: new MockEvent(),
+    tabsOnRemoved: new MockEvent<(tabId: number) => void>(),
     tabsOnCreated: new MockEvent(),
     tabsOnUpdated: new MockEvent(),
     debuggerOnEvent: new MockEvent(),

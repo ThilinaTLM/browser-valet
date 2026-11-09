@@ -107,4 +107,29 @@ describe('consent', () => {
       await page.close();
     }
   });
+
+  it('closing the tab while the consent request is pending fails the command promptly', async () => {
+    // Chrome may give a CDP-created tab an opener (an agent tab), which makes it an agent tab
+    // too. Retry until we get a plain user tab.
+    const unshared = async () =>
+      /\[(t\d+)\] Fixture Other.*\[not shared\]/.exec((await bctl('tab')).stdout)?.[1];
+    let page = await openUserTab(fixture('/other.html'));
+    let tid = await unshared();
+    for (let i = 0; i < 5 && !tid; i++) {
+      await page.close();
+      page = await openUserTab(fixture('/other.html'));
+      tid = await unshared();
+    }
+    if (!tid) throw new Error('could not open a plain user tab');
+    const started = Date.now();
+    const pending = bctl('tab', tid);
+    // Give the extension time to register the approval (its own consent window opens), then
+    // close the tab instead of answering.
+    await new Promise((r) => setTimeout(r, 1500));
+    await page.close();
+    const r = await pending;
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('closed while waiting');
+    expect(Date.now() - started).toBeLessThan(30_000);
+  });
 });

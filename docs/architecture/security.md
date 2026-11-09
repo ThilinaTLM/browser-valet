@@ -25,7 +25,7 @@ The wire details are in [protocol.md](protocol.md).
 - **MUST** end all control when the popup's on/off switch is turned off: revoke every grant and deny every pending approval (`revokeAll` in `index.ts`). *Why:* the switch is the user's emergency stop in their own browser. Turning it back on starts with no grants.
 - Grants live in `chrome.storage.session`. They survive service-worker and proxy restarts and are carried over by a self-update handoff. Turning the switch off, disabling or reloading the extension in Chrome, and restarting the browser clear them.
 
-> **Known debt:** pending approvals are stored in session state, but their waiters live only in memory. After a service-worker restart, the approval card and the `!` badge stay with nothing to answer them (only a handoff or the off switch clears them). Fix: [proposal](../proposals/stale-approvals.md).
+- **MUST** answer or drop every pending approval: the waiter lives in memory only, so `loadState` never restores approvals (a restarted service worker starts with none, and the CLI request that asked has already failed with "browser extension disconnected"), and closing the tab rejects the waiter with "The tab was closed while waiting for the user to allow control" (`failApprovals` in `tabs.ts`). *Why:* an approval card with nothing behind it does nothing, and a CLI waiting for a closed tab would hang for 120 s.
 
 ## Trust boundaries
 

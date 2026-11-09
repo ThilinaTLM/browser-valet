@@ -36,11 +36,19 @@ export async function revoke(tabId: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const APPROVAL_TIMEOUT_MS = 120_000;
-const pending = new Map<string, (allow: boolean) => void>();
+const pending = new Map<
+  string,
+  { resolve: (allow: boolean) => void; reject: (e: Error) => void }
+>();
 
 /** Called by the popup when the user clicks Allow / Deny. */
 export function decide(id: string, allow: boolean): void {
-  pending.get(id)?.(allow);
+  pending.get(id)?.resolve(allow);
+}
+
+/** Fail the waiting CLI request of every pending approval for `tabId` (e.g. the tab was closed). */
+function failApprovals(tabId: number, error: Error): void {
+  for (const a of state.approvals) if (a.tabId === tabId) pending.get(a.id)?.reject(error);
 }
 
 async function showApprovalUi(windowId: number): Promise<void> {
@@ -78,7 +86,7 @@ export async function requestControl(
 
   try {
     const allowed = await new Promise<boolean>((resolve, reject) => {
-      pending.set(id, resolve);
+      pending.set(id, { resolve, reject });
       const timer = setTimeout(() => {
         reject(new Error(`The user did not respond within ${APPROVAL_TIMEOUT_MS / 1000}s`));
       }, APPROVAL_TIMEOUT_MS);
@@ -125,6 +133,7 @@ export async function refreshGlobalBadge(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  failApprovals(tabId, new Error('The tab was closed while waiting for the user to allow control'));
   forgetTab(tabId);
   void cdp.detach(tabId);
 });
