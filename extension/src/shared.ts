@@ -117,6 +117,8 @@ export type ConfirmCategory = (typeof CONFIRM_CATEGORIES)[number];
 export interface Guardrails {
   /** Default output limit in characters; 0 = no limit. An agent's `--max-output` overrides it. */
   maxOutput: number;
+  /** Wrap page-derived output in nonce markers on every command ("always"). */
+  contentBoundaries: boolean;
 }
 
 /** Messages from the popup to the background worker. */

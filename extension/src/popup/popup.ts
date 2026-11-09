@@ -56,7 +56,7 @@ async function render(): Promise<void> {
   const { state } = await chrome.storage.session.get<{ state?: State }>('state');
   const settings = await chrome.storage.local.get<Partial<Settings>>(['secret', 'port', 'enabled']);
   const stored = await chrome.storage.local.get<{ guardrails?: Partial<Guardrails> }>('guardrails');
-  const policy: Guardrails = { maxOutput: 0, ...stored.guardrails };
+  const policy: Guardrails = { maxOutput: 0, contentBoundaries: false, ...stored.guardrails };
   // Do not rebuild the page under a field the user is typing in.
   if (document.activeElement?.closest('#guardrails')) return;
   if (!state) {
@@ -174,6 +174,8 @@ async function render(): Promise<void> {
   // 6. Guardrails: the user's policy for agents (enforced by the worker).
   if (!isWindow) {
     parts.push(`<details id="guardrails"${guardrailsOpen ? ' open' : ''}><summary>Guardrails</summary>
+      <label class="check"><input id="g-boundaries" type="checkbox"${policy.contentBoundaries ? ' checked' : ''} />
+        Always mark page content in output</label>
       <label class="field"><span>Default output limit (characters, 0 = none)</span>
         <input id="g-max" type="number" min="0" step="1000" value="${policy.maxOutput}" /></label>
       <div class="actions"><button class="primary" data-action="guardrails">Save</button></div>
@@ -233,7 +235,10 @@ app.addEventListener('click', (ev) => {
       const max = Number((document.getElementById('g-max') as HTMLInputElement).value);
       void send({
         type: 'guardrails',
-        guardrails: { maxOutput: Number.isInteger(max) && max > 0 ? max : 0 },
+        guardrails: {
+          maxOutput: Number.isInteger(max) && max > 0 ? max : 0,
+          contentBoundaries: (document.getElementById('g-boundaries') as HTMLInputElement).checked,
+        },
       }).then(() => {
         el.textContent = 'Saved';
         setTimeout(() => (el.textContent = 'Save'), 1500);

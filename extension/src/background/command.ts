@@ -58,6 +58,11 @@ export const GLOBAL_FLAGS: Flag[] = [
     desc: 'Timeout in ms for waits and navigation (default 25000)',
   },
   {
+    name: 'content-boundaries',
+    type: 'bool',
+    desc: 'Wrap page-derived output in nonce markers (not a security boundary)',
+  },
+  {
     name: 'max-output',
     type: 'string',
     desc: 'Truncate each output text to this many characters (default: the popup setting)',

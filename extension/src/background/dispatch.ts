@@ -21,7 +21,7 @@ import { navigationCommands } from './commands/navigation';
 import { readCommands } from './commands/read';
 import { networkCommands } from './commands/network';
 import { type ErrorCode, UserError } from './errors';
-import { effectiveMaxOutput, limitOutput } from './guardrails';
+import { applyBoundaries, effectiveMaxOutput, limitOutput } from './guardrails';
 import { log, meta } from './state';
 
 const DEFAULT_TIMEOUT = 25_000;
@@ -188,14 +188,24 @@ export async function execute(
 ): Promise<CliResponse> {
   const json = req.argv.includes('--json');
   const { name, rest } = splitCommand(req.argv);
-  const ok = (text: string, data: unknown, warning?: string | string[]): CliResponse => {
+  const ok = (
+    text: string,
+    data: unknown,
+    warning?: string | string[],
+    envelope: Record<string, unknown> = {},
+  ): CliResponse => {
     if (outcome) outcome.data = data ?? null;
-    return okResponse(text, data, warning);
+    return okResponse(text, data, warning, envelope);
   };
-  const okResponse = (text: string, data: unknown, warning?: string | string[]): CliResponse => ({
+  const okResponse = (
+    text: string,
+    data: unknown,
+    warning?: string | string[],
+    envelope: Record<string, unknown> = {},
+  ): CliResponse => ({
     exitCode: 0,
     stdout: json
-      ? `${JSON.stringify({ success: true, data: data ?? null, error: null })}\n`
+      ? `${JSON.stringify({ success: true, data: data ?? null, error: null, ...envelope })}\n`
       : text
         ? `${text}\n`
         : '',
@@ -242,8 +252,17 @@ export async function execute(
     const session = args.str('session') ?? req.session;
     ctx = new Ctx(req, session, json, args.num('timeout') ?? DEFAULT_TIMEOUT, signal, progress);
     const max = effectiveMaxOutput(args);
-    const result = limitOutput((await raceDialog(ctx, cmd.run(ctx, args))) ?? {}, max);
-    response = { ...ok(result.text ?? '✓ Done', result.data, result.warning), files: ctx.files };
+    const limited = limitOutput((await raceDialog(ctx, cmd.run(ctx, args))) ?? {}, max);
+    const { result, boundary } = await applyBoundaries(cmd.name, args, limited, json, ctx.tabId);
+    response = {
+      ...ok(
+        result.text ?? '✓ Done',
+        result.data,
+        result.warning,
+        boundary && { _boundary: boundary },
+      ),
+      files: ctx.files,
+    };
   } catch (e) {
     if (e instanceof UserError) response = fail(withUsage(cmd, e), e.code);
     else response = fail(errorMessage(e));

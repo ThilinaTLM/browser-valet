@@ -39,11 +39,19 @@ The wire details are in [protocol.md](protocol.md).
 - **MUST** use `ctx.tab()` (controlled tabs only), record lazily (`Network.enable` on the first `network` command per tab) and keep at most 500 entries per tab in memory. The buffer is dropped when the debugger session ends (`cdp.onDetached`: revoke, user detach, a navigation that swaps the renderer, tab close). *Why:* no recording on tabs the agent never asked about, and nothing survives a revoke.
 - Not built: `network route`/`unroute` (interception) and `har` (would write whole bodies and headers to disk).
 
+## Guardrails
+
+The user's policy lives in `chrome.storage.local` key `guardrails` (set in the popup, enforced in the worker: `guardrails.ts`). Agent flags may only narrow it.
+
+- **MUST** treat content boundaries as labelling, not as a security boundary: the markers tell the agent where page text begins and ends, and the per-response nonce stops a page from closing the block early. They do not stop an agent from obeying the text inside. The skill says so.
+- **Default:** boundaries off. `--content-boundaries` or the popup's "always" turns them on; an agent cannot turn the user's setting off.
+- The output limit is a context-size default (popup), not a restriction: the agent's `--max-output` overrides it.
+
 ## Trust boundaries
 
 - **The extension is trusted by the CLI.** The CLI writes `res.files[].path` without confining it. `upload` reads any path the CLI resolves. Anyone who can authenticate as `ext` can write files as the user, which is why the auth rules above are MUST.
 - **The local filesystem is not a boundary.** `bctl` runs as the user, and the agent already has shell access. So `upload`, `screenshot <path>` and opening `file://` URLs are allowed, as in agent-browser. The consent boundary is the browser profile (tabs, sessions, logins), not files.
-- **Page content is untrusted data.** Snapshots and text are passed through unchanged, and the skills tell agents not to follow instructions found in page content. `eval` runs arbitrary JS with a user gesture by design.
+- **Page content is untrusted data.** Snapshots and text are passed through unchanged (optionally wrapped in nonce markers, see [Guardrails](#guardrails)), and the skills tell agents not to follow instructions found in page content. `eval` runs arbitrary JS with a user gesture by design.
 - **Blocked URLs:** navigation refuses `chrome*`, `edge*`, `brave*` and `about:` URLs (except `about:blank`). Chrome itself refuses to attach to its own pages and the Web Store.
 
 ## Gotchas
