@@ -9,7 +9,7 @@ import { UserError } from './dom';
  * clicks and key presses are delivered without bringing the tab to the front.
  * Returns whether the page is hidden.
  */
-async function prime(tabId: number): Promise<boolean> {
+export async function prime(tabId: number): Promise<boolean> {
   const r = await cdp.send<{ result: { value?: unknown } }>(tabId, 'Runtime.evaluate', {
     expression: 'document.visibilityState',
     returnByValue: true,
@@ -30,7 +30,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Hidden pages never acknowledge some events (mouse moves wait for a frame); don't hang on them. */
-async function sendInput(
+export async function sendInput(
   tabId: number,
   hidden: boolean,
   method: string,
@@ -193,6 +193,8 @@ void chrome.runtime.getPlatformInfo().then((p) => (isMac = p.os === 'mac'));
 
 /** Modifiers currently held via `keydown`. */
 let modifiers = 0;
+/** Currently held modifier bits (for other input helpers). */
+export const heldModifiers = (): number => modifiers;
 
 function canonical(name: string): string {
   if (name === 'ControlOrMeta') return isMac ? 'Meta' : 'Control';

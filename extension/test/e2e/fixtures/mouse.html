@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Mouse</title>
+    <style>
+      body {
+        margin: 0;
+        height: 2000px;
+      }
+      #target {
+        position: absolute;
+        left: 20px;
+        top: 20px;
+        width: 200px;
+        height: 80px;
+        background: #cde;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="target">target</div>
+    <script>
+      window.events = [];
+      for (const type of ['mousemove', 'mousedown', 'mouseup', 'wheel']) {
+        addEventListener(type, (e) => {
+          events.push(
+            `${type} ${e.clientX},${e.clientY} b${e.button} bs${e.buttons} dy${e.deltaY ?? ''} dx${e.deltaX ?? ''}`,
+          );
+        });
+      }
+    </script>
+  </body>
+</html>

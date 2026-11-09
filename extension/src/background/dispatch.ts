@@ -11,6 +11,7 @@ import {
   parseArgs,
   type Result,
 } from './command';
+import { extraCommands } from './commands/extra';
 import { inspectionCommands } from './commands/inspection';
 import { interactionCommands } from './commands/interaction';
 import { navigationCommands } from './commands/navigation';
@@ -25,6 +26,7 @@ const COMMANDS: Command[] = [
   ...interactionCommands,
   ...inspectionCommands,
   ...readCommands,
+  ...extraCommands,
 ];
 const GROUPS = ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging'];
 
