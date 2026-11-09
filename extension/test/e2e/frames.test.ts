@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { bctl, bctlJson, fixture, framesPage, restartExtensionWorker, useBrowser } from './harness';
 
-useBrowser();
+const browser = useBrowser();
 
 const refOf = (snapshot: string, re: RegExp): string => {
   const line = snapshot.split('\n').find((l) => re.test(l));
@@ -108,6 +108,33 @@ describe('out-of-process iframes', () => {
     await openFrames();
     const pay = refOf((await bctl('snapshot', '-i')).stdout, /button "Pay"/);
     expect((await bctl('hover', `@${pay}`)).code).toBe(0);
+  });
+});
+
+describe('screenshot --annotate', () => {
+  it('boxes refs inside a cross-origin iframe at their place on the page', async () => {
+    await openFrames('&pad=400');
+    await bctl('set', 'viewport', '1000', '700'); // earlier files may have left a small one
+    await bctl('eval', 'window.scrollTo(0, 380)');
+    const pay = refOf((await bctl('snapshot', '-i')).stdout, /button "Pay"/);
+    const j = (await bctlJson('screenshot', '--annotate', 'frames-ann.png')).data as {
+      annotations: {
+        ref: string;
+        role: string;
+        box: { x: number; y: number; width: number; height: number };
+      }[];
+    };
+    const mine = j.annotations.find((a) => a.ref === pay);
+    expect(mine, JSON.stringify(j.annotations)).toBeDefined();
+    const page = (await browser.current.pages()).find((p) => p.url().includes('pad=400'));
+    const frame = page?.frames().find((f) => f.url().includes('frame-inner.html'));
+    const el = await frame?.$('#pay');
+    const want = await el?.boundingBox();
+    expect(want).toBeDefined();
+    expect(Math.abs((mine?.box.x ?? 0) - (want?.x ?? 999))).toBeLessThanOrEqual(2);
+    expect(Math.abs((mine?.box.y ?? 0) - (want?.y ?? 999))).toBeLessThanOrEqual(2);
+    expect(Math.abs((mine?.box.width ?? 0) - (want?.width ?? 999))).toBeLessThanOrEqual(2);
+    await bctl('set', 'viewport', 'reset');
   });
 });
 

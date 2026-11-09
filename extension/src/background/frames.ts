@@ -130,6 +130,39 @@ export async function evalInFrame(
   );
 }
 
+/**
+ * The content box of the iframe, in the tab's viewport, for a node of the child session
+ * `sessionId` (sums the offsets of nested out-of-process iframes). Used to place boxes that were
+ * measured inside an iframe on the tab's picture.
+ */
+export async function frameBox(
+  tabId: number,
+  sessionId: string,
+): Promise<{ x: number; y: number; width: number; height: number }> {
+  let x = 0;
+  let y = 0;
+  let own: { width: number; height: number } | undefined;
+  let sid: string | undefined = sessionId;
+  while (sid) {
+    const child = cdp.childSession(tabId, sid);
+    if (!child) throw new UserError('The iframe is gone. Run `bctl snapshot` again.', 'stale_ref');
+    const { backendNodeId } = await cdp.send<{ backendNodeId: number }>(
+      tabId,
+      'DOM.getFrameOwner',
+      { frameId: child.targetId },
+      child.parent,
+    );
+    const { model } = await cdp.send<{
+      model: { content: number[]; width: number; height: number };
+    }>(tabId, 'DOM.getBoxModel', { backendNodeId }, child.parent);
+    x += model.content[0] ?? 0;
+    y += model.content[1] ?? 0;
+    own ??= { width: model.width, height: model.height };
+    sid = child.parent;
+  }
+  return { x, y, ...(own ?? { width: 0, height: 0 }) };
+}
+
 /** Every frame of the tab (all sessions) for `frame <name|url>`. */
 async function allFrames(tabId: number): Promise<FrameInfo[]> {
   interface Tree {

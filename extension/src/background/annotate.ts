@@ -2,6 +2,7 @@
 // captured image with an OffscreenCanvas. Nothing is injected into the page.
 
 import * as cdp from './cdp';
+import { frameBox } from './frames';
 import { snapshot } from './snapshot';
 import { state } from './state';
 
@@ -38,23 +39,51 @@ export async function annotations(
   );
   const table = state.refs[tabId] ?? {};
   for (const [ref, info] of refs) {
-    const node = table[ref]?.backendNodeId;
-    if (node === undefined) continue;
+    const entry = table[ref];
+    if (!entry) continue;
+    const node = entry.backendNodeId;
+    // A node in an out-of-process iframe is measured in its own session, then placed by the
+    // iframe's position (nested frames add up) and clipped to the iframe's box.
+    let sessionId: string | undefined;
+    let frame: { x: number; y: number; width: number; height: number } | undefined;
+    if (entry.frameId !== undefined) {
+      sessionId = cdp.childSessions(tabId).find((c) => c.targetId === entry.frameId)?.sessionId;
+      if (!sessionId) continue;
+      try {
+        frame = await frameBox(tabId, sessionId);
+      } catch {
+        continue;
+      }
+    }
     let quads: number[][];
     try {
-      ({ quads } = await cdp.send<{ quads: number[][] }>(tabId, 'DOM.getContentQuads', {
-        backendNodeId: node,
-      }));
+      ({ quads } = await cdp.send<{ quads: number[][] }>(
+        tabId,
+        'DOM.getContentQuads',
+        { backendNodeId: node },
+        sessionId,
+      ));
     } catch {
       continue; // not rendered
     }
     const xs = quads.flatMap((q) => q.filter((_, i) => i % 2 === 0));
     const ys = quads.flatMap((q) => q.filter((_, i) => i % 2 === 1));
     if (xs.length === 0) continue;
-    const x = Math.min(...xs);
-    const y = Math.min(...ys);
-    const width = Math.max(...xs) - x;
-    const height = Math.max(...ys) - y;
+    let x = Math.min(...xs);
+    let y = Math.min(...ys);
+    let width = Math.max(...xs) - x;
+    let height = Math.max(...ys) - y;
+    if (frame) {
+      x += frame.x;
+      y += frame.y;
+      // Clip to what the iframe shows.
+      const x2 = Math.min(x + width, frame.x + frame.width);
+      const y2 = Math.min(y + height, frame.y + frame.height);
+      x = Math.max(x, frame.x);
+      y = Math.max(y, frame.y);
+      width = x2 - x;
+      height = y2 - y;
+    }
     if (width < 1 || height < 1) continue;
     // Only what the picture shows: the viewport, or the whole page for --full.
     const px = x + view.offsetX;
