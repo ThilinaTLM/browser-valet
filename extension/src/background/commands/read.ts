@@ -1,6 +1,6 @@
 import { Args, type Command } from '../command';
 import { evaluate, UserError } from '../dom';
-import { filterSections, outline, truncate } from '../read-format';
+import { filterSections, outline } from '../read-format';
 import { navigationCommands } from './navigation';
 
 let extractor: Promise<string> | undefined;
@@ -37,13 +37,8 @@ export const readCommands: Command[] = [
         type: 'string',
         desc: 'Only sections containing the text (case-insensitive)',
       },
-      { name: 'max-output', type: 'string', desc: 'Truncate the output to this many characters' },
     ],
     async run(ctx, a) {
-      const max = a.num('max-output');
-      if (max !== undefined && (!Number.isInteger(max) || max < 1)) {
-        throw new UserError('--max-output must be a positive integer', 'bad_args');
-      }
       const url = a.pos[0];
       if (url) {
         // Same rules as `open <url>`: never navigates a tab the user shared.
@@ -62,8 +57,6 @@ export const readCommands: Command[] = [
       } else if (a.str('filter')) {
         text = filterSections(text, a.str('filter') ?? '');
       }
-      const total = text.length;
-      if (max !== undefined) text = truncate(text, max);
       return {
         text,
         data: {
@@ -71,7 +64,6 @@ export const readCommands: Command[] = [
           url: page.url,
           title: page.title,
           mode: source,
-          truncated: text.length < total || (max !== undefined && total > max),
         },
       };
     },

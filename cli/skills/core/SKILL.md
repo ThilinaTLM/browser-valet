@@ -89,7 +89,7 @@ are not auto-accepted, and `drag` does not work there.
 
 For docs and articles use `bctl read [url]` (markdown of the main content, no nav) instead of a
 snapshot: `--outline` lists headings, `--filter <text>` returns matching sections,
-`--max-output <chars>` truncates. `read <url>` follows the `open` rules. Use `snapshot` to act.
+`read <url>` follows the `open` rules. Use `snapshot` to act.
 
 ## Commands (summary)
 
@@ -104,6 +104,10 @@ Full list with arguments and global flags: `bctl skills get core --ref commands`
 
 - Prefer `wait --text`, `wait --url`, `wait <t>` over fixed `wait <ms>`. `wait --url` prints the URL it
   matched and `wait --text` the text (`--json`: `{url}` / `{text}`), so you often need no `get url` after it.
+- `--max-output <chars>` (any command) cuts each output text to that size and appends
+  `[truncated: showing N of M chars. Use --max-output to adjust]`; `--json` data gets `truncated: true`.
+  The user may set a default limit in the popup; your flag overrides it. Prefer `snapshot -i -s <css>`,
+  `read --filter` or `get text <sel>` to narrow the output instead of raising the limit.
 - Notices go to stderr as `⚠ …` (a confirm dialog opened, a truncated full-page screenshot, `network`
   recording just started, `tab` not-shared hint); stdout is only the result.
 - With `--json`, failures are `{success:false, data:null, error, code}` on stdout (exit 1). Branch on `code`:

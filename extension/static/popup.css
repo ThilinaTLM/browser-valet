@@ -536,3 +536,40 @@ input[type='number'] {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* Guardrails form. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: var(--muted-foreground);
+}
+.field input[type='number'] {
+  width: 120px;
+}
+textarea {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  box-sizing: border-box;
+  font: inherit;
+  font-family: var(--font-mono);
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--input);
+  background: var(--input-background);
+  color: var(--foreground);
+  outline: none;
+}
+textarea:focus-visible {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px var(--focus);
+}
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--foreground);
+}

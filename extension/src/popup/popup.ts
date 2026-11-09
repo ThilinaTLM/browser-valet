@@ -1,7 +1,7 @@
 // Popup UI: connection status + pairing, consent requests, tab sharing, and recent activity.
 // Renders from chrome.storage (written by the background worker); actions are messages to it.
 
-import type { ConnStatus, PopupMessage, Settings, State } from '../shared';
+import type { ConnStatus, Guardrails, PopupMessage, Settings, State } from '../shared';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -50,9 +50,15 @@ function tabRow(t: chrome.tabs.Tab | undefined, tid: string, sub: string, action
     </div>${actions}</div>`;
 }
 
+let guardrailsOpen = false;
+
 async function render(): Promise<void> {
   const { state } = await chrome.storage.session.get<{ state?: State }>('state');
   const settings = await chrome.storage.local.get<Partial<Settings>>(['secret', 'port', 'enabled']);
+  const stored = await chrome.storage.local.get<{ guardrails?: Partial<Guardrails> }>('guardrails');
+  const policy: Guardrails = { maxOutput: 0, ...stored.guardrails };
+  // Do not rebuild the page under a field the user is typing in.
+  if (document.activeElement?.closest('#guardrails')) return;
   if (!state) {
     app.innerHTML = '<p class="muted">Starting…</p>';
     return;
@@ -165,7 +171,16 @@ async function render(): Promise<void> {
     );
   }
 
-  // 6. Settings.
+  // 6. Guardrails: the user's policy for agents (enforced by the worker).
+  if (!isWindow) {
+    parts.push(`<details id="guardrails"${guardrailsOpen ? ' open' : ''}><summary>Guardrails</summary>
+      <label class="field"><span>Default output limit (characters, 0 = none)</span>
+        <input id="g-max" type="number" min="0" step="1000" value="${policy.maxOutput}" /></label>
+      <div class="actions"><button class="primary" data-action="guardrails">Save</button></div>
+    </details>`);
+  }
+
+  // 7. Settings.
   if (!isWindow) {
     parts.push(`<details><summary>Settings</summary>
       <div class="row"><span class="grow">Port</span>
@@ -214,6 +229,17 @@ app.addEventListener('click', (ev) => {
       if (port > 0 && port < 65536) void send({ type: 'settings', settings: { port } });
       break;
     }
+    case 'guardrails': {
+      const max = Number((document.getElementById('g-max') as HTMLInputElement).value);
+      void send({
+        type: 'guardrails',
+        guardrails: { maxOutput: Number.isInteger(max) && max > 0 ? max : 0 },
+      }).then(() => {
+        el.textContent = 'Saved';
+        setTimeout(() => (el.textContent = 'Save'), 1500);
+      });
+      break;
+    }
     case 'repair':
       if (confirm('Generate a new pairing code? The CLI must be paired again.')) {
         void send({ type: 'repair' });
@@ -221,6 +247,16 @@ app.addEventListener('click', (ev) => {
       break;
   }
 });
+
+app.addEventListener(
+  'toggle',
+  (ev) => {
+    if ((ev.target as HTMLElement).id === 'guardrails') {
+      guardrailsOpen = (ev.target as HTMLDetailsElement).open;
+    }
+  },
+  true,
+);
 
 enabledEl.addEventListener('change', () => {
   void send({ type: 'settings', settings: { enabled: enabledEl.checked } });

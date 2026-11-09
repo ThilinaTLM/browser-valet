@@ -4,6 +4,7 @@
 import type { PopupMessage } from '../shared';
 import { connect, disconnect, startKeepAlive } from './connection';
 import { loadState, regenerateSecret, save, state, updateSettings } from './state';
+import { updateGuardrails } from './guardrails';
 import { decide, grant, refreshBadge, refreshGlobalBadge, revoke } from './tabs';
 
 const ready = loadState().then(async () => {
@@ -52,6 +53,9 @@ async function handle(msg: PopupMessage): Promise<void> {
       if (msg.settings.enabled === false) await revokeAll();
       disconnect();
       connect();
+      break;
+    case 'guardrails':
+      await updateGuardrails(msg.guardrails);
       break;
     case 'repair':
       await regenerateSecret();

@@ -109,6 +109,16 @@ export interface Pairing {
 
 export const DEFAULT_PORT = 47823;
 
+/** Actions that can need a click on Allow each time they run (see guardrails.ts). */
+export const CONFIRM_CATEGORIES = ['eval', 'upload', 'navigate-new-site'] as const;
+export type ConfirmCategory = (typeof CONFIRM_CATEGORIES)[number];
+
+/** The user's binding policy for agents (popup → `chrome.storage.local` key `guardrails`). */
+export interface Guardrails {
+  /** Default output limit in characters; 0 = no limit. An agent's `--max-output` overrides it. */
+  maxOutput: number;
+}
+
 /** Messages from the popup to the background worker. */
 export type PopupMessage =
   | { type: 'ping' }
@@ -117,4 +127,5 @@ export type PopupMessage =
   | { type: 'revoke'; tabId: number }
   | { type: 'revokeAll' }
   | { type: 'settings'; settings: Partial<Settings> }
+  | { type: 'guardrails'; guardrails: Partial<Guardrails> }
   | { type: 'repair' };

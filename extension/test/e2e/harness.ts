@@ -222,3 +222,32 @@ export async function restartExtensionWorker(): Promise<void> {
     await page.close().catch(() => undefined);
   }
 }
+
+/**
+ * Set the user's guardrail policy the way the popup does (a `guardrails` message to the worker).
+ * Pass `{}` to reset to the defaults. Always reset in `afterEach`/`afterAll`: the policy is
+ * persistent browser state shared by every test file in the run.
+ */
+export async function setGuardrails(patch: Record<string, unknown>): Promise<void> {
+  const page = await browser().newPage();
+  try {
+    await page.goto(`${info().extensionOrigin}/popup.html`);
+    const reply = await page.evaluate(async (p: Record<string, unknown>) => {
+      const res: unknown = await chrome.runtime.sendMessage({
+        type: 'guardrails',
+        guardrails: {
+          maxOutput: 0,
+          contentBoundaries: false,
+          allowedDomains: [],
+          confirm: [],
+          ...p,
+        },
+      });
+      return res;
+    }, patch);
+    const r = reply as { ok: boolean; error?: string };
+    if (!r.ok) throw new Error(`guardrails update failed: ${r.error ?? ''}`);
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}

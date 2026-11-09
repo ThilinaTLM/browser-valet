@@ -21,6 +21,7 @@ import { navigationCommands } from './commands/navigation';
 import { readCommands } from './commands/read';
 import { networkCommands } from './commands/network';
 import { type ErrorCode, UserError } from './errors';
+import { effectiveMaxOutput, limitOutput } from './guardrails';
 import { log, meta } from './state';
 
 const DEFAULT_TIMEOUT = 25_000;
@@ -46,7 +47,7 @@ function generalHelp(): string {
   const lines = [
     'bctl — control your real browser from the command line (Browser Bridge)',
     '',
-    'Usage: bctl <command> [args] [--json] [--session <name>] [--timeout <ms>]',
+    'Usage: bctl <command> [args] [--json] [--session <name>] [--timeout <ms>] [--max-output <chars>]',
     '',
     'Start here (for AI agents): `bctl skills get core`',
     'It explains the snapshot-and-ref workflow, tab consent and the JSON error codes.',
@@ -121,7 +122,7 @@ export function withUsage(cmd: Command, e: UserError): string {
 
 /** Split argv into the command name and the rest (global flags may precede the command). */
 function splitCommand(argv: string[]): { name: string | undefined; rest: string[] } {
-  const withValue = new Set(['--session', '--timeout']);
+  const withValue = new Set(['--session', '--timeout', '--max-output']);
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i] ?? '';
     if (withValue.has(tok)) {
@@ -240,7 +241,8 @@ export async function execute(
     if (args.has('help')) return ok(commandHelp(cmd), null);
     const session = args.str('session') ?? req.session;
     ctx = new Ctx(req, session, json, args.num('timeout') ?? DEFAULT_TIMEOUT, signal, progress);
-    const result = (await raceDialog(ctx, cmd.run(ctx, args))) ?? {};
+    const max = effectiveMaxOutput(args);
+    const result = limitOutput((await raceDialog(ctx, cmd.run(ctx, args))) ?? {}, max);
     response = { ...ok(result.text ?? '✓ Done', result.data, result.warning), files: ctx.files };
   } catch (e) {
     if (e instanceof UserError) response = fail(withUsage(cmd, e), e.code);

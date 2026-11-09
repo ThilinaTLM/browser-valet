@@ -57,6 +57,11 @@ export const GLOBAL_FLAGS: Flag[] = [
     type: 'string',
     desc: 'Timeout in ms for waits and navigation (default 25000)',
   },
+  {
+    name: 'max-output',
+    type: 'string',
+    desc: 'Truncate each output text to this many characters (default: the popup setting)',
+  },
   { name: 'help', short: 'h', type: 'bool', desc: 'Show help' },
 ];
 

@@ -9,6 +9,7 @@ import {
   type State,
   type TabMeta,
 } from '../shared';
+import { loadGuardrails } from './guardrails';
 import { forgetBaselines } from './snapshot-diff';
 
 const initial = (): State => ({
@@ -145,6 +146,7 @@ export async function loadState(): Promise<void> {
     await chrome.storage.local.set({ secret: settings.secret, paired: false });
   }
   state.conn.paired = local.paired ?? false;
+  await loadGuardrails();
   await refreshPairing();
 }
 
