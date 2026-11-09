@@ -14,5 +14,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "build.mjs", "eslint.config.js"]
+  "include": ["src", "build.mjs", "eslint.config.js", "vitest.config.ts", "vitest.e2e.config.ts"]
 }

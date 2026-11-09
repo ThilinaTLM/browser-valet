@@ -180,7 +180,7 @@ function resolveTabRef(ref: string): number {
 
 const LABEL = /^[a-zA-Z][\w-]*$/;
 
-function setLabel(tabId: number, label: string): void {
+export function setLabel(tabId: number, label: string): void {
   if (!LABEL.test(label) || /^t\d+$/i.test(label)) {
     throw new UserError('Labels start with a letter, use letters/digits/-/_, and are not t<N>');
   }
