@@ -407,7 +407,10 @@ export const inspectionCommands: Command[] = [
       if (a.has('threshold') && thresholdArg === undefined)
         throw new UserError('Missing --threshold value', 'bad_args');
       if (threshold < 0 || threshold > 1) {
-        throw new UserError(`--threshold must be from 0 to 1, got '${thresholdArg ?? ''}'`, 'bad_args');
+        throw new UserError(
+          `--threshold must be from 0 to 1, got '${thresholdArg ?? ''}'`,
+          'bad_args',
+        );
       }
       const id = await ctx.tab();
       const path = a.pos[0]

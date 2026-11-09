@@ -14,7 +14,7 @@ open/back/forward/reload/close, `tab` (list/new/label/switch/close), `snapshot -
 keyboard, check/uncheck/select, scroll/scrollintoview, drag, upload, `find` (all locators),
 `get text|html|value|attr|title|url|count|box`, `is`, `wait` (target/ms/text/url/load/fn/state),
 stable monotonic refs, `snapshot --delta/--full`, clickable (`cursor:pointer`/`onclick`) refs and `removedRefs`, `get styles` (curated by default), XPath targets, `mouse`, `highlight`, `pushstate`, `session list/info`,
-`wait` prints the match, stderr `⚠` warnings, JSON error `code`s, usage on missing args, help details/examples, upstream JSON field names, `screenshot [--full]`, `read` (active tab/URL; no `--raw/--llms/--require-md`), `eval` (inline/-b/--stdin), `dialog`, `console`, `errors`, `--json`,
+`wait` prints the match, stderr `⚠` warnings, JSON error `code`s, usage on missing args, help details/examples, upstream JSON field names, `screenshot [--full] [--annotate] [--if-changed] [--threshold]`, `read` (active tab/URL; no `--raw/--llms/--require-md`), `eval` (inline/-b/--stdin), `dialog`, `console`, `errors`, `--json`,
 `--session`, `--timeout`, the `skills` command.
 
 ## Proposals
