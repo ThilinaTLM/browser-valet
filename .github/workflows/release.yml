@@ -67,7 +67,8 @@ jobs:
             (cd "pkg/$name" && 7z a "../../out/$name.zip" .)
           else
             cp "cli/target/${{ matrix.target }}/release/bvl" "pkg/$name/"
-            tar -czf "out/$name.tar.gz" -C "pkg/$name" .
+            # Top-level members without a ./ prefix, so `tar -xz bvl` (README) matches.
+            tar -czf "out/$name.tar.gz" -C "pkg/$name" bvl LICENSE NOTICE README.md
           fi
           ls -l out
       - uses: actions/upload-artifact@v4
