@@ -14,12 +14,18 @@ import {
 import { inspectionCommands } from './commands/inspection';
 import { interactionCommands } from './commands/interaction';
 import { navigationCommands } from './commands/navigation';
+import { readCommands } from './commands/read';
 import { UserError } from './dom';
 import { log, meta } from './state';
 
 const DEFAULT_TIMEOUT = 25_000;
 
-const COMMANDS: Command[] = [...navigationCommands, ...interactionCommands, ...inspectionCommands];
+const COMMANDS: Command[] = [
+  ...navigationCommands,
+  ...interactionCommands,
+  ...inspectionCommands,
+  ...readCommands,
+];
 const GROUPS = ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging'];
 
 function lookup(name: string): Command | undefined {

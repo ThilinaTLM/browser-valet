@@ -153,3 +153,66 @@ describe('debugger', () => {
     expect(r.code).toBe(0);
   });
 });
+
+describe('read', () => {
+  it('reads the main content as markdown, without the nav sidebar', async () => {
+    const open = await bctl('read', fixture('/docs.html'));
+    expect(open).toMatchObject({ code: 0, stderr: '' });
+    const out = open.stdout;
+    expect(out).toContain('# Guide');
+    expect(out).toContain('## Auth');
+    expect(out).toContain('Intro paragraph with a link and **bold**');
+    expect(out).toContain('- First item');
+    expect(out).toContain('1. Download\n2. Run');
+    expect(out).toContain('```js\nconst a = 1;\nconsole.log(a);\n```');
+    expect(out).toContain('| Name | Type |\n| --- | --- |\n| id | int |');
+    expect(out).not.toContain('Sidebar A');
+    expect(out).not.toContain('Footer text');
+    expect(out).not.toContain('/link');
+  });
+
+  it('--outline, --filter and --max-output', async () => {
+    const outline = (await bctl('read', '--outline')).stdout.trimEnd();
+    expect(outline).toBe(
+      `# Outline\n\nSource: ${fixture('/docs.html')}\n\n- Guide\n  - Auth\n    - Token details\n  - Install`,
+    );
+
+    const filtered = (await bctl('read', '--filter', 'auth')).stdout;
+    expect(filtered).toMatch(/^## Auth/);
+    expect(filtered).toContain('### Token details');
+    expect(filtered).not.toContain('## Install');
+    expect((await bctl('read', '--filter', 'zzz')).stdout.trimEnd()).toBe(
+      'No matching page sections',
+    );
+
+    const cut = (await bctl('read', '--max-output', '20')).stdout;
+    expect(cut).toContain('[truncated: showing 20 of ');
+
+    const json = await bctlJson('read', '--outline');
+    expect(json).toMatchObject({ success: true });
+    expect(JSON.stringify(json.data)).toContain('Guide');
+  });
+
+  it('read <url> never navigates a shared tab', async () => {
+    const page = await openUserTab(fixture('/'));
+    try {
+      const tid = await tidForTitle('Fixture Home');
+      const pending = bctl('tab', tid);
+      await approveNextConsent('allow');
+      await pending;
+      const r = await bctl('read', fixture('/docs.html'));
+      expect(r.code).toBe(0);
+      expect(r.stdout).toContain('# Guide');
+      expect(await page.title()).toBe('Fixture Home');
+    } finally {
+      await page.close();
+    }
+  });
+
+  it('falls back to Readability when there is no main/article', async () => {
+    const r = await bctl('read', fixture('/prose.html'));
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('Readable prose');
+    expect(r.stdout).not.toContain('Cookie banner');
+  });
+});

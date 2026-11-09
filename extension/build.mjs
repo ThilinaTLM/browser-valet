@@ -25,7 +25,10 @@ for (const [family, weights] of Object.entries(FONTS)) {
 await rm('dist/pairing.json', { force: true });
 
 const options = {
-  entryPoints: { background: 'src/background/index.ts', popup: 'src/popup/popup.ts' },
+  entryPoints: {
+    background: 'src/background/index.ts',
+    popup: 'src/popup/popup.ts',
+  },
   outdir: 'dist',
   bundle: true,
   format: 'esm',
@@ -34,9 +37,22 @@ const options = {
   logLevel: 'info',
 };
 
+// Injected into pages by `read` (Readability + Turndown); an IIFE so nothing leaks into page globals,
+// and a separate file so the service worker bundle stays small.
+const pageOptions = {
+  entryPoints: { 'read-extractor': 'src/page/read-extractor.ts' },
+  outdir: 'dist',
+  bundle: true,
+  format: 'iife',
+  target: 'chrome127',
+  minify: true,
+  logLevel: 'info',
+};
+
 if (watch) {
-  const ctx = await esbuild.context(options);
-  await ctx.watch();
+  await (await esbuild.context(options)).watch();
+  await (await esbuild.context(pageOptions)).watch();
 } else {
   await esbuild.build(options);
+  await esbuild.build(pageOptions);
 }
