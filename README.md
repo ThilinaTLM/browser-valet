@@ -207,4 +207,6 @@ pnpm watch                                   # rebuild on change, then reload th
 
 ## License
 
-[Apache License 2.0](LICENSE)
+Copyright 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).

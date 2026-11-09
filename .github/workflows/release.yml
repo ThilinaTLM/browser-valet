@@ -61,7 +61,7 @@ jobs:
         run: |
           name="bvl-${{ matrix.target }}"
           mkdir -p "pkg/$name" out
-          cp LICENSE README.md "pkg/$name/"
+          cp LICENSE NOTICE README.md "pkg/$name/"
           if [[ "${{ matrix.target }}" == *windows* ]]; then
             cp "cli/target/${{ matrix.target }}/release/bvl.exe" "pkg/$name/"
             (cd "pkg/$name" && 7z a "../../out/$name.zip" .)
