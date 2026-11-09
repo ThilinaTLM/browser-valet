@@ -1,0 +1,8 @@
+# Keep LF everywhere: cli/build.rs embeds cli/skills and extension/dist byte-for-byte,
+# so a CRLF checkout (Windows autocrlf) would ship CRLF skills in bvl.exe.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pem binary
