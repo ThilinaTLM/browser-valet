@@ -1,99 +1,175 @@
-name: ci
+name: CI
+
 on:
   push:
     branches: [main]
+    paths-ignore: &docs-only
+      - "docs/**"
+      - "README.md"
+      - "SKILL.md" # root stub only; cli/skills/** is embedded and still triggers CI
+      - "LICENSE"
+      - "NOTICE"
   pull_request:
-  workflow_call: # reused by release.yml on tag pushes
+    paths-ignore: *docs-only
+  workflow_call: # reused by release.yml on tag pushes (path filters don't apply)
+
+# One run per ref: a newer push cancels the older run. Never cancel on tags (release CI).
+# The group is hard-coded: under workflow_call, github.workflow is the caller's name.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
+  extension:
+    name: Extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: extension/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm check` + `pnpm test` + `pnpm build`, split into concurrent steps with separate logs.
+      - parallel:
+          - name: Typecheck
+            run: pnpm typecheck
+          - name: Lint
+            run: pnpm lint
+          - name: Check formatting
+            run: pnpm format:check
+          - name: Run unit tests
+            run: pnpm test
+          - name: Build extension
+            run: pnpm build
+
+      - name: Upload extension build
+        uses: actions/upload-artifact@v7
+        with:
+          name: extension-dist
+          path: extension/dist
+          retention-days: 3
+          if-no-files-found: error
+
   cli:
+    name: CLI (${{ matrix.label }})
+    # cli/tests/relay.rs only covers managed updates when extension/dist is embedded.
     needs: extension
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - { os: ubuntu-latest, label: Linux }
+          - { os: macos-latest, label: macOS }
+          - { os: windows-latest, label: Windows }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: cli
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Download extension build
+        uses: actions/download-artifact@v8
         with:
           name: extension-dist
           path: extension/dist
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: cli
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
-      - run: cargo build --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bvl-${{ matrix.os }}
-          path: |
-            cli/target/release/bvl
-            cli/target/release/bvl.exe
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-  extension:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: extension
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: extension/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: extension/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check # typecheck + eslint + prettier
-      - run: pnpm test # unit tests (Vitest, mocked chrome.*)
-      - run: pnpm build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: extension-dist
-          path: extension/dist
+      # Sequential on purpose: these share cargo's target-dir lock.
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked
 
   # Real Chrome for Testing + the real extension + a real bvl, headless. Branded Chrome 137+
-  # ignores --load-extension, so install Chrome for Testing explicitly.
+  # ignores --load-extension, so install Chrome for Testing explicitly. Builds everything
+  # itself, so it starts right away instead of waiting for the Extension job.
   e2e:
-    needs: extension
+    name: E2E (Chrome for Testing)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: extension
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
         with:
           package_json_file: extension/package.json
-      - uses: actions/setup-node@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: extension/pnpm-lock.yaml
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: cli
-      - run: pnpm install --frozen-lockfile
-      - name: Install Chrome for Testing
-        working-directory: ${{ runner.temp }} # npx misbehaves inside the pnpm project
-        run: |
-          out=$(npx --yes @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome")
-          echo "CHROME_PATH=${out#* }" >> "$GITHUB_ENV"
-      - run: pnpm test:e2e # builds the extension and `cargo build`s bvl itself
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - parallel:
+          - name: Install Chrome for Testing
+            working-directory: ${{ runner.temp }} # npx misbehaves inside the pnpm project
+            run: |
+              out=$(npx --yes @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome")
+              echo "CHROME_PATH=${out#* }" >> "$GITHUB_ENV"
+          # Extension first: cli/build.rs embeds extension/dist.
+          - name: Build extension and bvl
+            run: |
+              pnpm install --frozen-lockfile
+              pnpm build
+              cargo build --locked --manifest-path ../cli/Cargo.toml
+
+      - name: Run E2E tests
+        run: pnpm test:e2e # uses the prebuilt cli/target/debug/bvl
         env:
           CI: true
+          E2E_SKIP_BUILD: 1
