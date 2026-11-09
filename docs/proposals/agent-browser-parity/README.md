@@ -14,14 +14,13 @@ open/back/forward/reload/close, `tab` (list/new/label/switch/close), `snapshot -
 keyboard, check/uncheck/select, scroll/scrollintoview, drag, upload, `find` (all locators),
 `get text|html|value|attr|title|url|count|box`, `is`, `wait` (target/ms/text/url/load/fn/state),
 stable monotonic refs, `snapshot --delta/--full`, clickable (`cursor:pointer`/`onclick`) refs and `removedRefs`, `get styles` (curated by default), XPath targets, `mouse`, `highlight`, `pushstate`, `session list/info`,
-`screenshot [--full]`, `read` (active tab/URL; no `--raw/--llms/--require-md`), `eval` (inline/-b/--stdin), `dialog`, `console`, `errors`, `--json`,
+`wait` prints the match, stderr `⚠` warnings, JSON error `code`s, usage on missing args, help details/examples, upstream JSON field names, `screenshot [--full]`, `read` (active tab/URL; no `--raw/--llms/--require-md`), `eval` (inline/-b/--stdin), `dialog`, `console`, `errors`, `--json`,
 `--session`, `--timeout`, the `skills` command.
 
 ## Proposals
 
 | Proposal | What | Priority |
 |---|---|---|
-| [cli-output-conventions.md](../cli-output-conventions.md) | wait prints the match, warnings on stderr, JSON error codes, usage on missing args, help examples, JSON field names | 1 |
 | [screenshot-improvements.md](../screenshot-improvements.md) | `--annotate`, `--if-changed`, `--threshold` | 2 |
 | [cross-origin-frames.md](../cross-origin-frames.md) | inline cross-site iframes; `frame` | 2 |
 | [batch.md](../batch.md) | `batch` | 2 |
@@ -30,8 +29,6 @@ stable monotonic refs, `snapshot --delta/--full`, clickable (`cursor:pointer`/`o
 
 ```mermaid
 flowchart LR
-  OC[output conventions] --> B[batch]
-  OC --> G[guardrails]
   XF[cross-origin frames] -.-> AN[--annotate]
 ```
 

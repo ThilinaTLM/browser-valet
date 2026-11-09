@@ -133,6 +133,13 @@ flight. On idle expiry the proxy exits.
 }
 ```
 
+A `res` the proxy generates itself (extension not connected or disconnected, proxy shutting down)
+also carries `"code": "not_connected"` and an empty `stdout`. With `--json` in argv the CLI turns it
+into the usual `{success:false,data:null,error,code}` envelope on stdout, so JSON mode stays
+parseable. The CLI does the same for its own failures before a `res` exists (cannot reach the proxy,
+authentication failed: `not_connected`; not paired: `not_paired`). Codes are listed in
+[automation.md](automation.md#output-conventions).
+
 The CLI creates parent directories for `files[].path` as needed.
 
 ## CLI-local commands

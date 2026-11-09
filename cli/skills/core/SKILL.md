@@ -95,7 +95,16 @@ Full list with arguments and global flags: `bctl skills get core --ref commands`
 
 ## Tips
 
-- Prefer `wait --text`, `wait --url`, `wait <t>` over fixed `wait <ms>`.
+- Prefer `wait --text`, `wait --url`, `wait <t>` over fixed `wait <ms>`. `wait --url` prints the URL it
+  matched and `wait --text` the text (`--json`: `{url}` / `{text}`), so you often need no `get url` after it.
+- Notices go to stderr as `⚠ …` (a confirm dialog opened, a truncated full-page screenshot, `network`
+  recording just started, `tab` not-shared hint); stdout is only the result.
+- With `--json`, failures are `{success:false, data:null, error, code}` on stdout (exit 1). Branch on `code`:
+  `unknown_command`, `bad_args` (the message ends with `Usage: bctl …`), `unknown_ref`/`stale_ref` (re-snapshot),
+  `not_found`, `not_visible`, `disabled`, `covered`, `timeout`, `dialog_open` (`dialog accept|dismiss`),
+  `no_tab` (`open` a page), `tab_gone`, `not_shared`/`revoked` (ask again with `tab <id>`), `denied` (the user
+  said no: do not retry), `not_connected` (extension/proxy down: `bctl doctor`), `not_paired` (`bctl setup`).
+  Page and Chrome errors (such as a JS exception in `eval`) have no `code`.
 - `Element is covered by <div#…>`: dismiss that overlay, re-snapshot, retry.
 - A `confirm`/`prompt` dialog pauses the page: `bctl dialog accept` or `bctl dialog dismiss`.
   Alerts are accepted automatically.

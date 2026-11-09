@@ -28,5 +28,11 @@ network request <id>
 `get styles` prints a curated set (`--all` for every computed property, or name the properties).
 `highlight` outlines the element for 3 s. `pushstate` does client-side navigation (same origin only).
 `mouse` is for canvases, maps and sliders; on a background tab `mouse wheel` scrolls by script. Global flags: `--json`, `--session <name>`,
-`--timeout <ms>` (default 25000). `bctl <command> --help` for details.
+`--timeout <ms>` (default 25000). `bctl <command> --help` shows details and examples.
+
+`--json` output: `{success, data, error}`, plus `code` on failures (list in SKILL.md). `data` follows agent-browser:
+actions echo their target (`click` → `{clicked:"@e3"}`, `fill` → `{filled}`, `press` → `{pressed}`, …), page reads add
+`origin`, `get attr|value` → `{value}`, `get count` → `{count,selector}`, `console` → `{messages:[{type,text,args}]}`,
+`errors` → `{errors:[{text,line,column,url}]}`, `dialog status` → `{hasDialog,type,message,defaultPrompt}`,
+`tab` → `{tabs:[{tabId,label,title,url,active,controlled,pending,…}]}`, `wait --url` → `{url}`, `wait --text` → `{text}`.
 
