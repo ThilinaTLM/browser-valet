@@ -12,6 +12,7 @@ import {
   type Result,
 } from './command';
 import { extraCommands } from './commands/extra';
+import { emulationCommands } from './commands/emulation';
 import { inspectionCommands } from './commands/inspection';
 import { interactionCommands } from './commands/interaction';
 import { navigationCommands } from './commands/navigation';
@@ -29,6 +30,7 @@ const COMMANDS: Command[] = [
   ...readCommands,
   ...extraCommands,
   ...networkCommands,
+  ...emulationCommands,
 ];
 const GROUPS = ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging'];
 
