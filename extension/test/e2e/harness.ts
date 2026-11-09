@@ -63,7 +63,11 @@ let shared: Browser | undefined;
 /** Connect to the shared browser for this test file. Call at describe level. */
 export function useBrowser(): { readonly current: Browser } {
   beforeAll(async () => {
-    shared = await puppeteer.connect({ browserWSEndpoint: info().wsEndpoint });
+    shared = await puppeteer.connect({
+      browserWSEndpoint: info().wsEndpoint,
+      // No viewport emulation: puppeteer would override the page size bctl sets.
+      defaultViewport: null,
+    });
   });
   afterAll(async () => {
     await shared?.disconnect();
