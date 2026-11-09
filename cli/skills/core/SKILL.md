@@ -23,6 +23,11 @@ If it says `Not paired` or `not connected`, ask the user to run `bctl setup` (on
 installs the extension into a folder they load via chrome://extensions → Developer mode →
 Load unpacked, and pairs automatically). The extension updates itself when `bctl` is upgraded.
 
+If a command fails unexpectedly (connection, authentication, version or timeout errors), run
+`bctl doctor`: it checks config, extension folder, proxy, extension and a round trip, and prints a
+fix for each failure. `bctl doctor --json` is machine-readable; `--fix` applies safe repairs only
+(restart the proxy, rewrite the managed folder, fix file permissions). Safe to run; it never re-pairs.
+
 ## Use your own session
 
 Pass `--session <name>` (or set `BCTL_SESSION`) so you don't take over another agent's tab:

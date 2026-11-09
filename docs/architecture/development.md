@@ -18,7 +18,7 @@ Build, embedding, CI and testing. Everyday commands are in the root [README](../
 
 ## Testing
 
-- `cli/tests/relay.rs` runs real proxies against fake CLI and extension clients. It covers the handshake, the Origin/role rules, relaying, cancel (CLI disconnect, failed write, no double cancel), idle exit, shutdown (including failing in-flight requests), refusing to restart a busy proxy of another version, managed updates (stale-file removal, 0600 `pairing.json`), skills and `setup` idempotence. Tests set `BCTL_CONFIG_DIR`, `BCTL_EXT_WAIT_MS` and a small idle timeout.
+- `cli/tests/relay.rs` runs real proxies against fake CLI and extension clients. It covers the handshake, the Origin/role rules, relaying, cancel (CLI disconnect, failed write, no double cancel), idle exit, shutdown (including failing in-flight requests), refusing to restart a busy proxy of another version, managed updates (stale-file removal, 0600 `pairing.json`), skills, `setup` idempotence and `bctl doctor` (each check, `--json`, `--quick`, `--fix` for permissions and the managed folder, a squatter on the port). Tests set `BCTL_CONFIG_DIR`, `BCTL_EXT_WAIT_MS` and a small idle timeout.
 - Not covered: the successful version-mismatch restart, proxy spawning (including Windows flags), and everything in the extension.
 
 > **Known debt:** the extension has no automated tests. Consent, state and handoff, parsing and CDP behaviour are verified only by hand in Chrome. Do not extend this pattern. Fix: [proposal](../proposals/extension-tests.md).

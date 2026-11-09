@@ -28,7 +28,6 @@ keyboard, check/uncheck/select, scroll/scrollintoview, drag, upload, `find` (all
 | [cross-origin-frames.md](../cross-origin-frames.md) | inline cross-site iframes; `frame` | 2 |
 | [batch.md](../batch.md) | `batch` | 2 |
 | [read-command.md](../read-command.md) | `read` (markdown, `--outline`, `--filter`) | 2 |
-| [doctor.md](../doctor.md) | `bctl doctor` | 2 |
 | [agent-guardrails.md](../agent-guardrails.md) | allowed domains, content boundaries, max output, action confirmation | 3 (security sign-off) |
 | [network-observe.md](../network-observe.md) | read-only `network requests` / `request` | 3 (security sign-off) |
 | [revisit-pdf-and-viewport.md](../revisit-pdf-and-viewport.md) | `pdf`; `set viewport/media` on agent tabs | 4 (changes a settled direction) |

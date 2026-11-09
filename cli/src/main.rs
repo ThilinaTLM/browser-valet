@@ -2,6 +2,7 @@
 //!
 //! Env: BCTL_PORT (port), BCTL_SESSION, BCTL_IDLE_TIMEOUT (proxy), BCTL_EXT_WAIT_MS (proxy; test hook),
 //! BCTL_CONFIG_DIR (replaces `<config_dir>/browser-bridge`; used by tests).
+mod doctor;
 mod embed;
 mod proxy;
 mod setup;
@@ -88,7 +89,7 @@ pub fn save(c: &Config) -> Result<()> {
 
 // ---- client ----
 
-fn addr(port: u16) -> SocketAddr {
+pub(crate) fn addr(port: u16) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], port))
 }
 pub fn recv(ws: &mut Ws) -> Result<Value> {
@@ -143,7 +144,7 @@ pub fn connect(c: &Config) -> Result<Ws> {
 }
 
 /// Connect and mutually authenticate as role `cli`; also returns the proxy's version.
-fn connect_raw(c: &Config) -> Result<(Ws, String)> {
+pub(crate) fn connect_raw(c: &Config) -> Result<(Ws, String)> {
     let s = TcpStream::connect_timeout(&addr(c.port), Duration::from_secs(3))?;
     s.set_read_timeout(Some(Duration::from_secs(10)))?;
     let (mut ws, _) = tungstenite::client(format!("ws://127.0.0.1:{}/", c.port), s)
@@ -206,7 +207,7 @@ pub fn ensure_proxy(c: &Config) -> Result<()> {
 }
 
 /// Ask a running proxy to exit. Returns false if none was reachable / auth failed.
-fn shutdown(c: &Config) -> bool {
+pub(crate) fn shutdown(c: &Config) -> bool {
     let Ok((mut ws, _)) = connect_raw(c) else { return false };
     let ok = send(&mut ws, json!({"t":"shutdown"})).is_ok() && recv(&mut ws).is_ok();
     std::thread::sleep(Duration::from_millis(200)); // let it release the port
@@ -230,6 +231,7 @@ const HELP: &str = "bctl local commands:
   pair <secret> [--port N]   pair manually with a code (normally `setup` does this)
   unpair                     forget the secret and stop the proxy
   status [--json]            show proxy and extension connection
+  doctor [--json] [--quick] [--fix]   diagnose config, extension folder, proxy, extension, round trip
   proxy [--idle-timeout S] [--port N]   run the relay in the foreground
   stop                       stop the background proxy
   version                    print version
@@ -418,6 +420,7 @@ fn local(args: Vec<String>) -> Result<i32> {
         }
         Some("setup") => setup::run(&args),
         Some("skills") => embed::skills(&args),
+        Some("doctor") => doctor::run(&args),
         Some("status") => status(args.iter().any(|a| a == "--json")),
         Some("proxy") => {
             let c = paired();

@@ -611,3 +611,208 @@ fn setup_writes_folder_and_pairing() {
     assert!(!d.join("extension/pairing.json").exists());
     std::fs::remove_dir_all(&d).ok();
 }
+
+// ---- doctor ----
+
+fn doctor(dir: &std::path::Path, port: u16, args: &[&str]) -> (Value, i32) {
+    let o = Command::new(env!("CARGO_BIN_EXE_bctl"))
+        .arg("doctor")
+        .args(args)
+        .arg("--json")
+        .env("BCTL_CONFIG_DIR", dir)
+        .env("BCTL_PORT", port.to_string())
+        .output()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap_or_else(|e| {
+        panic!(
+            "{e}: {}{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        )
+    });
+    (v, o.status.code().unwrap())
+}
+fn check<'a>(v: &'a Value, name: &str) -> &'a Value {
+    v["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == name)
+        .unwrap()
+}
+fn chmod(path: &std::path::Path, _mode: u32) {
+    #[cfg(unix)]
+    std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(_mode)).unwrap();
+    let _ = path;
+}
+/// Fake extension that answers every request with exit code 0 until its socket closes.
+fn answering_ext(p: &Proxy, info: Value) -> std::thread::JoinHandle<()> {
+    let mut e = ext_with(p, info);
+    std::thread::spawn(move || {
+        while let Ok(Message::Text(t)) = e.read() {
+            let r: Value = serde_json::from_str(t.as_str()).unwrap();
+            if r["t"] == "req" {
+                assert_eq!(r["req"]["argv"], json!(["help"]));
+                send(
+                    &mut e,
+                    json!({"t":"res","id":r["id"],"res":{"exitCode":0,"stdout":"help\n"}}),
+                );
+            }
+        }
+    })
+}
+
+#[test]
+fn doctor_all_green_with_extension() {
+    let p = start(&[]);
+    chmod(&p.dir.join("config.json"), 0o600);
+    let info = json!({"browser":"Google Chrome 150","extVersion":env!("CARGO_PKG_VERSION"),"managed":false});
+    let _t = answering_ext(&p, info);
+    let (v, code) = doctor(&p.dir, p.port, &[]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(v["ok"], true);
+    for n in ["config", "managed folder", "proxy", "extension", "round trip"] {
+        assert_eq!(check(&v, n)["status"], "pass", "{n}: {v}");
+    }
+    assert!(check(&v, "round trip")["message"].as_str().unwrap().contains(" ms"));
+    // Text output uses marks and ends with a summary.
+    let o = bctl(&p, &["doctor", "--quick"]);
+    let s = String::from_utf8_lossy(&o.stdout);
+    assert!(s.contains("✓ proxy:") && s.ends_with("All good.\n"), "{s}");
+}
+
+#[test]
+fn doctor_reports_missing_extension_and_old_browser() {
+    let p = start(&[]);
+    let (v, code) = doctor(&p.dir, p.port, &["--quick"]);
+    assert_eq!(code, 1);
+    assert_eq!(check(&v, "proxy")["status"], "pass");
+    assert_eq!(check(&v, "extension")["status"], "fail");
+    assert!(check(&v, "extension")["message"]
+        .as_str()
+        .unwrap()
+        .contains("not connected"));
+    assert_eq!(check(&v, "round trip")["status"], "skip");
+
+    let info = json!({"browser":"Google Chrome 120","extVersion":env!("CARGO_PKG_VERSION"),"managed":false});
+    let _t = answering_ext(&p, info);
+    let (v, code) = doctor(&p.dir, p.port, &["--quick"]);
+    assert_eq!(code, 1);
+    assert!(
+        check(&v, "extension")["message"].as_str().unwrap().contains("127"),
+        "{v}"
+    );
+}
+
+#[test]
+fn doctor_warns_on_extension_version_mismatch() {
+    let p = start(&[]);
+    chmod(&p.dir.join("config.json"), 0o600);
+    let info = json!({"browser":"Google Chrome 150","extVersion":"0.0.1","managed":false});
+    let _t = answering_ext(&p, info);
+    let (v, code) = doctor(&p.dir, p.port, &["--quick"]);
+    assert_eq!(code, 0);
+    assert_eq!(check(&v, "extension")["status"], "warn");
+    assert!(check(&v, "extension")["fix"].is_string());
+}
+
+#[test]
+fn doctor_without_config_fails_and_skips_the_rest() {
+    let d = tmpdir("doctor-nocfg");
+    let (v, code) = doctor(&d, 1, &[]);
+    assert_eq!(code, 1);
+    assert_eq!(check(&v, "config")["status"], "fail");
+    assert_eq!(check(&v, "proxy")["status"], "skip");
+    std::fs::remove_dir_all(&d).ok();
+}
+
+#[test]
+fn doctor_quick_does_not_start_a_proxy() {
+    let d = tmpdir("doctor-quick");
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    std::fs::write(d.join("config.json"), json!({"secret":SECRET,"port":port}).to_string()).unwrap();
+    chmod(&d.join("config.json"), 0o600);
+    let (v, code) = doctor(&d, port, &["--quick"]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(check(&v, "proxy")["status"], "warn");
+    assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+    std::fs::remove_dir_all(&d).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_config_permissions_and_fix() {
+    let p = start(&[]);
+    let cfg = p.dir.join("config.json");
+    chmod(&cfg, 0o644);
+    let (v, code) = doctor(&p.dir, p.port, &["--quick"]);
+    assert_eq!((code, check(&v, "config")["status"].as_str()), (1, Some("fail")));
+    let (v, _) = doctor(&p.dir, p.port, &["--quick", "--fix"]);
+    assert_eq!(check(&v, "config")["status"], "fixed");
+    let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&cfg).unwrap().permissions());
+    assert_eq!(mode & 0o777, 0o600);
+}
+
+#[test]
+fn doctor_managed_folder_mismatch_and_fix() {
+    let p = start(&[]);
+    chmod(&p.dir.join("config.json"), 0o600);
+    let folder = p.dir.join("extension");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("manifest.json"), json!({"version":"0.0.1"}).to_string()).unwrap();
+    std::fs::write(
+        folder.join("pairing.json"),
+        json!({"secret":"other","port":p.port}).to_string(),
+    )
+    .unwrap();
+    let (v, code) = doctor(&p.dir, p.port, &["--quick"]);
+    assert_eq!(
+        (code, check(&v, "managed folder")["status"].as_str()),
+        (1, Some("fail"))
+    );
+    assert!(check(&v, "managed folder")["message"]
+        .as_str()
+        .unwrap()
+        .contains("pairing.json"));
+    let (v, _) = doctor(&p.dir, p.port, &["--quick", "--fix"]);
+    if embedded() {
+        assert_eq!(check(&v, "managed folder")["status"], "fixed");
+        let pairing: Value = serde_json::from_slice(&std::fs::read(folder.join("pairing.json")).unwrap()).unwrap();
+        assert_eq!(pairing, json!({"secret":SECRET,"port":p.port}));
+        assert_eq!(doctor(&p.dir, p.port, &["--quick"]).0["checks"][1]["status"], "pass");
+    } else {
+        assert_eq!(check(&v, "managed folder")["status"], "fail");
+    }
+}
+
+#[test]
+fn doctor_detects_a_squatter_on_the_port() {
+    let d = tmpdir("doctor-squat");
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::fs::write(d.join("config.json"), json!({"secret":SECRET,"port":port}).to_string()).unwrap();
+    chmod(&d.join("config.json"), 0o600);
+    let t = std::thread::spawn(move || {
+        let mut ws = loop {
+            if let Ok(ws) = tungstenite::accept(l.accept().unwrap().0) {
+                break ws;
+            }
+        };
+        send(&mut ws, json!({"t":"challenge","nonce":"aa"}));
+        recv(&mut ws);
+        send(&mut ws, json!({"t":"welcome","mac":"00","version":"x"}));
+    });
+    let (v, code) = doctor(&d, port, &["--quick"]);
+    t.join().unwrap();
+    assert_eq!(code, 1);
+    assert_eq!(check(&v, "proxy")["status"], "fail");
+    assert!(check(&v, "proxy")["message"]
+        .as_str()
+        .unwrap()
+        .contains("server authentication failed"));
+    std::fs::remove_dir_all(&d).ok();
+}

@@ -52,7 +52,6 @@ rules into architecture, delete the proposal) | Rejected (delete, or add one lin
 | [cross-origin-frames.md](cross-origin-frames.md) | automation | Draft |
 | [batch.md](batch.md) | automation | Draft |
 | [read-command.md](read-command.md) | automation | Draft |
-| [doctor.md](doctor.md) | runtime | Draft |
 | [agent-guardrails.md](agent-guardrails.md) | security | Draft |
 | [network-observe.md](network-observe.md) | automation, security | Draft |
 | [revisit-pdf-and-viewport.md](revisit-pdf-and-viewport.md) | automation | Draft |
@@ -79,7 +78,6 @@ Overview and priorities: [agent-browser-parity/](agent-browser-parity/README.md)
 - [ ] Cross-origin iframes and `frame`: [cross-origin-frames.md](cross-origin-frames.md)
 - [ ] `batch`: [batch.md](batch.md)
 - [ ] `read`: [read-command.md](read-command.md)
-- [ ] `bctl doctor`: [doctor.md](doctor.md)
 - [ ] Guardrails (needs security sign-off): [agent-guardrails.md](agent-guardrails.md)
 - [ ] Read-only network inspection (needs security sign-off): [network-observe.md](network-observe.md)
 - [ ] Reconsider `pdf` and agent-tab viewport (changes a settled direction): [revisit-pdf-and-viewport.md](revisit-pdf-and-viewport.md)

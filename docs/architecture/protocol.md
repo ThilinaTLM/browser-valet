@@ -139,9 +139,20 @@ The CLI creates parent directories for `files[].path` as needed.
 
 Handled by the CLI itself (never forwarded): `setup [--browser B] [--no-open] [--no-wait]`,
 `skills [list | get <name> [--full] [--ref R] | path [name] | install [--dir D]]`,
-`pair <secret> [--port N]`, `unpair`, `status`, `proxy [--idle-timeout S] [--port N]`
+`pair <secret> [--port N]`, `unpair`, `status`, `doctor [--json] [--quick] [--fix]`, `proxy [--idle-timeout S] [--port N]`
 (foreground relay), `stop`, `version`/`--version`.
 Everything else (including `help` / `--help`) is forwarded as a `req`.
+
+`doctor` runs these checks in order and prints ✓/!/✗ with a one-line fix: config (exists, secret,
+mode 0600 on Unix), managed folder (`pairing.json` matches the config, files match the bundled
+version), proxy (port reachable, handshake, version), extension (connected, version equals the
+CLI's, browser version ≥ 127) and a round trip (`help` as a normal `req`, with latency). It reads
+the extension's info from the proxy's `status` reply, so there is no extra message type. It exits 1
+if any check fails (version mismatches only warn). `--json` prints `{version, ok, checks:[{name,
+status: pass|warn|fail|skip|fixed, message, fix?}]}`. `--quick` skips the round trip and does not
+start a proxy. `--fix` does only safe repairs: chmod 0600 on `config.json`, rewrite the managed
+folder, restart an idle proxy (never one with pending requests). It never re-pairs. Without
+`--quick` it starts the proxy on demand, like every other command.
 
 If the proxy is not reachable, the CLI starts `bctl proxy` detached (Unix: own process group;
 Windows: `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`), logging to
