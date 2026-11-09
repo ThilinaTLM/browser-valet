@@ -19,6 +19,13 @@ function extractorSource(): Promise<string> {
 export const readCommands: Command[] = [
   {
     name: 'read',
+    details:
+      'Prints the page as markdown (main content only). Use --outline for headings, --filter to keep matching sections, --max-output to cap the size. Given a URL it opens it in an agent tab first.',
+    examples: [
+      'bctl read',
+      'bctl read --outline',
+      'bctl read https://example.com --filter pricing',
+    ],
     group: 'Reading',
     usage: 'read [url] [--outline] [--filter <text>] [--max-output <chars>]',
     summary:

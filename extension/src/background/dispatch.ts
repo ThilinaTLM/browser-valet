@@ -43,6 +43,9 @@ function generalHelp(): string {
     'bctl — control your real browser from the command line (Browser Bridge)',
     '',
     'Usage: bctl <command> [args] [--json] [--session <name>] [--timeout <ms>]',
+    '',
+    'Start here (for AI agents): `bctl skills get core`',
+    'It explains the snapshot-and-ref workflow, tab consent and the JSON error codes.',
   ];
   for (const g of GROUPS) {
     lines.push('', g);
@@ -72,12 +75,14 @@ function generalHelp(): string {
 function commandHelp(c: Command): string {
   const lines = [`Usage: bctl ${c.usage}`, '', c.summary];
   if (c.aliases?.length) lines.push(`Aliases: ${c.aliases.join(', ')}`);
+  if (c.details) lines.push('', c.details);
   const flags = [...(c.flags ?? []), ...GLOBAL_FLAGS];
   lines.push('', 'Flags:');
   for (const f of flags) {
     const name = `${f.short ? `-${f.short}, ` : '    '}--${f.name}${f.type === 'string' ? ' <value>' : ''}`;
     lines.push(`  ${name.padEnd(28)} ${f.desc}`);
   }
+  if (c.examples?.length) lines.push('', 'Examples:', ...c.examples.map((e) => `  ${e}`));
   return lines.join('\n');
 }
 

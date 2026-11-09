@@ -21,6 +21,10 @@ export interface Command {
   usage: string;
   summary: string;
   flags?: Flag[];
+  /** Behaviour notes for `<cmd> --help` (what it waits for, when it fails, what it prints). */
+  details?: string;
+  /** Example command lines for `<cmd> --help`. */
+  examples?: string[];
   /**
    * Activity-log redaction (see security.md). By default only the first `show` positional
    * arguments (default 1: the target or subcommand) and the flags named in `showFlags` are

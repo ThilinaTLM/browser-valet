@@ -200,6 +200,9 @@ export function setLabel(tabId: number, label: string): void {
 export const navigationCommands: Command[] = [
   {
     name: 'open',
+    details:
+      "Navigates the session's current agent tab, or opens a new background agent tab when there is none. If the current tab is one you shared, it opens a new agent tab instead of navigating yours. Prints the page title and URL. Does not wait for the page to be idle; use `wait --load networkidle` for that.",
+    examples: ['bctl open https://example.com', 'bctl open localhost:3000'],
     show: Infinity,
     aliases: ['goto', 'navigate'],
     group: 'Navigation',
@@ -284,6 +287,14 @@ export const navigationCommands: Command[] = [
   },
   {
     name: 'tab',
+    details:
+      'Without arguments lists tabs; `[not shared]` marks tabs you opened yourself that the agent may not use. Switching to a tab the agent did not open asks the user in the browser and waits for the answer (code `denied` if refused). `tab new` opens an agent tab, `tab close` closes one.',
+    examples: [
+      'bctl tab',
+      'bctl tab t3',
+      'bctl tab new --label docs https://example.com',
+      'bctl tab close docs',
+    ],
     show: Infinity,
     showFlags: ['label'],
     group: 'Tabs',

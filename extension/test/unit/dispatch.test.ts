@@ -52,6 +52,42 @@ describe('help generation', () => {
     expect(a.stdout).toContain('--session <value>');
   });
 
+  it('points agents at the core skill in the top-level help', async () => {
+    expect((await run('help')).stdout).toContain(
+      'Start here (for AI agents): `bctl skills get core`',
+    );
+  });
+
+  it('renders details and examples when a command has them', async () => {
+    const r = await run('help', 'click');
+    expect(r.stdout).toMatch(/\n\nClicks the element/);
+    expect(r.stdout).toContain('\nExamples:\n  bctl click @e3\n');
+    // Examples come after the flags, details before them.
+    expect(r.stdout.indexOf('Clicks the element')).toBeLessThan(r.stdout.indexOf('Flags:'));
+    expect(r.stdout.indexOf('Flags:')).toBeLessThan(r.stdout.indexOf('Examples:'));
+    // A command without them still prints plain help.
+    expect((await run('help', 'highlight')).stdout).not.toContain('Examples:');
+  });
+
+  it('every example starts with bctl and names its own command', async () => {
+    for (const name of [
+      'open',
+      'snapshot',
+      'click',
+      'fill',
+      'wait',
+      'eval',
+      'tab',
+      'get',
+      'find',
+    ]) {
+      const out = (await run('help', name)).stdout;
+      const ex = out.split('Examples:\n')[1]?.split('\n').filter(Boolean) ?? [];
+      expect(ex.length, name).toBeGreaterThan(0);
+      for (const line of ex) expect(line.trim(), name).toMatch(/bctl /);
+    }
+  });
+
   it('shows command-specific flags in command help', async () => {
     const r = await run('help', 'tab');
     expect(r.stdout).toContain('--label <value>');

@@ -36,6 +36,13 @@ function headerBlock(h: Record<string, string>): string {
 export const networkCommands: Command[] = [
   {
     name: 'network',
+    details:
+      'Observes requests the page made. Recording starts with the first `network` command on a tab (a warning says so), so reload or repeat the action afterwards. Credentials in URLs, headers and bodies are redacted.',
+    examples: [
+      'bctl network requests --filter /api --status 4xx',
+      'bctl network request <id>',
+      'bctl network requests --clear',
+    ],
     group: 'Debugging',
     usage:
       'network requests [--filter <substr>] [--type <t,…>] [--method <m>] [--status <s>] [--clear]\nnetwork request <id>',
