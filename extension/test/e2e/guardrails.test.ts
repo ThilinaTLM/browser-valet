@@ -2,7 +2,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import {
   approveNextConsent,
   bctl,
@@ -17,6 +17,21 @@ useBrowser();
 
 afterEach(async () => {
   await setGuardrails({});
+});
+
+// Leave no agent tabs behind for the next file (the browser is shared by the whole run).
+afterAll(async () => {
+  for (const session of [
+    'default',
+    'confirm-e2e',
+    'confirm-sites',
+    'confirm-blocked',
+    'guard-e2e',
+    'guard-new',
+    'guard-batch',
+  ]) {
+    await bctl('close', '--session', session);
+  }
 });
 
 describe('--max-output', () => {

@@ -135,7 +135,10 @@ describe('screenshot --annotate', () => {
     const mine = j.annotations.find((a) => a.ref === pay);
     expect(mine, JSON.stringify(j.annotations)).toBeDefined();
     const page = (await browser.current.pages()).find((p) => p.url().includes('pad=400'));
-    const frame = page?.frames().find((f) => f.url().includes('frame-inner.html'));
+    // The main frame's URL has `frame-inner.html` in its query: skip it (frame order varies).
+    const frame = page
+      ?.frames()
+      .find((f) => f !== page.mainFrame() && f.url().includes('/frame-inner.html'));
     const el = await frame?.$('#pay');
     const want = await el?.boundingBox();
     expect(want).toBeDefined();

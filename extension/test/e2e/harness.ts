@@ -107,13 +107,30 @@ function browser(): Browser {
   return shared;
 }
 
-/** Open a page as the *user* would (a tab the agent has no access to until approved). */
+/**
+ * Open a page as the *user* would (a tab the agent has no access to until approved).
+ *
+ * The extension treats a tab opened by a controlled tab as the agent's, and Chrome gives
+ * `newPage()` the *active* tab as opener. Earlier files leave agent tabs behind (some blank, e.g.
+ * after a refused navigation), so "activate an about:blank tab first" could pick one of those and
+ * turn the user tab into an agent tab. A target created in a new window has no opener at all.
+ */
 export async function openUserTab(url: string): Promise<Page> {
-  // Chrome gives a new tab the active tab as its opener, and the extension treats a tab opened
-  // by a controlled tab as the agent's. Activate the untouched about:blank tab first.
-  const blank = (await browser().pages()).find((p) => p.url() === 'about:blank');
-  await blank?.bringToFront().catch(() => undefined);
-  const page = await browser().newPage();
+  const session = await browser().target().createCDPSession();
+  let page: Page | null;
+  try {
+    const { targetId } = await session.send('Target.createTarget', {
+      url: 'about:blank',
+      newWindow: true,
+    });
+    const target = await browser().waitForTarget(
+      (t) => (t as unknown as { _targetId: string })._targetId === targetId,
+    );
+    page = await target.page();
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
+  if (!page) throw new Error('could not open a user tab');
   await page.goto(url);
   return page;
 }
