@@ -2,7 +2,9 @@
 //!
 //! Env: BCTL_PORT (port), BCTL_SESSION, BCTL_IDLE_TIMEOUT (proxy), BCTL_EXT_WAIT_MS (proxy; test hook),
 //! BCTL_CONFIG_DIR (replaces `<config_dir>/browser-bridge`; used by tests).
+mod embed;
 mod proxy;
+mod setup;
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
@@ -16,9 +18,9 @@ use std::time::{Duration, Instant};
 use tungstenite::{Message, WebSocket};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-const DEFAULT_PORT: u16 = 47823;
+pub const DEFAULT_PORT: u16 = 47823;
 const TIMEOUT: Duration = Duration::from_secs(600);
-type Ws = WebSocket<TcpStream>;
+pub type Ws = WebSocket<TcpStream>;
 
 fn hmac(secret: &str, msg: &str) -> Hmac<Sha256> {
     let mut m = <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()).expect("any key length");
@@ -46,21 +48,21 @@ pub fn log(msg: &str) {
 
 // ---- config ----
 
-struct Config {
-    secret: String,
-    port: u16,
+pub struct Config {
+    pub secret: String,
+    pub port: u16,
 }
-fn dir() -> PathBuf {
+pub fn dir() -> PathBuf {
     match std::env::var_os("BCTL_CONFIG_DIR") {
         Some(d) => d.into(),
         None => dirs::config_dir().unwrap_or_else(|| ".".into()).join("browser-bridge"),
     }
 }
-fn env_port() -> Option<u16> {
+pub fn env_port() -> Option<u16> {
     std::env::var("BCTL_PORT").ok()?.parse().ok()
 }
 /// Port precedence: BCTL_PORT > config.json > default.
-fn load() -> Option<Config> {
+pub fn load() -> Option<Config> {
     let v: Value = serde_json::from_slice(&std::fs::read(dir().join("config.json")).ok()?).ok()?;
     let port = env_port()
         .or(v["port"].as_u64().and_then(|p| p.try_into().ok()))
@@ -70,7 +72,7 @@ fn load() -> Option<Config> {
         port,
     })
 }
-fn save(c: &Config) -> Result<()> {
+pub fn save(c: &Config) -> Result<()> {
     std::fs::create_dir_all(dir())?;
     let path = dir().join("config.json");
     let mut o = std::fs::OpenOptions::new();
@@ -89,7 +91,7 @@ fn save(c: &Config) -> Result<()> {
 fn addr(port: u16) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], port))
 }
-fn recv(ws: &mut Ws) -> Result<Value> {
+pub fn recv(ws: &mut Ws) -> Result<Value> {
     loop {
         match ws.read() {
             Ok(Message::Text(t)) => return Ok(serde_json::from_str(t.as_str())?),
@@ -104,12 +106,33 @@ fn recv(ws: &mut Ws) -> Result<Value> {
         }
     }
 }
-fn send(ws: &mut Ws, v: Value) -> Result<()> {
+pub fn send(ws: &mut Ws, v: Value) -> Result<()> {
     Ok(ws.send(Message::text(v.to_string()))?)
 }
 
-/// Connect and mutually authenticate as role `cli`.
-fn connect(c: &Config) -> Result<Ws> {
+/// Connect as role `cli`; if the proxy runs a different bctl version, restart it from this binary (once).
+pub fn connect(c: &Config) -> Result<Ws> {
+    let (ws, v) = connect_raw(c)?;
+    if v == VERSION {
+        return Ok(ws);
+    }
+    drop(ws);
+    eprintln!("bctl: restarting the proxy (v{v} -> v{VERSION})");
+    if !shutdown(c) {
+        return Ok(connect_raw(c)?.0);
+    }
+    for _ in 0..20 {
+        if TcpStream::connect_timeout(&addr(c.port), Duration::from_millis(200)).is_err() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    ensure_proxy(c)?;
+    Ok(connect_raw(c)?.0)
+}
+
+/// Connect and mutually authenticate as role `cli`; also returns the proxy's version.
+fn connect_raw(c: &Config) -> Result<(Ws, String)> {
     let s = TcpStream::connect_timeout(&addr(c.port), Duration::from_secs(3))?;
     s.set_read_timeout(Some(Duration::from_secs(10)))?;
     let (mut ws, _) = tungstenite::client(format!("ws://127.0.0.1:{}/", c.port), s)
@@ -130,7 +153,7 @@ fn connect(c: &Config) -> Result<Ws> {
                 w["mac"].as_str().unwrap_or(""),
             ) =>
         {
-            Ok(ws)
+            Ok((ws, w["version"].as_str().unwrap_or("").to_string()))
         }
         Some("welcome") => bail!(
             "server authentication failed: bad welcome MAC (is something else listening on port {}?)",
@@ -142,7 +165,7 @@ fn connect(c: &Config) -> Result<Ws> {
 }
 
 /// Start `bctl proxy` detached (log in proxy.log) unless something already accepts connections.
-fn ensure_proxy(c: &Config) -> Result<()> {
+pub fn ensure_proxy(c: &Config) -> Result<()> {
     let up = || TcpStream::connect_timeout(&addr(c.port), Duration::from_millis(500)).is_ok();
     if up() {
         return Ok(());
@@ -173,7 +196,7 @@ fn ensure_proxy(c: &Config) -> Result<()> {
 
 /// Ask a running proxy to exit. Returns false if none was reachable / auth failed.
 fn shutdown(c: &Config) -> bool {
-    let Ok(mut ws) = connect(c) else { return false };
+    let Ok((mut ws, _)) = connect_raw(c) else { return false };
     let ok = send(&mut ws, json!({"t":"shutdown"})).is_ok() && recv(&mut ws).is_ok();
     std::thread::sleep(Duration::from_millis(200)); // let it release the port
     ok
@@ -181,21 +204,33 @@ fn shutdown(c: &Config) -> bool {
 
 fn paired() -> Config {
     load().unwrap_or_else(|| {
-        eprintln!("Not paired. Open the Browser Bridge extension popup and copy the pairing command.");
+        eprintln!("Not paired. Run `bctl setup` to install the browser extension and pair.");
         std::process::exit(1)
     })
 }
 
 const HELP: &str = "bctl local commands:
-  pair <secret> [--port N]   store the pairing secret from the extension popup
+  setup [--browser chrome|edge|brave|chromium] [--no-open] [--no-wait]
+                             install the browser extension (load it once) and pair automatically
+  skills [list]              list agent skills; `skills get core` prints the usage guide (read it first!)
+  skills get <name> [--full] [--ref <ref>]   print a skill (+ all / one reference)
+  skills path [name]         write skills to the config dir and print the path
+  skills install [--dir D]   install a stub `bctl` skill for Claude Code / other agents
+  pair <secret> [--port N]   pair manually with a code (normally `setup` does this)
   unpair                     forget the secret and stop the proxy
   status [--json]            show proxy and extension connection
   proxy [--idle-timeout S] [--port N]   run the relay in the foreground
   stop                       stop the background proxy
   version                    print version
-All other commands are forwarded to the browser extension.";
+All other commands are forwarded to the browser extension.
+New here? Run `bctl skills get core`.";
 
 fn forward(argv: Vec<String>) -> Result<i32> {
+    let helpish = matches!(argv.first().map(String::as_str), None | Some("help" | "--help" | "-h"));
+    if helpish && load().is_none() {
+        println!("{HELP}\n\nNot paired. Run `bctl setup` to install the browser extension and pair.");
+        return Ok(1);
+    }
     let c = paired();
     let stdin = if argv.iter().any(|a| a == "--stdin") {
         let mut s = String::new();
@@ -206,7 +241,7 @@ fn forward(argv: Vec<String>) -> Result<i32> {
     };
     let mut ws = match ensure_proxy(&c).and_then(|_| connect(&c)) {
         Ok(ws) => ws,
-        Err(e) if matches!(argv.first().map(String::as_str), None | Some("help" | "--help" | "-h")) => {
+        Err(e) if helpish => {
             println!("{HELP}\n\nCould not reach the extension: {e:#}");
             return Ok(1);
         }
@@ -285,11 +320,25 @@ fn status(json_out: bool) -> Result<i32> {
         p["port"]
     );
     match v["ext"].as_object() {
-        Some(e) => println!(
-            "extension: {} (extension v{})",
-            e.get("browser").and_then(Value::as_str).unwrap_or("unknown browser"),
-            e.get("extVersion").and_then(Value::as_str).unwrap_or("?")
-        ),
+        Some(e) => {
+            let ver = e.get("extVersion").and_then(Value::as_str).unwrap_or("?");
+            let managed = e.get("managed").and_then(Value::as_bool).unwrap_or(false);
+            println!(
+                "extension: {} (extension v{ver})",
+                e.get("browser").and_then(Value::as_str).unwrap_or("unknown browser"),
+            );
+            println!("managed:   {}", if managed { "yes" } else { "no" });
+            if let Some(emb) = embed::EMBEDDED_EXT_VERSION.filter(|emb| *emb != ver) {
+                println!(
+                    "note:      extension v{ver} differs from the version bundled with this bctl (v{emb}); {}",
+                    if managed {
+                        "it will update automatically"
+                    } else {
+                        "reload the unpacked extension / rebuild it"
+                    }
+                );
+            }
+        }
         None => println!("extension: not connected"),
     }
     Ok(0)
@@ -326,6 +375,9 @@ fn local(args: Vec<String>) -> Result<i32> {
             // the OLD config). If that fails (no proxy / old secret already wrong) there is nothing to stop
             // or it can't be stopped from here; it will exit on its idle timeout.
             let stopped = load().is_some_and(|old| shutdown(&old));
+            if embed::ext_dir().is_dir() {
+                embed::write_pairing(&secret, port)?;
+            }
             save(&Config { secret, port })?;
             println!("Paired. Run `bctl status` to check the connection.");
             if !stopped && TcpStream::connect_timeout(&addr(port), Duration::from_millis(300)).is_ok() {
@@ -338,6 +390,7 @@ fn local(args: Vec<String>) -> Result<i32> {
                 shutdown(&c);
             }
             let _ = std::fs::remove_file(dir().join("config.json"));
+            let _ = std::fs::remove_file(embed::ext_dir().join(embed::PAIRING));
             println!("Unpaired.");
             Ok(0)
         }
@@ -352,6 +405,8 @@ fn local(args: Vec<String>) -> Result<i32> {
             );
             Ok(0)
         }
+        Some("setup") => setup::run(&args),
+        Some("skills") => embed::skills(&args),
         Some("status") => status(args.iter().any(|a| a == "--json")),
         Some("proxy") => {
             let c = paired();

@@ -25,6 +25,10 @@ export interface Connection {
   status: ConnStatus;
   /** Set once the CLI has successfully connected with the current secret. */
   paired: boolean;
+  /** Secret and port come from `pairing.json` (installed by `bctl setup`). */
+  managed?: boolean;
+  /** Effective port (from pairing.json when managed). */
+  port?: number;
 }
 
 export type Control = 'agent' | 'user';
@@ -74,6 +78,12 @@ export interface Settings {
   secret: string;
   port: number;
   enabled: boolean;
+}
+
+/** Shape of `pairing.json` in the managed extension folder. */
+export interface Pairing {
+  secret: string;
+  port: number;
 }
 
 export const DEFAULT_PORT = 47823;

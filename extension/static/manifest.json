@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Browser Bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqx2otc2k8LzF8ldr9zChtNNkKJ6fpuoqRDzey6N1uwU1wSFlxLmZUyPQVx0KqP+2aq6Pna11wigNQBkULljsalAboAGvwdq0HV0cPp2bNEv3Mp9umqP87dE7s74k5HM59ux6p56xtaYojNUJo7vXFxtDjrnzrjd8WHqG2GLIRtoPsjp/NMultQwiY94nCkvko3u+J2cQGWgo4aRxA2SNe7TvMEdIKrd1WfOUY5U1RRS8WvTjV72MGlRKV11r32kRqqC+IFJr4t68p1payCqi4bCgHhuSTIN3DmMQlghvtD6yBNPzDs15mikbUzZTddC0zRMJA4k+0CfuQACMRTKTXwIDAQAB",
   "description": "Let coding agents control this browser through the local `bctl` CLI — only the tabs you allow.",
   "minimum_chrome_version": "127",
   "permissions": ["debugger", "tabs", "storage", "alarms"],

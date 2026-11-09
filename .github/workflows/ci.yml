@@ -3,6 +3,7 @@ on: [push, pull_request]
 
 jobs:
   cli:
+    needs: extension
     strategy:
       fail-fast: false
       matrix:
@@ -13,6 +14,10 @@ jobs:
         working-directory: cli
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: extension-dist
+          path: extension/dist
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

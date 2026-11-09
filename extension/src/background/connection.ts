@@ -2,12 +2,15 @@
 
 import type { CliRequest, ConnStatus } from '../shared';
 import { execute } from './dispatch';
-import { save, setPaired, settings, state } from './state';
+import { log, refreshPairing, save, setPaired, settings, state } from './state';
 
 const VERSION = chrome.runtime.getManifest().version;
 const RETRY_MS = 1000;
+const UPDATE_RETRY_MS = 10 * 60_000;
 
 let ws: WebSocket | undefined;
+let connecting = false;
+let updating = false;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
 const inflight = new Map<number, AbortController>();
 
@@ -69,8 +72,46 @@ export function connect(): void {
     setStatus('off');
     return;
   }
-  if (ws) return;
+  if (ws || connecting) return;
+  connecting = true;
+  // Re-read pairing.json first so re-pairing (`bctl setup`) needs no extension reload.
+  void refreshPairing()
+    .catch(() => undefined)
+    .then(() => {
+      connecting = false;
+      if (!ws && settings.enabled) open();
+    });
+}
 
+/** Wait for in-flight requests, hand the state over, and reload into the new version. */
+async function selfUpdate(version: string): Promise<void> {
+  const { updateTried } = await chrome.storage.local.get<{
+    updateTried?: { version: string; ts: number };
+  }>('updateTried');
+  // Loop guard: a reload that didn't pick up the new version is retried at most every 10 minutes.
+  if (updateTried?.version === version && Date.now() - updateTried.ts < UPDATE_RETRY_MS) {
+    console.warn(`bctl: already tried updating to ${version} and it did not take; ignoring`);
+    return;
+  }
+  if (updating || VERSION === version) return;
+  updating = true;
+  await chrome.storage.local.set({ updateTried: { version, ts: Date.now() } });
+  const deadline = Date.now() + 120_000;
+  while (inflight.size > 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  console.info(`bctl: updating extension ${VERSION} -> ${version}`);
+  log({
+    ts: Date.now(),
+    session: 'bctl',
+    command: `update ${VERSION} → ${version}`,
+    ok: true,
+  });
+  await chrome.storage.local.set({ handoff: { state, ts: Date.now() } });
+  chrome.runtime.reload();
+}
+
+function open(): void {
   const sock = new WebSocket(`ws://127.0.0.1:${settings.port}/`);
   ws = sock;
   let nonce = '';
@@ -99,7 +140,11 @@ export function connect(): void {
           nonce,
           mac: await hmac(`bctl1|client|ext|${challenge}|${nonce}`),
           version: VERSION,
-          info: { browser: browserName(), extVersion: VERSION },
+          info: {
+            browser: browserName(),
+            extVersion: VERSION,
+            managed: state.conn.managed === true,
+          },
         });
         break;
       }
@@ -130,6 +175,9 @@ export function connect(): void {
         send({ t: 'res', id, res });
         break;
       }
+      case 'update':
+        if (authed && typeof msg.version === 'string') void selfUpdate(msg.version);
+        break;
       case 'cancel':
         inflight.get(Number(msg.id))?.abort();
         break;

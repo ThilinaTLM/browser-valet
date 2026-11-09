@@ -3,7 +3,7 @@
 
 import type { Control } from '../shared';
 import * as cdp from './cdp';
-import { forgetTab, meta, save, state } from './state';
+import { forgetTab, handoffGraceUntil, meta, save, state } from './state';
 
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -140,7 +140,12 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
 });
 
 // The user closed Chrome's debugging bar: treat it as "stop controlling this tab".
-cdp.setOnUserDetach((tabId) => void revoke(tabId));
+// (Not right after a self-update reload, which drops all debugger attachments; those re-attach
+// lazily on the next command.)
+cdp.setOnUserDetach((tabId) => {
+  if (Date.now() < handoffGraceUntil) return;
+  void revoke(tabId);
+});
 
 // ---------------------------------------------------------------------------
 // Navigation helpers

@@ -1,4 +1,5 @@
 //! Stateless relay: authenticates `cli` and `ext` peers and routes requests between them.
+use crate::embed::EMBEDDED_EXT_VERSION;
 use crate::{log, mac, nonce, verify, VERSION};
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -11,6 +12,9 @@ use tokio::sync::{mpsc, Notify};
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::{handshake::server::*, http, Message};
 use tokio_tungstenite::WebSocketStream;
+
+/// The only extension origin allowed to connect as role `ext` (derived from the key in manifest.json).
+const EXT_ORIGIN: &str = "chrome-extension://fekhggniifjffgnkljlblgfcoolaonbm";
 
 type Ws = WebSocketStream<TcpStream>;
 
@@ -130,7 +134,7 @@ async fn conn(sh: Arc<Shared>, tcp: TcpStream) -> Result<()> {
             .get("origin")
             .and_then(|v| v.to_str().ok())
             .map(String::from);
-        if o.as_ref().is_some_and(|o| !o.starts_with("chrome-extension://")) {
+        if o.as_ref().is_some_and(|o| o != EXT_ORIGIN) {
             let r = http::Response::builder()
                 .status(403)
                 .body(Some("forbidden origin".to_string()))
@@ -169,20 +173,48 @@ async fn conn(sh: Arc<Shared>, tcp: TcpStream) -> Result<()> {
     send(&mut ws, json!({"t":"welcome","mac":m,"version":VERSION})).await?;
     log(&format!("{role} connected (version {})", s("version")));
     if role == "ext" {
-        ext_conn(&sh, ws, auth["info"].clone()).await;
+        let info = auth["info"].clone();
+        let update = pending_update(&sh, &info);
+        ext_conn(&sh, ws, info, update).await;
         Ok(())
     } else {
         cli_conn(&sh, ws).await
     }
 }
 
-async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value) {
+/// A managed extension running a different version than the embedded one gets the managed folder rewritten
+/// and an `update` message. Returns the version to announce, if any. Never fails the connection.
+fn pending_update(sh: &Shared, info: &Value) -> Option<&'static str> {
+    let emb = EMBEDDED_EXT_VERSION?;
+    if info["managed"] != true || info["extVersion"].as_str() == Some(emb) {
+        return None;
+    }
+    match crate::embed::write_managed(&sh.secret, sh.port) {
+        Ok(p) => {
+            log(&format!(
+                "extension {} -> {emb}: rewrote {}",
+                info["extVersion"].as_str().unwrap_or("?"),
+                p.display()
+            ));
+            Some(emb)
+        }
+        Err(e) => {
+            log(&format!("cannot update managed extension folder: {e:#}"));
+            None
+        }
+    }
+}
+
+async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let id = {
         let mut st = sh.st.lock().unwrap();
         st.next += 1;
         let id = st.next;
         // Replacing drops the old sender, which ends the old connection's loop.
+        if let Some(v) = update {
+            tx.send(json!({"t":"update","version":v}).to_string()).ok();
+        }
         st.ext = Some(Ext { conn: id, tx, info });
         id
     };

@@ -12,8 +12,18 @@ All messages are JSON text frames over one WebSocket endpoint: `ws://127.0.0.1:<
 
 ## Pairing secret
 
-The extension generates the secret (32 random bytes, base64url, no padding) and shows a pairing
-command: `bctl pair <secret>`. The CLI stores it in `<config_dir>/browser-bridge/config.json`
+The secret is 32 random bytes, base64url-encoded with no padding. There are two ways to share it:
+
+- **Managed (default):** `bctl setup` generates the secret and writes the bundled extension to
+  `<config_dir>/browser-bridge/extension/`, adding `pairing.json` (`{"secret": "...", "port": 47823}`,
+  mode 0600). The user loads that folder as an unpacked extension. The extension fetches
+  `chrome.runtime.getURL("pairing.json")` (`cache: no-store`) at startup and before every connection
+  attempt, so re-pairing (`bctl setup`, `bctl pair`) needs no reload. If the file exists, it overrides
+  the secret and port stored in the extension. The file is not web-accessible.
+- **Manual (development builds loaded from `extension/dist`):** the extension generates the secret
+  and shows a pairing command, `bctl pair <secret>`.
+
+The CLI stores the secret in `<config_dir>/browser-bridge/config.json`
 (`{"secret": "...", "port": 47823}`; file mode 0600 on Unix). `config_dir` = `dirs::config_dir()`
 (`~/.config` on Linux, `~/Library/Application Support` on macOS, `%APPDATA%` on Windows).
 The proxy reads the secret from the same file at startup. The secret is never sent on the wire.
@@ -24,8 +34,9 @@ HMAC key = UTF-8 bytes of the secret string. MAC = lowercase hex of HMAC-SHA256.
 
 Origin rule (checked at WebSocket upgrade):
 - `Origin` header absent → only role `cli` is allowed.
-- `Origin` starts with `chrome-extension://` → only role `ext` is allowed.
-- Any other `Origin` (web pages) → reject with HTTP 403.
+- `Origin` is `chrome-extension://fekhggniifjffgnkljlblgfcoolaonbm` → only role `ext` is allowed.
+  This ID is pinned by the `key` in the extension manifest.
+- Any other `Origin` (web pages, other extensions) → reject with HTTP 403.
 
 Handshake:
 
@@ -35,6 +46,8 @@ Handshake:
    On success: `{"t":"welcome","mac":"<HMAC(key, "bctl1|server|" + role + "|" + Nc + "|" + Np)>","version":"<proxy version>"}`
 4. Client verifies the server MAC and closes the connection if it is wrong (protects against
    another process squatting the port while the proxy is down).
+5. If the proxy's `version` differs from the CLI's, the CLI sends `shutdown`, starts a proxy from its
+   own binary and reconnects once, so an upgraded binary never talks to an old proxy.
 
 Any message other than `auth` before authentication → close.
 
@@ -42,10 +55,32 @@ Any message other than `auth` before authentication → close.
 
 - Only one extension connection is active. A newly authenticated `ext` replaces the old one
   (the old socket is closed).
-- `info` in the ext auth message: `{"browser": "Google Chrome 157", "extVersion": "0.2.0"}`.
+- `info` in the ext auth message: `{"browser": "Google Chrome 157", "extVersion": "0.3.0", "managed": true}`
+  (`managed` = `pairing.json` was found, so the extension runs from the folder `bctl` manages).
 - The extension sends `{"t":"ping"}` every ~20 s to keep its service worker alive. The proxy ignores pings
   (they do **not** count as activity for the idle timer).
 
+### Updates
+
+The proxy acts when an extension authenticates with `managed: true`, its `extVersion` differs from
+the version embedded in the binary, and the binary embeds an extension:
+
+1. The proxy rewrites the managed folder: the embedded files, a fresh `pairing.json`, and stale
+   files removed.
+2. It sends `{"t":"update","version":"<embedded version>"}`.
+
+The extension then:
+
+1. Waits until no requests are in flight.
+2. Copies its session state to `chrome.storage.local` (`handoff`), because a reload clears
+   `chrome.storage.session`.
+3. Calls `chrome.runtime.reload()`. Chrome re-reads the folder and the extension restores the
+   handoff state (if under 60 s old) and reconnects.
+
+Loop guard: the extension records the target version and time (`updateTried`). If it is still
+running a different version, it ignores another update to the same version for 10 minutes.
+
+The proxy never updates non-managed extensions; `bctl status` only reports their version mismatch.
 ## CLI requests
 
 After `welcome`, the CLI sends exactly one message and waits:
@@ -99,8 +134,10 @@ The CLI creates parent directories for `files[].path` as needed.
 
 ## CLI-local commands
 
-Handled by the CLI itself (never forwarded): `pair <secret> [--port N]`, `unpair`, `status`,
-`proxy [--idle-timeout S] [--port N]` (foreground relay), `stop`, `version`/`--version`.
+Handled by the CLI itself (never forwarded): `setup [--browser B] [--no-open] [--no-wait]`,
+`skills [list | get <name> [--full] [--ref R] | path [name] | install [--dir D]]`,
+`pair <secret> [--port N]`, `unpair`, `status`, `proxy [--idle-timeout S] [--port N]`
+(foreground relay), `stop`, `version`/`--version`.
 Everything else (including `help` / `--help`) is forwarded as a `req`.
 
 If the proxy is not reachable, the CLI starts `bctl proxy` detached (Unix: own process group;

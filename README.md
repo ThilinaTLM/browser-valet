@@ -19,30 +19,52 @@ flowchart LR
 - **Consent first.** Agent-opened tabs are the agent's. Any other tab needs your approval in a
   popup; you can revoke control at any time (popup, or close Chrome's "debugging" bar).
   `open <url>` never navigates away from a tab you shared; it opens an agent tab instead.
-  Reloading the extension clears all grants.
+  Turning the extension off and on again clears all grants.
+- **One binary.** `bctl` contains the extension and the agent skills, always version-matched.
 
 ## Install
 
-**CLI**
+You only need the `bctl` binary (from a release, or `cargo install --path cli` after building the
+extension; see [Development](#development)). Then:
 
 ```sh
-cargo install --path cli        # puts `bctl` in ~/.cargo/bin (make sure it's on PATH)
+bctl setup
 ```
 
-**Extension**
+`setup` writes the bundled extension to `<config dir>/extension`, opens `chrome://extensions`, and
+copies the folder path to the clipboard. In the browser, do this once: turn on **Developer mode**,
+click **Load unpacked**, and pick that folder. `setup` waits until the extension connects:
 
-```sh
-cd extension && pnpm install && pnpm build
+```
+✓ Connected: Google Chrome 142 (extension v0.3.0)
 ```
 
-Open `chrome://extensions`, enable **Developer mode**, **Load unpacked** → `extension/dist`.
+There is no pairing step. `setup` puts a `pairing.json` with the shared secret in the extension
+folder, and the extension reads it from there.
 
-**Pair** — click the Browser Bridge toolbar icon, copy the pairing command it shows and run it:
+**Updates.** After you update `bctl`, the next connection notices that the extension is a
+different version. The proxy rewrites the folder, and the extension reloads itself after any
+running commands finish. Tab approvals carry over.
+
+**Agents.** `bctl skills install` puts a small skill stub in `~/.claude/skills/bctl` and
+`~/.agents/skills/bctl`. The stub tells the agent to run `bctl skills get core`, which prints the
+full guide for the installed version.
+
+> Chrome only installs extensions from the Chrome Web Store with one click (it rejects a `.crx`
+> from anywhere else, even localhost). That's why setup uses Load unpacked. Chrome may sometimes
+> warn about developer-mode extensions; the extension keeps working.
+
+<details><summary>Manual pairing (extension loaded from <code>extension/dist</code> during development)</summary>
+
+Click the Browser Bridge toolbar icon, copy the pairing command it shows and run it:
 
 ```sh
 bctl pair <code>
-bctl status          # extension: Google Chrome … (extension v0.2.0)
+bctl status
 ```
+
+A development build is not updated automatically; `bctl status` tells you when its version differs.
+</details>
 
 ## Usage
 
@@ -57,7 +79,8 @@ bctl tab t4                          # asks you in the browser, waits for the an
 bctl close                           # close the session's tabs, release yours
 ```
 
-Run `bctl help` for every command. `SKILL.md` is a ready-made skill for coding agents.
+Run `bctl help` for every command. For agents: `bctl skills get core` (add `--full` for the command
+reference).
 
 | Area | Commands |
 |---|---|
@@ -69,7 +92,8 @@ Run `bctl help` for every command. `SKILL.md` is a ready-made skill for coding a
 | Debugging | `console`, `errors` |
 
 Global flags: `--json` (`{success, data, error}`), `--session <name>` (or `BCTL_SESSION`),
-`--timeout <ms>`. CLI-local commands: `pair`, `unpair`, `status`, `stop`, `proxy`, `version`.
+`--timeout <ms>`. CLI-local commands: `setup`, `skills`, `pair`, `unpair`, `status`, `stop`,
+`proxy`, `version`.
 
 Deliberately left out: cookies/storage/state, network interception, emulation, video/trace/pdf —
 they would modify your real profile or aren't needed for driving pages.
@@ -100,21 +124,35 @@ Controlled tabs show an **AI** badge on the toolbar icon.
 
 | | |
 |---|---|
-| `BCTL_PORT` | Proxy port (default `47823`; also `bctl pair --port`, and the popup's Settings) |
+| `BCTL_PORT` | Proxy port (default `47823`; set it before `bctl setup`, or use `bctl pair --port` / the popup's Settings for manual pairing) |
 | `BCTL_SESSION` | Default session name |
 | `BCTL_IDLE_TIMEOUT` | Proxy idle shutdown in seconds (default 600, `0` = never) |
 | `BCTL_CONFIG_DIR` | Override the config directory (tests) |
 
 Config lives in `~/.config/browser-bridge` (Linux), `~/Library/Application Support/browser-bridge`
-(macOS) or `%APPDATA%\browser-bridge` (Windows); the proxy logs to `proxy.log` there.
+(macOS) or `%APPDATA%\browser-bridge` (Windows). The proxy logs to `proxy.log` there; the
+extension lives in `extension/` and expanded skills in `skills/`.
 
 ## Development
 
 ```sh
+cd extension && pnpm install && pnpm build   # build first: the CLI embeds extension/dist
 cd cli && cargo test                         # relay + client integration tests
-cd extension && pnpm check && pnpm build     # typecheck, eslint, prettier, bundle
+cargo install --path cli                     # bctl with the extension and skills built in
+cd extension && pnpm check                   # typecheck, eslint, prettier
 pnpm watch                                   # rebuild on change, then reload the extension
 ```
+
+- If `extension/dist` is missing, `cli` still builds, but `bctl setup` reports that this build has no
+  extension.
+- The build fails if the extension's version differs from the CLI's.
+- Skill sources live in `cli/skills/`. The root `SKILL.md` is a stub that points to
+  `bctl skills get core`.
+- The manifest `key` pins the extension ID to `fekhggniifjffgnkljlblgfcoolaonbm`, and the proxy only
+  accepts that origin. Chrome rejects a second unpacked copy with the same ID, so for development
+  remove the `bctl setup` copy and load `extension/dist` instead (or the other way round).
+- The matching private key (`extension/key.pem`, gitignored) is only needed to pack a `.crx` or to
+  keep the same ID on a first Web Store upload.
 
 ## Limitations
 

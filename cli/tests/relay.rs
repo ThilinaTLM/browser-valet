@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use tungstenite::{client::IntoClientRequest, Message, WebSocket};
 
 const SECRET: &str = "test-secret";
+const EXT_ORIGIN: &str = "chrome-extension://fekhggniifjffgnkljlblgfcoolaonbm";
 type Ws = WebSocket<TcpStream>;
 
 struct Proxy {
@@ -26,6 +27,17 @@ impl Drop for Proxy {
 
 #[allow(clippy::zombie_processes)]
 fn start(extra: &[&str]) -> Proxy {
+    // Picking a free port is racy across parallel tests: retry if our proxy died (e.g. port taken).
+    for _ in 0..5 {
+        if let Some(p) = try_start(extra) {
+            return p;
+        }
+    }
+    panic!("proxy did not start");
+}
+
+#[allow(clippy::zombie_processes)]
+fn try_start(extra: &[&str]) -> Option<Proxy> {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -47,13 +59,21 @@ fn start(extra: &[&str]) -> Proxy {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+    let mut p = Proxy { child, port, dir };
     for _ in 0..100 {
+        if p.child.try_wait().unwrap().is_some() {
+            return None;
+        }
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return Proxy { child, port, dir };
+            std::thread::sleep(Duration::from_millis(30));
+            if p.child.try_wait().unwrap().is_none() {
+                return Some(p);
+            }
+            return None;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    panic!("proxy did not start");
+    None
 }
 
 fn mac(msg: &str) -> String {
@@ -74,6 +94,16 @@ fn send(ws: &mut Ws, v: Value) {
 
 /// Full handshake; Err(text) if rejected at upgrade or by an `error` message.
 fn try_connect(port: u16, role: &str, origin: Option<&str>, secret_mac_ok: bool) -> Result<Ws, String> {
+    let info = json!({"browser":"Test Chrome 1","extVersion":"9.9.9"});
+    try_connect_info(port, role, origin, secret_mac_ok, info)
+}
+fn try_connect_info(
+    port: u16,
+    role: &str,
+    origin: Option<&str>,
+    secret_mac_ok: bool,
+    info: Value,
+) -> Result<Ws, String> {
     let s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let mut req = format!("ws://127.0.0.1:{port}/").into_client_request().unwrap();
@@ -87,7 +117,6 @@ fn try_connect(port: u16, role: &str, origin: Option<&str>, secret_mac_ok: bool)
     if !secret_mac_ok {
         m = "00".repeat(32);
     }
-    let info = json!({"browser":"Test Chrome 1","extVersion":"9.9.9"});
     send(
         &mut ws,
         json!({"t":"auth","role":role,"nonce":nc,"mac":m,"version":"t","info":info}),
@@ -104,7 +133,7 @@ fn cli(p: &Proxy) -> Ws {
     try_connect(p.port, "cli", None, true).unwrap()
 }
 fn ext(p: &Proxy) -> Ws {
-    try_connect(p.port, "ext", Some("chrome-extension://abc"), true).unwrap()
+    try_connect(p.port, "ext", Some(EXT_ORIGIN), true).unwrap()
 }
 fn status(p: &Proxy) -> Value {
     let mut c = cli(p);
@@ -151,7 +180,14 @@ fn rejects_bad_mac_origin_and_role() {
     assert!(try_connect(p.port, "ext", None, true)
         .unwrap_err()
         .contains("authentication failed"));
-    assert!(try_connect(p.port, "cli", Some("chrome-extension://abc"), true).is_err());
+    assert!(try_connect(p.port, "cli", Some(EXT_ORIGIN), true).is_err());
+    // Only the pinned extension ID may be an ext.
+    for o in [
+        "chrome-extension://abc",
+        "chrome-extension://fekhggniifjffgnkljlblgfcoolaonbmx",
+    ] {
+        assert!(try_connect(p.port, "ext", Some(o), true).unwrap_err().contains("403"));
+    }
 }
 
 #[test]
@@ -294,4 +330,155 @@ fn cli_binary_unpaired_and_bad_server_mac() {
     t.join().unwrap();
     assert_eq!(o.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&o.stderr).contains("server authentication failed"));
+}
+
+// ---- managed extension updates, skills, setup ----
+
+fn embedded() -> bool {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../extension/dist/manifest.json")
+        .is_file()
+}
+fn ext_with(p: &Proxy, info: Value) -> Ws {
+    try_connect_info(p.port, "ext", Some(EXT_ORIGIN), true, info).unwrap()
+}
+/// True if the next message the ext receives is a relayed request (i.e. no `update` was sent before it).
+fn no_update_before_req(p: &Proxy, e: &mut Ws) -> bool {
+    let mut c = cli(p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    recv(e)["t"] == "req"
+}
+
+#[test]
+fn managed_old_ext_gets_update_and_folder() {
+    let p = start(&[]);
+    let mut e = ext_with(&p, json!({"browser":"T","extVersion":"0.0.1","managed":true}));
+    let folder = p.dir.join("extension");
+    if !embedded() {
+        assert!(no_update_before_req(&p, &mut e));
+        return;
+    }
+    let u = recv(&mut e);
+    assert_eq!(u, json!({"t":"update","version":env!("CARGO_PKG_VERSION")}));
+    assert!(folder.join("manifest.json").is_file());
+    assert!(!folder.join("background.js.map").exists());
+    let pairing: Value = serde_json::from_slice(&std::fs::read(folder.join("pairing.json")).unwrap()).unwrap();
+    assert_eq!(pairing, json!({"secret":SECRET,"port":p.port}));
+    #[cfg(unix)]
+    assert_eq!(
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(folder.join("pairing.json")).unwrap().permissions())
+            & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn managed_update_removes_stale_files_but_keeps_pairing() {
+    if !embedded() {
+        return;
+    }
+    let p = start(&[]);
+    let folder = p.dir.join("extension");
+    std::fs::create_dir_all(folder.join("old")).unwrap();
+    std::fs::write(folder.join("old/stale.js"), "x").unwrap();
+    std::fs::write(folder.join("pairing.json"), "{}").unwrap();
+    let mut e = ext_with(&p, json!({"browser":"T","extVersion":"0.0.1","managed":true}));
+    assert_eq!(recv(&mut e)["t"], "update");
+    assert!(!folder.join("old").exists());
+    assert!(std::fs::read_to_string(folder.join("pairing.json"))
+        .unwrap()
+        .contains(SECRET));
+}
+
+#[test]
+fn unmanaged_or_current_ext_gets_no_update() {
+    let p = start(&[]);
+    let mut e = ext_with(&p, json!({"browser":"T","extVersion":"0.0.1","managed":false}));
+    assert!(no_update_before_req(&p, &mut e));
+    assert!(!p.dir.join("extension").exists());
+    let mut e = ext_with(
+        &p,
+        json!({"browser":"T","extVersion":env!("CARGO_PKG_VERSION"),"managed":true}),
+    );
+    assert!(no_update_before_req(&p, &mut e));
+    assert!(!p.dir.join("extension").exists());
+}
+
+fn run_bctl(dir: &std::path::Path, home: &std::path::Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_bctl"))
+        .args(args)
+        .env("BCTL_CONFIG_DIR", dir)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env_remove("BCTL_PORT")
+        .output()
+        .unwrap()
+}
+fn tmpdir(tag: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("bctl-{tag}-{}", std::process::id()));
+    std::fs::remove_dir_all(&d).ok();
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+#[test]
+fn skills_list_get_path_install() {
+    let d = tmpdir("skills");
+    let home = d.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let cfg = d.join("cfg");
+    let out = |a: &[&str]| {
+        let o = run_bctl(&cfg, &home, a);
+        assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).to_string()
+    };
+    assert!(out(&["skills"]).starts_with("core\t"));
+    assert_eq!(out(&["skills"]), out(&["skills", "list"]));
+    let core = out(&["skills", "get", "core"]);
+    assert!(core.starts_with("---\nname: core\n") && core.contains("bctl setup"));
+    let r = out(&["skills", "get", "core", "--ref", "commands"]);
+    assert!(r.contains("snapshot"));
+    assert!(out(&["skills", "get", "core", "--full"]).contains(&r));
+    assert!(!run_bctl(&cfg, &home, &["skills", "get", "nope"]).status.success());
+    let path = out(&["skills", "path", "core"]);
+    assert!(std::path::Path::new(path.trim()).join("SKILL.md").is_file());
+    assert!(std::path::Path::new(path.trim())
+        .join("references/commands.md")
+        .is_file());
+
+    out(&["skills", "install"]);
+    let stub = std::fs::read_to_string(home.join(".agents/skills/bctl/SKILL.md")).unwrap();
+    assert!(stub.contains("name: bctl") && stub.contains("bctl skills get core"));
+    assert!(!home.join(".claude").exists());
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    out(&["skills", "install"]);
+    assert!(home.join(".claude/skills/bctl/SKILL.md").is_file());
+    out(&["skills", "install", "--dir", d.join("custom").to_str().unwrap()]);
+    assert!(d.join("custom/bctl/SKILL.md").is_file());
+    std::fs::remove_dir_all(&d).ok();
+}
+
+#[test]
+fn setup_writes_folder_and_pairing() {
+    let d = tmpdir("setup");
+    let o = run_bctl(&d, &d, &["setup", "--no-open", "--no-wait"]);
+    if !embedded() {
+        assert!(!o.status.success());
+        assert!(String::from_utf8_lossy(&o.stderr).contains("doesn't include the extension"));
+        return;
+    }
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let cfg: Value = serde_json::from_slice(&std::fs::read(d.join("config.json")).unwrap()).unwrap();
+    let pairing: Value = serde_json::from_slice(&std::fs::read(d.join("extension/pairing.json")).unwrap()).unwrap();
+    assert_eq!(cfg["secret"].as_str().unwrap().len(), 43);
+    assert_eq!(pairing, cfg);
+    assert!(d.join("extension/manifest.json").is_file());
+    // Idempotent: keeps the secret.
+    assert!(run_bctl(&d, &d, &["setup", "--no-open", "--no-wait"]).status.success());
+    let cfg2: Value = serde_json::from_slice(&std::fs::read(d.join("config.json")).unwrap()).unwrap();
+    assert_eq!(cfg, cfg2);
+    // unpair removes pairing.json
+    run_bctl(&d, &d, &["unpair"]);
+    assert!(!d.join("extension/pairing.json").exists());
+    std::fs::remove_dir_all(&d).ok();
 }
