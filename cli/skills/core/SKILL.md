@@ -63,10 +63,16 @@ bctl wait --url "**/dashboard"
 bctl snapshot -i                 # refs change after navigation: snapshot again
 ```
 
+## Reading prose
+
+For docs and articles use `bctl read [url]` (markdown of the main content, no nav) instead of a
+snapshot: `--outline` lists headings, `--filter <text>` returns matching sections,
+`--max-output <chars>` truncates. `read <url>` follows the `open` rules. Use `snapshot` to act.
+
 ## Commands (summary)
 
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
-`select`, `scroll`, `wait`, `get`, `find`, `screenshot`, `eval`, `dialog`, `console`, `errors`.
+`select`, `scroll`, `wait`, `get`, `find`, `read`, `screenshot`, `eval`, `dialog`, `console`, `errors`.
 Full list with arguments and global flags: `bctl skills get core --ref commands`.
 `bctl <command> --help` for details.
 

@@ -13,7 +13,7 @@ open/back/forward/reload/close, `tab` (list/new/label/switch/close), `snapshot -
 (line format identical to the binary), click/dblclick/hover/focus/fill/type/press/keydown/keyup/
 keyboard, check/uncheck/select, scroll/scrollintoview, drag, upload, `find` (all locators),
 `get text|html|value|attr|title|url|count|box`, `is`, `wait` (target/ms/text/url/load/fn/state),
-`screenshot [--full]`, `eval` (inline/-b/--stdin), `dialog`, `console`, `errors`, `--json`,
+`screenshot [--full]`, `read` (active tab/URL; no `--raw/--llms/--require-md`), `eval` (inline/-b/--stdin), `dialog`, `console`, `errors`, `--json`,
 `--session`, `--timeout`, the `skills` command.
 
 ## Proposals
@@ -27,7 +27,6 @@ keyboard, check/uncheck/select, scroll/scrollintoview, drag, upload, `find` (all
 | [screenshot-improvements.md](../screenshot-improvements.md) | `--annotate`, `--if-changed`, `--threshold` | 2 |
 | [cross-origin-frames.md](../cross-origin-frames.md) | inline cross-site iframes; `frame` | 2 |
 | [batch.md](../batch.md) | `batch` | 2 |
-| [read-command.md](../read-command.md) | `read` (markdown, `--outline`, `--filter`) | 2 |
 | [agent-guardrails.md](../agent-guardrails.md) | allowed domains, content boundaries, max output, action confirmation | 3 (security sign-off) |
 | [network-observe.md](../network-observe.md) | read-only `network requests` / `request` | 3 (security sign-off) |
 | [revisit-pdf-and-viewport.md](../revisit-pdf-and-viewport.md) | `pdf`; `set viewport/media` on agent tabs | 4 (changes a settled direction) |

@@ -13,6 +13,7 @@ find role|text|label|placeholder|alt|title|testid <value> <action> [value] [--na
 find first|last <selector> <action> [value]   find nth <n> <selector> <action> [value]
 get text|html|value|attr|title|url|count|box [t] [attr]   is visible|enabled|checked <t>
 wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob | --load s | --fn js
+read [url] [--outline] [--filter <text>] [--max-output <chars>]
 screenshot [path] [--full]   eval <js> | eval -b <base64> | eval --stdin
 dialog status|accept [text]|dismiss   console [--clear]   errors [--clear]
 ```
