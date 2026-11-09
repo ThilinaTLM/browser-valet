@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Upload</title>
+  </head>
+  <body>
+    <input id="f" type="file" />
+    <p id="name"></p>
+    <script>
+      document.getElementById('f').addEventListener('change', (e) => {
+        document.getElementById('name').textContent = e.target.files[0]?.name ?? '';
+      });
+    </script>
+  </body>
+</html>

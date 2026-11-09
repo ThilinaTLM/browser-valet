@@ -21,7 +21,14 @@ import { navigationCommands } from './commands/navigation';
 import { readCommands } from './commands/read';
 import { networkCommands } from './commands/network';
 import { type ErrorCode, UserError } from './errors';
-import { applyBoundaries, effectiveMaxOutput, limitOutput, parseDomainList } from './guardrails';
+import {
+  applyBoundaries,
+  confirmCommand,
+  effectiveMaxOutput,
+  limitOutput,
+  parseConfirmList,
+  parseDomainList,
+} from './guardrails';
 import { log, meta } from './state';
 
 const DEFAULT_TIMEOUT = 25_000;
@@ -122,7 +129,13 @@ export function withUsage(cmd: Command, e: UserError): string {
 
 /** Split argv into the command name and the rest (global flags may precede the command). */
 function splitCommand(argv: string[]): { name: string | undefined; rest: string[] } {
-  const withValue = new Set(['--session', '--timeout', '--max-output', '--allowed-domains']);
+  const withValue = new Set([
+    '--session',
+    '--timeout',
+    '--max-output',
+    '--allowed-domains',
+    '--confirm-actions',
+  ]);
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i] ?? '';
     if (withValue.has(tok)) {
@@ -253,6 +266,9 @@ export async function execute(
     ctx = new Ctx(req, session, json, args.num('timeout') ?? DEFAULT_TIMEOUT, signal, progress);
     const max = effectiveMaxOutput(args);
     ctx.agentAllowedDomains = parseDomainList(args.str('allowed-domains'));
+    ctx.agentConfirm = parseConfirmList(args.str('confirm-actions'));
+    ctx.described = describe(cmd, req, args);
+    await confirmCommand(ctx, cmd.name, args);
     const limited = limitOutput((await raceDialog(ctx, cmd.run(ctx, args))) ?? {}, max);
     const { result, boundary } = await applyBoundaries(cmd.name, args, limited, json, ctx.tabId);
     response = {

@@ -119,6 +119,10 @@ Full list with arguments and global flags: `bctl skills get core --ref commands`
   around it, tell the user or use an allowed site. `--allowed-domains a.com,*.b.com,localhost:3000` on a
   command narrows that policy for that command (`a.com` includes subdomains, `*.b.com` only subdomains); it
   can never widen the user's.
+- The user may require a click on **Allow** before `eval` (and `wait --fn`), `upload` or the first visit
+  to a new site in your session (`--confirm-actions eval,upload,navigate-new-site` adds categories for a
+  command; you cannot remove the user's). The command waits up to 120 s while the browser shows a card
+  with the redacted command. `denied` = the user said no (do not retry, ask them); `timeout` = no answer.
 - Notices go to stderr as `⚠ …` (a confirm dialog opened, a truncated full-page screenshot, `network`
   recording just started, `tab` not-shared hint); stdout is only the result.
 - With `--json`, failures are `{success:false, data:null, error, code}` on stdout (exit 1). Branch on `code`:

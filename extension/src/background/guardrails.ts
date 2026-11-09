@@ -4,15 +4,23 @@
 // The merge rule everywhere: an agent flag may only *narrow* the user's policy, except
 // `--max-output`, which is a context-size default the agent may change.
 
-import type { Guardrails } from '../shared';
+import {
+  type ApprovalAction,
+  CONFIRM_CATEGORIES,
+  type ConfirmCategory,
+  type Guardrails,
+} from '../shared';
 import { UserError } from './errors';
 import type { Args, Ctx, Result } from './command';
 import { truncate } from './read-format';
+import { session } from './state';
+import { requestConfirmation } from './tabs';
 
 export const DEFAULT_GUARDRAILS: Guardrails = {
   maxOutput: 0,
   contentBoundaries: false,
   allowedDomains: [],
+  confirm: [],
 };
 
 /** The current user policy (in memory; mirrored to `chrome.storage.local` key `guardrails`). */
@@ -26,6 +34,7 @@ export function sanitize(raw: unknown): Guardrails {
     maxOutput: Number.isInteger(max) && max > 0 ? max : DEFAULT_GUARDRAILS.maxOutput,
     contentBoundaries: r.contentBoundaries === true,
     allowedDomains: cleanPatterns(r.allowedDomains),
+    confirm: cleanCategories(r.confirm),
   };
 }
 
@@ -317,4 +326,91 @@ export function assertNavigable(ctx: Ctx, url: string): void {
       (by === 'user' ? guardrails.allowedDomains : ctx.agentAllowedDomains) ?? [],
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Action confirmation
+// ---------------------------------------------------------------------------
+
+function cleanCategories(raw: unknown): ConfirmCategory[] {
+  const list = Array.isArray(raw) ? raw : [];
+  return CONFIRM_CATEGORIES.filter((c) => list.includes(c));
+}
+
+/** Categories from `--confirm-actions eval,upload`; undefined when the flag is absent. */
+export function parseConfirmList(flag: string | undefined): ConfirmCategory[] | undefined {
+  if (flag === undefined) return undefined;
+  const out: ConfirmCategory[] = [];
+  for (const part of flag.split(/[\s,]+/).filter(Boolean)) {
+    const c = CONFIRM_CATEGORIES.find((x) => x === part.toLowerCase());
+    if (!c) {
+      throw new UserError(
+        `Unknown --confirm-actions category "${part}". Use: ${CONFIRM_CATEGORIES.join(', ')}.`,
+        'bad_args',
+      );
+    }
+    out.push(c);
+  }
+  if (out.length === 0)
+    throw new UserError('--confirm-actions needs at least one category', 'bad_args');
+  return out;
+}
+
+/** Categories in force: the user's, plus any the agent adds. The agent can never remove one. */
+export function confirmRequired(
+  agent: readonly ConfirmCategory[] | undefined,
+  user: readonly ConfirmCategory[] = guardrails.confirm,
+): Set<ConfirmCategory> {
+  return new Set([...user, ...(agent ?? [])]);
+}
+
+/** The category a command falls into by itself (navigation is handled where the URL is known). */
+export function commandCategory(command: string, a: Args): ConfirmCategory | undefined {
+  // `wait --fn` runs arbitrary page JS just like `eval`.
+  if (command === 'eval' || (command === 'wait' && a.has('fn'))) return 'eval';
+  if (command === 'upload') return 'upload';
+  return undefined;
+}
+
+/** Block until the user allows `category` for the running command; throws `denied` otherwise. */
+async function confirm(ctx: Ctx, action: ApprovalAction): Promise<void> {
+  const tabId = ctx.tabId ?? session(ctx.session).tab ?? -1;
+  await requestConfirmation(tabId, ctx.session, action, ctx.signal, ctx.progress);
+}
+
+/** Before `eval` / `upload` run: ask when their category is in force. */
+export async function confirmCommand(ctx: Ctx, command: string, a: Args): Promise<void> {
+  const category = commandCategory(command, a);
+  if (!category || !confirmRequired(ctx.agentConfirm).has(category)) return;
+  await confirm(ctx, { category, command: ctx.described });
+}
+
+/** A site is the host without a leading `www.`. */
+export function siteOf(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined;
+    return u.hostname.replace(/^www\./, '');
+  } catch {
+    return undefined;
+  }
+}
+
+const MAX_SITES = 200;
+
+/**
+ * Before the agent navigates to `url` (open, tab new, click --new-tab, read <url>): refuse it if
+ * the domain policy says so, then ask when `navigate-new-site` is in force and the session has
+ * not been to this site yet. A site counts as visited once the agent was allowed there.
+ */
+export async function guardNavigation(ctx: Ctx, url: string): Promise<void> {
+  assertNavigable(ctx, url);
+  const site = siteOf(url);
+  if (!site) return;
+  const s = session(ctx.session);
+  if (s.sites?.includes(site)) return;
+  if (confirmRequired(ctx.agentConfirm).has('navigate-new-site')) {
+    await confirm(ctx, { category: 'navigate-new-site', command: ctx.described, site });
+  }
+  s.sites = [...(s.sites ?? []), site].slice(-MAX_SITES);
 }

@@ -4,10 +4,11 @@
 import type { PopupMessage } from '../shared';
 import { connect, disconnect, startKeepAlive } from './connection';
 import { loadState, regenerateSecret, save, state, updateSettings } from './state';
-import { updateGuardrails } from './guardrails';
+import { loadGuardrails, updateGuardrails } from './guardrails';
 import { decide, grant, refreshBadge, refreshGlobalBadge, revoke } from './tabs';
 
 const ready = loadState().then(async () => {
+  await loadGuardrails();
   save(); // publish initial state so the popup can render before anything happens
   // Re-apply badges (they don't survive browser restarts; state might have).
   for (const id of Object.keys(state.tabs)) await refreshBadge(Number(id));

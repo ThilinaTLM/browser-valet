@@ -50,6 +50,10 @@ The user's policy lives in `chrome.storage.local` key `guardrails` (set in the p
 - **MUST** merge policies by conjunction: a URL must pass the user's list (popup, `guardrails.allowedDomains`) **and** the agent's `--allowed-domains`. The flag can only narrow. The error names which policy refused and what it allows.
 - The policy also covers agent-initiated navigation on **shared** tabs (`pushstate`, and `open`, which opens an agent tab instead); it never restricts the user's own browsing.
 - Not attempted: blocking subresources, WebSockets or beacons (CDNs, analytics and SSO would break).
+- **Action confirmation:** the user picks categories in the popup (`guardrails.confirm`): `eval` (also `wait --fn`), `upload`, `navigate-new-site`. Before such a command runs (`confirmCommand` in `execute`; `guardNavigation` where the URL is known), the worker asks through the **same approval flow as tab consent** (`requestConfirmation` in `tabs.ts`: popup card or small window, 120 s timeout, `!` badge). The card shows the session, the category and the command **redacted exactly as in the activity log** (so `eval` shows `eval (N chars)`, never the code), plus the host for a new site. Deny → `denied`, no answer → `timeout`; in both the command does nothing.
+- **MUST** keep confirmations under the approval rules above: a card is never restored after a worker restart, closing the tab it is tied to (the session's current tab; none for the very first `open`) fails the waiter, and turning the switch off denies it.
+- The agent's `--confirm-actions eval,upload` can only **add** categories (union with the user's). It cannot remove or bypass the user's.
+- *New site* means a host (leading `www.` ignored) the session has not navigated to through `open`, `tab new`, `click --new-tab` or `read <url>`. Visited hosts are remembered per session (`state.sessions[s].sites`, last 200, also when the category is off) and a site counts once the agent was allowed there. Redirects and link clicks are not tracked. A domain-blocked URL fails before any card is shown.
 - The output limit is a context-size default (popup), not a restriction: the agent's `--max-output` overrides it.
 
 ## Trust boundaries
@@ -71,5 +75,6 @@ The user's policy lives in `chrome.storage.local` key `guardrails` (set in the p
 |---|---|---|
 | Handshake, Origin rule, manifest `key` | High | relay tests (`cli/tests/relay.rs` covers bad MAC, origin 403, role mismatch, fake server); user sign-off |
 | Consent paths (`tabs.ts`, `Ctx.tab()`, opener grant, revoke) | High | manual approve/deny/revoke/debug-bar test; user sign-off for any widening |
+| Guardrails (`guardrails.ts`, domain policy, confirmation cards) | High | unit tests for matching and merge; E2E for block, allow and deny; user sign-off |
 | Activity-log content | Medium | check new commands with free-text args against `SECRET_ARGS` |
 | File paths in `res.files` / `upload` | Medium | any new file-writing command is a security change |

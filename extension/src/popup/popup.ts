@@ -1,7 +1,15 @@
 // Popup UI: connection status + pairing, consent requests, tab sharing, and recent activity.
 // Renders from chrome.storage (written by the background worker); actions are messages to it.
 
-import type { ConnStatus, Guardrails, PopupMessage, Settings, State } from '../shared';
+import {
+  CONFIRM_CATEGORIES,
+  type ConfirmCategory,
+  type ConnStatus,
+  type Guardrails,
+  type PopupMessage,
+  type Settings,
+  type State,
+} from '../shared';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -52,6 +60,17 @@ function tabRow(t: chrome.tabs.Tab | undefined, tid: string, sub: string, action
 
 let guardrailsOpen = false;
 
+const CONFIRM_LABEL: Record<ConfirmCategory, string> = {
+  eval: 'eval (JavaScript in a page)',
+  upload: 'upload (local files leave the machine)',
+  'navigate-new-site': 'navigating to a new site',
+};
+const CONFIRM_TITLE: Record<ConfirmCategory, string> = {
+  eval: 'Run JavaScript in a page',
+  upload: 'Upload local files',
+  'navigate-new-site': 'Open a site it has not visited yet',
+};
+
 async function render(): Promise<void> {
   const { state } = await chrome.storage.session.get<{ state?: State }>('state');
   const settings = await chrome.storage.local.get<Partial<Settings>>(['secret', 'port', 'enabled']);
@@ -60,6 +79,7 @@ async function render(): Promise<void> {
     maxOutput: 0,
     contentBoundaries: false,
     allowedDomains: [],
+    confirm: [],
     ...stored.guardrails,
   };
   // Do not rebuild the page under a field the user is typing in.
@@ -82,6 +102,21 @@ async function render(): Promise<void> {
   // 1. Consent requests come first: they block an agent that is waiting.
   for (const a of state.approvals) {
     const t = tabs.get(a.tabId);
+    if (a.action) {
+      const tab = t ? tabRow(t, state.tabs[a.tabId]?.tid ?? '', esc(t.url ?? ''), '') : '';
+      parts.push(`<section class="card alert">
+      <h2>Confirm action</h2>
+      <p>An agent (session <b>${esc(a.session)}</b>) wants to: <b>${esc(CONFIRM_TITLE[a.action.category])}</b></p>
+      ${a.action.site ? `<p>Site: <b>${esc(a.action.site)}</b></p>` : ''}
+      <div class="code"><span>${esc(a.action.command)}</span></div>${tab}
+      <p class="small muted">Arguments are hidden here, as in the activity log. Deny to stop it.</p>
+      <div class="actions">
+        <button data-action="deny" data-id="${a.id}">Deny</button>
+        <button class="primary" data-action="allow" data-id="${a.id}">Allow</button>
+      </div>
+    </section>`);
+      continue;
+    }
     parts.push(`<section class="card alert">
       <h2>Permission request</h2>
       <p>An agent (session <b>${esc(a.session)}</b>) wants to control this tab:</p>
@@ -185,6 +220,11 @@ async function render(): Promise<void> {
         Always mark page content in output</label>
       <label class="field"><span>Default output limit (characters, 0 = none)</span>
         <input id="g-max" type="number" min="0" step="1000" value="${policy.maxOutput}" /></label>
+      <p class="small muted">Ask me before the agent runs:</p>
+      ${CONFIRM_CATEGORIES.map(
+        (c) =>
+          `<label class="check"><input type="checkbox" data-confirm="${c}"${policy.confirm.includes(c) ? ' checked' : ''} /> ${esc(CONFIRM_LABEL[c])}</label>`,
+      ).join('')}
       <div class="actions"><button class="primary" data-action="guardrails">Save</button></div>
     </details>`);
   }
@@ -247,6 +287,9 @@ app.addEventListener('click', (ev) => {
           allowedDomains: (document.getElementById('g-domains') as HTMLTextAreaElement).value
             .split(/[\s,]+/)
             .filter(Boolean),
+          confirm: [...document.querySelectorAll<HTMLInputElement>('[data-confirm]')]
+            .filter((i) => i.checked)
+            .map((i) => i.dataset.confirm as ConfirmCategory),
           contentBoundaries: (document.getElementById('g-boundaries') as HTMLInputElement).checked,
         },
       }).then((res) => {

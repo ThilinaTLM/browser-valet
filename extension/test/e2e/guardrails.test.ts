@@ -1,7 +1,9 @@
 // Agent guardrails: output limit, content boundaries, allowed domains, confirmation.
 
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { bctl, fixture, setGuardrails, useBrowser } from './harness';
+import { approveNextConsent, bctl, fixture, setGuardrails, useBrowser, workDir } from './harness';
 
 useBrowser();
 
@@ -191,5 +193,87 @@ describe('allowed domains (commands layer)', () => {
     await expect(setGuardrails({ allowedDomains: ['ok.com', 'bad$host'] })).rejects.toThrow(
       /Invalid domain pattern/,
     );
+  });
+});
+
+describe('action confirmation', () => {
+  const S = ['--session', 'confirm-e2e'];
+  const jsonOf = (stdout: string) =>
+    JSON.parse(stdout) as { success: boolean; data: unknown; error?: string; code?: string };
+
+  it('eval waits for Allow, shows the redacted command, then runs', async () => {
+    await bctl('open', fixture('/prose.html'), ...S);
+    await setGuardrails({ confirm: ['eval'] });
+    const pending = bctl('eval', '1+41 /* s3cret-token */', ...S);
+    const card = await approveNextConsent('allow');
+    expect(card).toContain('Run JavaScript in a page');
+    expect(card).toContain('eval (');
+    expect(card).not.toContain('s3cret-token');
+    const r = await pending;
+    expect(r.code).toBe(0);
+    expect(r.stdout).toBe('42\n');
+  });
+
+  it('Deny fails with code denied and nothing runs', async () => {
+    await setGuardrails({ confirm: ['eval'] });
+    const pending = bctl('eval', 'document.title = "ran"', ...S, '--json');
+    await approveNextConsent('deny');
+    const r = jsonOf((await pending).stdout);
+    expect(r).toMatchObject({ success: false, code: 'denied' });
+    await setGuardrails({});
+    expect((await bctl('get', 'title', ...S)).stdout).toBe('Prose\n');
+  });
+
+  it('--confirm-actions adds a category on its own; categories not asked run straight away', async () => {
+    const pending = bctl('eval', '2+2', '--confirm-actions', 'eval', ...S);
+    await approveNextConsent('allow');
+    expect((await pending).stdout).toBe('4\n');
+    expect((await bctl('get', 'title', '--confirm-actions', 'eval', ...S)).stdout).toBe('Prose\n');
+    expect((await bctl('eval', '3', ...S)).stdout).toBe('3\n');
+  });
+
+  it('rejects an unknown category', async () => {
+    const r = jsonOf(
+      (await bctl('eval', '1', '--confirm-actions', 'click', ...S, '--json')).stdout,
+    );
+    expect(r).toMatchObject({ success: false, code: 'bad_args' });
+  });
+
+  it('upload asks first; Deny leaves the file input empty', async () => {
+    await bctl('open', fixture('/upload.html'), ...S);
+    await setGuardrails({ confirm: ['upload'] });
+    await writeFile(join(workDir(), 'note.txt'), 'hello');
+    const denied = bctl('upload', '#f', 'note.txt', ...S, '--json');
+    await approveNextConsent('deny');
+    expect(jsonOf((await denied).stdout)).toMatchObject({ success: false, code: 'denied' });
+    expect((await bctl('get', 'text', '#name', ...S)).stdout.trim()).toBe('');
+    const allowed = bctl('upload', '#f', 'note.txt', ...S);
+    await approveNextConsent('allow');
+    expect((await allowed).code).toBe(0);
+    expect((await bctl('get', 'text', '#name', ...S)).stdout.trim()).toBe('note.txt');
+  });
+
+  it('navigate-new-site asks once per site in a session', async () => {
+    await setGuardrails({ confirm: ['navigate-new-site'] });
+    const S2 = ['--session', 'confirm-sites'];
+    const first = bctl('open', fixture('/prose.html'), ...S2);
+    const card = await approveNextConsent('allow');
+    expect(card).toContain('127.0.0.1');
+    expect((await first).code).toBe(0);
+    // Same site again: no card (a pending card would make this hang until the timeout).
+    const again = await bctl('open', fixture('/form.html'), ...S2, '--timeout', '5000');
+    expect(again.code).toBe(0);
+    // A different site needs a new answer; deny keeps the tab where it was.
+    const other = fixture('/prose.html').replace('127.0.0.1', 'localhost');
+    const denied = bctl('open', other, ...S2, '--json');
+    await approveNextConsent('deny');
+    expect(jsonOf((await denied).stdout)).toMatchObject({ success: false, code: 'denied' });
+    expect((await bctl('get', 'url', ...S2)).stdout.trim()).toBe(fixture('/form.html'));
+  });
+
+  it('a blocked domain fails without asking', async () => {
+    await setGuardrails({ confirm: ['navigate-new-site'], allowedDomains: ['127.0.0.1'] });
+    const r = await bctl('open', 'https://example.org/', '--session', 'confirm-blocked', '--json');
+    expect(jsonOf(r.stdout)).toMatchObject({ success: false, code: 'domain_blocked' });
   });
 });

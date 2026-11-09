@@ -114,7 +114,12 @@ export function installChromeMock(): ChromeMock {
       remove: vi.fn(noop),
       reload: vi.fn(noop),
     },
-    windows: { update: vi.fn(noop), create: vi.fn(noop) },
+    windows: {
+      update: vi.fn(noop),
+      create: vi.fn(noop),
+      getLastFocused: vi.fn(() => Promise.resolve({ id: 1 })),
+      WINDOW_ID_CURRENT: -2,
+    },
     action: {
       openPopup: vi.fn(noop),
       setBadgeText: vi.fn(noop),

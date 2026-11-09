@@ -1,7 +1,7 @@
 // Tab control: which tabs the agent may drive, asking the user for consent, badges, and
 // navigation helpers.
 
-import type { Control } from '../shared';
+import type { ApprovalAction, Control } from '../shared';
 import * as cdp from './cdp';
 import { UserError } from './errors';
 import { forgetBaselines } from './snapshot-diff';
@@ -71,6 +71,62 @@ async function showApprovalUi(windowId: number): Promise<void> {
   }
 }
 
+/**
+ * Show the approval UI and wait for the user's Allow/Deny on the pending approval `id` (already
+ * in `state.approvals`). Rejects on timeout, on `signal` abort, or when `failApprovals` fires.
+ */
+async function awaitDecision(id: string, windowId: number, signal: AbortSignal): Promise<boolean> {
+  void showApprovalUi(windowId);
+  return new Promise<boolean>((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      reject(
+        new UserError(`The user did not respond within ${APPROVAL_TIMEOUT_MS / 1000}s`, 'timeout'),
+      );
+    }, APPROVAL_TIMEOUT_MS);
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new Error('cancelled'));
+    });
+  });
+}
+
+/**
+ * Ask the user to allow one action (eval, upload, a new site) before it runs. Reuses the consent
+ * card/window and its 120 s timeout. Resolves when allowed; throws `denied` / `timeout` otherwise.
+ * `tabId` ties the card to a tab (closing the tab fails the waiter); -1 when there is none yet.
+ */
+export async function requestConfirmation(
+  tabId: number,
+  session: string,
+  action: ApprovalAction,
+  signal: AbortSignal,
+  progress: (text: string) => void,
+): Promise<void> {
+  const id = crypto.randomUUID();
+  state.approvals.push({ id, tabId, session, ts: Date.now(), action });
+  save();
+  await refreshGlobalBadge();
+  progress(`Waiting for the user to confirm: ${action.command} …\n`);
+  const win = await chrome.windows
+    .getLastFocused({ windowTypes: ['normal'] })
+    .catch(() => undefined);
+  try {
+    const allowed = await awaitDecision(id, win?.id ?? chrome.windows.WINDOW_ID_CURRENT, signal);
+    if (!allowed) {
+      throw new UserError(
+        `The user denied the ${action.category} action: ${action.command}`,
+        'denied',
+      );
+    }
+  } finally {
+    pending.delete(id);
+    state.approvals = state.approvals.filter((a) => a.id !== id);
+    save();
+    await refreshGlobalBadge();
+  }
+}
+
 /** Ask the user to let the agent control `tabId`. Resolves when allowed; throws otherwise. */
 export async function requestControl(
   tabId: number,
@@ -86,24 +142,9 @@ export async function requestControl(
   save();
   await refreshGlobalBadge();
   progress(`Waiting for the user to allow control of [${m.tid}] ${tab.title ?? ''} …\n`);
-  void showApprovalUi(tab.windowId);
 
   try {
-    const allowed = await new Promise<boolean>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      const timer = setTimeout(() => {
-        reject(
-          new UserError(
-            `The user did not respond within ${APPROVAL_TIMEOUT_MS / 1000}s`,
-            'timeout',
-          ),
-        );
-      }, APPROVAL_TIMEOUT_MS);
-      signal.addEventListener('abort', () => {
-        clearTimeout(timer);
-        reject(new Error('cancelled'));
-      });
-    });
+    const allowed = await awaitDecision(id, tab.windowId, signal);
     if (!allowed) throw new UserError(`The user denied control of ${m.tid}`, 'denied');
     await grant(tabId, 'user');
   } finally {

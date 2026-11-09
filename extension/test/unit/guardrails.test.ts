@@ -18,7 +18,12 @@ const args = (flags: Record<string, string | true> = {}) =>
 describe('policy storage', () => {
   it('defaults when nothing is stored, and coerces bad values', async () => {
     await g.loadGuardrails();
-    expect(g.guardrails).toEqual({ maxOutput: 0, contentBoundaries: false, allowedDomains: [] });
+    expect(g.guardrails).toEqual({
+      maxOutput: 0,
+      contentBoundaries: false,
+      allowedDomains: [],
+      confirm: [],
+    });
     mock.local.data.guardrails = { maxOutput: 'lots' };
     await g.loadGuardrails();
     expect(g.guardrails.maxOutput).toBe(0);
@@ -256,5 +261,124 @@ describe('allowed domains', () => {
     expect(() => {
       g.assertNavigable(ctx, 'https://b.example.com/');
     }).toThrow(/your --allowed-domains/);
+  });
+});
+
+describe('action confirmation', () => {
+  const E = async () => {
+    const stateMod = await import('../../src/background/state');
+    const tabs = await import('../../src/background/tabs');
+    await stateMod.loadState();
+    return { stateMod, tabs };
+  };
+  const mkCtx = (over: Record<string, unknown> = {}) =>
+    ({
+      session: 'default',
+      signal: new AbortController().signal,
+      progress: () => undefined,
+      described: 'eval (5 chars)',
+      agentAllowedDomains: undefined,
+      agentConfirm: undefined,
+      tabId: undefined,
+      ...over,
+    }) as unknown as import('../../src/background/command').Ctx;
+
+  it("the agent flag adds categories and can never remove the user's", () => {
+    expect([...g.confirmRequired(undefined, ['eval'])]).toEqual(['eval']);
+    expect([...g.confirmRequired(['upload'], ['eval'])].sort()).toEqual(['eval', 'upload']);
+    expect([...g.confirmRequired([], [])]).toEqual([]);
+  });
+
+  it('parses --confirm-actions', () => {
+    expect(g.parseConfirmList('eval, upload')).toEqual(['eval', 'upload']);
+    expect(g.parseConfirmList(undefined)).toBeUndefined();
+    expect(() => g.parseConfirmList('click')).toThrow(/Unknown --confirm-actions/);
+    expect(() => g.parseConfirmList('')).toThrow(/at least one/);
+  });
+
+  it('stores only known categories', async () => {
+    await g.updateGuardrails({ confirm: ['upload', 'bogus', 'eval'] as never });
+    expect(g.guardrails.confirm).toEqual(['eval', 'upload']);
+  });
+
+  it('does not ask when the category is not in force', async () => {
+    const { stateMod } = await E();
+    await g.confirmCommand(mkCtx(), 'eval', args());
+    await g.confirmCommand(mkCtx(), 'click', args());
+    expect(stateMod.state.approvals).toEqual([]);
+  });
+
+  it('asks with the redacted command and runs on allow', async () => {
+    const { stateMod, tabs } = await E();
+    await g.updateGuardrails({ confirm: ['eval'] });
+    const p = g.confirmCommand(mkCtx(), 'eval', args());
+    await mock.flush();
+    const [a] = stateMod.state.approvals;
+    expect(a?.action).toEqual({ category: 'eval', command: 'eval (5 chars)' });
+    tabs.decide(a?.id ?? '', true);
+    await p;
+    expect(stateMod.state.approvals).toEqual([]);
+  });
+
+  it('fails with code denied on deny, and the flag alone is enough to ask', async () => {
+    const { stateMod, tabs } = await E();
+    const p = g.confirmCommand(mkCtx({ agentConfirm: ['upload'] }), 'upload', args());
+    const failed = p.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    await mock.flush();
+    tabs.decide(stateMod.state.approvals[0]?.id ?? '', false);
+    expect(await failed).toMatchObject({ code: 'denied' });
+    expect(stateMod.state.approvals).toEqual([]);
+  });
+
+  it('an approval tied to a tab fails when the tab closes', async () => {
+    const { stateMod } = await E();
+    stateMod.meta(7);
+    stateMod.session('default').tab = 7;
+    await g.updateGuardrails({ confirm: ['eval'] });
+    const failed = g.confirmCommand(mkCtx(), 'eval', args()).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    await mock.flush();
+    expect(stateMod.state.approvals[0]?.tabId).toBe(7);
+    mock.events.tabsOnRemoved.fire(7);
+    expect(((await failed) as Error).message).toMatch(/tab was closed/);
+  });
+
+  it('asks once per new site, remembers it, and never asks for a blocked site', async () => {
+    const { stateMod, tabs } = await E();
+    await g.updateGuardrails({ confirm: ['navigate-new-site'], allowedDomains: ['example.com'] });
+    const ctx = mkCtx({ described: 'open https://www.example.com/a' });
+    const p = g.guardNavigation(ctx, 'https://www.example.com/a');
+    await mock.flush();
+    expect(stateMod.state.approvals[0]?.action).toMatchObject({
+      category: 'navigate-new-site',
+      site: 'example.com',
+    });
+    tabs.decide(stateMod.state.approvals[0]?.id ?? '', true);
+    await p;
+    expect(stateMod.session('default').sites).toEqual(['example.com']);
+    await g.guardNavigation(ctx, 'https://example.com/b'); // same site (www. ignored): no card
+    expect(stateMod.state.approvals).toEqual([]);
+    await expect(g.guardNavigation(ctx, 'https://evil.test/')).rejects.toMatchObject({
+      code: 'domain_blocked',
+    });
+    expect(stateMod.state.approvals).toEqual([]);
+  });
+
+  it('wait --fn counts as eval', () => {
+    expect(g.commandCategory('wait', args({ fn: 'x' }))).toBe('eval');
+    expect(g.commandCategory('wait', args())).toBeUndefined();
+    expect(g.commandCategory('eval', args())).toBe('eval');
+    expect(g.commandCategory('upload', args())).toBe('upload');
+  });
+
+  it('records visited sites even when the category is off', async () => {
+    const { stateMod } = await E();
+    await g.guardNavigation(mkCtx(), 'https://a.test/');
+    expect(stateMod.session('default').sites).toEqual(['a.test']);
   });
 });

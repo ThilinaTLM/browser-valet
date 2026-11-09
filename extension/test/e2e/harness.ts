@@ -137,19 +137,24 @@ export async function tidForTitle(title: string): Promise<string> {
  *   await approveNextConsent();           // or approveNextConsent('deny')
  *   expect((await pending).code).toBe(0);
  */
-export async function approveNextConsent(decision: 'allow' | 'deny' = 'allow'): Promise<void> {
+export async function approveNextConsent(decision: 'allow' | 'deny' = 'allow'): Promise<string> {
   const page = await browser().newPage();
   try {
     await page.goto(`${info().extensionOrigin}/popup.html?window=1`);
     const button = await page.waitForSelector(`button[data-action="${decision}"]`, {
       timeout: 30_000,
     });
+    // The text of the card being decided (what the user sees), for tests that check redaction.
+    const card = await page.evaluate(
+      () => document.querySelector('.card.alert')?.textContent.replace(/\s+/g, ' ').trim() ?? '',
+    );
     await button?.click();
     // The popup window closes itself once no request is pending; wait for that (or the button
     // to vanish) so the decision has been delivered before we return.
     await page
       .waitForSelector(`button[data-action="${decision}"]`, { hidden: true, timeout: 15_000 })
       .catch(() => undefined); // page closed itself (or the command result will show the failure)
+    return card;
   } finally {
     await page.close().catch(() => undefined);
   }

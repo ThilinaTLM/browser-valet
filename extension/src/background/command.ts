@@ -1,6 +1,6 @@
 // Command definitions, argument parsing, and the per-request context.
 
-import type { CliRequest } from '../shared';
+import type { CliRequest, ConfirmCategory } from '../shared';
 import * as cdp from './cdp';
 import { UserError } from './errors';
 import { meta, session as sessionState } from './state';
@@ -56,6 +56,11 @@ export const GLOBAL_FLAGS: Flag[] = [
     name: 'timeout',
     type: 'string',
     desc: 'Timeout in ms for waits and navigation (default 25000)',
+  },
+  {
+    name: 'confirm-actions',
+    type: 'string',
+    desc: 'Comma-separated categories needing the user to click Allow: eval, upload, navigate-new-site',
   },
   {
     name: 'allowed-domains',
@@ -182,6 +187,10 @@ export class Ctx {
   tabId: number | undefined;
   /** Narrowing flags from the command line (see guardrails.ts); the user's policy still applies. */
   agentAllowedDomains: string[] | undefined;
+  /** Categories the agent asked to confirm with `--confirm-actions` (they add to the user's). */
+  agentConfirm: ConfirmCategory[] | undefined;
+  /** This command as the activity log shows it (redacted); what confirmation cards display. */
+  described = '';
 
   constructor(
     readonly req: CliRequest,

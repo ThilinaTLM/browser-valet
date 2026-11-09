@@ -42,11 +42,21 @@ export interface TabMeta {
   owner?: string;
 }
 
+/** What a confirmation card asks about (absent on a plain tab-control request). */
+export interface ApprovalAction {
+  category: ConfirmCategory;
+  /** The command as the activity log shows it (arguments redacted). */
+  command: string;
+  /** For `navigate-new-site`: the host the agent wants to reach. */
+  site?: string;
+}
+
 export interface Approval {
   id: string;
   tabId: number;
   session: string;
   ts: number;
+  action?: ApprovalAction;
 }
 
 export interface LogEntry {
@@ -81,7 +91,7 @@ export interface ChildSession {
 export interface State {
   nextTid: number;
   tabs: Record<number, TabMeta>;
-  sessions: Record<string, { tab?: number; nextRef?: number }>;
+  sessions: Record<string, { tab?: number; nextRef?: number; sites?: string[] }>;
   /** Refs of the tab's current document (cleared on cross-document navigation). */
   refs: Record<number, Record<string, RefInfo>>;
   /** Loader id of the main-frame document the tab's refs belong to. */
@@ -121,6 +131,8 @@ export interface Guardrails {
   contentBoundaries: boolean;
   /** Domain patterns agent navigation may reach; empty = unrestricted. See guardrails.ts. */
   allowedDomains: string[];
+  /** Action categories that need a click on Allow every time they run. */
+  confirm: ConfirmCategory[];
 }
 
 /** Messages from the popup to the background worker. */
