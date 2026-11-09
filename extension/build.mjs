@@ -29,7 +29,7 @@ const options = {
   outdir: 'dist',
   bundle: true,
   format: 'esm',
-  target: 'chrome120',
+  target: 'chrome127',
   sourcemap: 'linked',
   logLevel: 'info',
 };

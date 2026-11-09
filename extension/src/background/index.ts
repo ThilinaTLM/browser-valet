@@ -20,6 +20,14 @@ void chrome.alarms.create('bctl-keepalive', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(() => void ready.then(connect));
 startKeepAlive();
 
+/** Stop controlling every tab and deny every pending approval. */
+async function revokeAll(): Promise<void> {
+  for (const a of state.approvals) decide(a.id, false);
+  state.approvals = []; // also drops orphans whose waiter died with an earlier service worker
+  await refreshGlobalBadge();
+  for (const [id, m] of Object.entries(state.tabs)) if (m.control) await revoke(Number(id));
+}
+
 async function handle(msg: PopupMessage): Promise<void> {
   await ready;
   switch (msg.type) {
@@ -36,10 +44,12 @@ async function handle(msg: PopupMessage): Promise<void> {
       await revoke(msg.tabId);
       break;
     case 'revokeAll':
-      for (const [id, m] of Object.entries(state.tabs)) if (m.control) await revoke(Number(id));
+      await revokeAll();
       break;
     case 'settings':
       await updateSettings(msg.settings);
+      // Turning the extension off ends all agent control; turning it on again starts from scratch.
+      if (msg.settings.enabled === false) await revokeAll();
       disconnect();
       connect();
       break;
