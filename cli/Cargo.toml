@@ -1,11 +1,11 @@
 [package]
-name = "browser-bridge"
-version = "0.3.0"
+name = "browser-valet"
+version = "0.1.0"
 edition = "2021"
 description = "Control your real Chrome browser from the command line via a companion extension"
 
 [[bin]]
-name = "bctl"
+name = "bvl"
 path = "src/main.rs"
 
 [dependencies]

@@ -21,11 +21,7 @@ export const readCommands: Command[] = [
     name: 'read',
     details:
       'Prints the page as markdown (main content only). Use --outline for headings, --filter to keep matching sections, --max-output to cap the size. Given a URL it opens it in an agent tab first.',
-    examples: [
-      'bctl read',
-      'bctl read --outline',
-      'bctl read https://example.com --filter pricing',
-    ],
+    examples: ['bvl read', 'bvl read --outline', 'bvl read https://example.com --filter pricing'],
     group: 'Reading',
     usage: 'read [url] [--outline] [--filter <text>] [--max-output <chars>]',
     summary:
@@ -46,7 +42,7 @@ export const readCommands: Command[] = [
         await open?.run(ctx, new Args([url], new Map()));
       }
       const id = await ctx.tab();
-      const r = await evaluate(id, `${await extractorSource()}\n;__bctlRead()`);
+      const r = await evaluate(id, `${await extractorSource()}\n;__bvlRead()`);
       const page = r.value as { markdown: string; title: string; url: string } | undefined;
       if (!page) throw new UserError('Could not read the page');
       let text = page.markdown;

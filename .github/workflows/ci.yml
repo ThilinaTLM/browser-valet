@@ -30,10 +30,10 @@ jobs:
       - run: cargo build --release
       - uses: actions/upload-artifact@v4
         with:
-          name: bctl-${{ matrix.os }}
+          name: bvl-${{ matrix.os }}
           path: |
-            cli/target/release/bctl
-            cli/target/release/bctl.exe
+            cli/target/release/bvl
+            cli/target/release/bvl.exe
 
   extension:
     runs-on: ubuntu-latest
@@ -59,7 +59,7 @@ jobs:
           name: extension-dist
           path: extension/dist
 
-  # Real Chrome for Testing + the real extension + a real bctl, headless. Branded Chrome 137+
+  # Real Chrome for Testing + the real extension + a real bvl, headless. Branded Chrome 137+
   # ignores --load-extension, so install Chrome for Testing explicitly.
   e2e:
     needs: extension
@@ -87,6 +87,6 @@ jobs:
         run: |
           out=$(npx --yes @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome")
           echo "CHROME_PATH=${out#* }" >> "$GITHUB_ENV"
-      - run: pnpm test:e2e # builds the extension and `cargo build`s bctl itself
+      - run: pnpm test:e2e # builds the extension and `cargo build`s bvl itself
         env:
           CI: true

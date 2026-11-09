@@ -121,9 +121,9 @@ export const batchCommands: Command[] = [
     details:
       'Each quoted argument (or each line of stdin) is one command, split like a shell would (quotes and backslashes, no expansion). Items run in order through the normal path, so consent, dialogs, errors and the activity log work as for single calls. --max-output, --content-boundaries, --allowed-domains and --confirm-actions on the batch apply to every item (output is truncated and wrapped per item; an item cannot repeat --allowed-domains or --confirm-actions). --session, --timeout (per item) and --json apply to every item; --session on an item is rejected. A confirm/prompt dialog ends the batch. Exit code 1 if any item failed. --json prints a top-level array of {command, success, result, error}; --omit-command replaces command with index. Not allowed inside a batch: batch, --stdin (eval -b still works).',
     examples: [
-      'bctl batch "fill @e1 user@example.com" "fill @e2 hunter2" "click @e3" "wait --url **/home"',
-      'bctl batch --bail "open https://example.com" "snapshot -i"',
-      "printf 'open https://example.com\\nsnapshot -i\\n' | bctl batch --stdin",
+      'bvl batch "fill @e1 user@example.com" "fill @e2 hunter2" "click @e3" "wait --url **/home"',
+      'bvl batch --bail "open https://example.com" "snapshot -i"',
+      "printf 'open https://example.com\\nsnapshot -i\\n' | bvl batch --stdin",
     ],
     flags: [
       { name: 'bail', type: 'bool', desc: 'Stop at the first failed item' },

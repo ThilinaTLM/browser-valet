@@ -55,11 +55,11 @@ function lookup(name: string): Command | undefined {
 
 function generalHelp(): string {
   const lines = [
-    'bctl — control your real browser from the command line (Browser Bridge)',
+    'bvl — control your real browser from the command line (Browser Valet)',
     '',
-    'Usage: bctl <command> [args] [--json] [--session <name>] [--timeout <ms>] [--max-output <chars>]',
+    'Usage: bvl <command> [args] [--json] [--session <name>] [--timeout <ms>] [--max-output <chars>]',
     '',
-    'Start here (for AI agents): `bctl skills get core`',
+    'Start here (for AI agents): `bvl skills get core`',
     'It explains the snapshot-and-ref workflow, tab consent and the JSON error codes.',
   ];
   for (const g of GROUPS) {
@@ -74,21 +74,21 @@ function generalHelp(): string {
     'Handled by the CLI itself: pair, unpair, status, stop, proxy, version',
     '',
     'Core loop:',
-    '  bctl open https://example.com    # agent tab, opened in the background',
-    '  bctl snapshot -i                 # interactive elements with @refs',
-    '  bctl click @e3                   # act on refs; re-snapshot after page changes',
+    '  bvl open https://example.com    # agent tab, opened in the background',
+    '  bvl snapshot -i                 # interactive elements with @refs',
+    '  bvl click @e3                   # act on refs; re-snapshot after page changes',
     '',
     'Tabs the agent did not open are off-limits until the user approves:',
-    '  bctl tab                         # [not shared] marks tabs the agent cannot use',
-    '  bctl tab t3                      # asks the user in the browser, waits for the answer',
+    '  bvl tab                         # [not shared] marks tabs the agent cannot use',
+    '  bvl tab t3                      # asks the user in the browser, waits for the answer',
     '',
-    'Run `bctl <command> --help` for details.',
+    'Run `bvl <command> --help` for details.',
   );
   return lines.join('\n');
 }
 
 function commandHelp(c: Command): string {
-  const lines = [`Usage: bctl ${c.usage}`, '', c.summary];
+  const lines = [`Usage: bvl ${c.usage}`, '', c.summary];
   if (c.aliases?.length) lines.push(`Aliases: ${c.aliases.join(', ')}`);
   if (c.details) lines.push('', c.details);
   const flags = [...(c.flags ?? []), ...GLOBAL_FLAGS];
@@ -127,7 +127,7 @@ export function formatJsonError(
 /** Argument errors end with the command's usage line, unless the message already carries one. */
 export function withUsage(cmd: Command, e: UserError): string {
   if (e.code !== 'bad_args' || /usage:/i.test(e.message)) return e.message;
-  return `${e.message}\nUsage: bctl ${cmd.usage}`;
+  return `${e.message}\nUsage: bvl ${cmd.usage}`;
 }
 
 /** Split argv into the command name and the rest (global flags may precede the command). */
@@ -184,7 +184,7 @@ async function raceDialog(ctx: Ctx, run: Promise<Result | undefined>): Promise<R
       resolve({
         text: '✓ Done',
         data: { dialog: { type, message } },
-        warning: `A JavaScript ${type} dialog is blocking the page: "${message}" — use \`bctl dialog accept\` or \`bctl dialog dismiss\``,
+        warning: `A JavaScript ${type} dialog is blocking the page: "${message}" — use \`bvl dialog accept\` or \`bvl dialog dismiss\``,
       });
     });
   });
@@ -247,7 +247,7 @@ export async function execute(
   }
   const cmd = lookup(name);
   if (!cmd) {
-    return fail(`Unknown command: ${name}. Run \`bctl help\`.`, 'unknown_command', {
+    return fail(`Unknown command: ${name}. Run \`bvl help\`.`, 'unknown_command', {
       type: 'unknown_command',
     });
   }

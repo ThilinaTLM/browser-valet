@@ -63,7 +63,7 @@ export async function locateFrame(tabId: number, frameId: string): Promise<Frame
   const late = await cdp.sessionForFrame(tabId, frameId);
   if (late) return top(late.sessionId);
   throw new UserError(
-    'Frame not found (it navigated or was removed). Run `bctl frame main`.',
+    'Frame not found (it navigated or was removed). Run `bvl frame main`.',
     'not_found',
   );
 }
@@ -145,7 +145,7 @@ export async function frameBox(
   let sid: string | undefined = sessionId;
   while (sid) {
     const child = cdp.childSession(tabId, sid);
-    if (!child) throw new UserError('The iframe is gone. Run `bctl snapshot` again.', 'stale_ref');
+    if (!child) throw new UserError('The iframe is gone. Run `bvl snapshot` again.', 'stale_ref');
     const { backendNodeId } = await cdp.send<{ backendNodeId: number }>(
       tabId,
       'DOM.getFrameOwner',

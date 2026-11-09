@@ -85,4 +85,4 @@ export function extract(): { markdown: string; title: string; url: string } {
   return { markdown, title: document.title, url: location.href };
 }
 
-(globalThis as unknown as { __bctlRead: typeof extract }).__bctlRead = extract;
+(globalThis as unknown as { __bvlRead: typeof extract }).__bvlRead = extract;

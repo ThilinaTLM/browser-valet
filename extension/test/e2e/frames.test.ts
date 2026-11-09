@@ -4,8 +4,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  bctl,
-  bctlJson,
+  bvl,
+  bvlJson,
   fixture,
   framesPage,
   restartExtensionWorker,
@@ -23,11 +23,11 @@ const refOf = (snapshot: string, re: RegExp): string => {
 };
 
 async function openFrames(query = '', innerQuery = ''): Promise<void> {
-  const r = await bctl('open', framesPage(query, innerQuery));
+  const r = await bvl('open', framesPage(query, innerQuery));
   expect(r.code).toBe(0);
   // The iframe loads after the page: wait until its content is reachable.
   for (let i = 0; i < 40; i++) {
-    if ((await bctl('snapshot', '-i')).stdout.includes('Pay')) return;
+    if ((await bvl('snapshot', '-i')).stdout.includes('Pay')) return;
     await new Promise((r) => setTimeout(r, 250));
   }
   throw new Error('iframe content never showed up');
@@ -36,96 +36,96 @@ async function openFrames(query = '', innerQuery = ''): Promise<void> {
 describe('out-of-process iframes', () => {
   it('snapshot inlines the iframe content with refs', async () => {
     await openFrames();
-    const snap = (await bctl('snapshot', '-i')).stdout;
+    const snap = (await bvl('snapshot', '-i')).stdout;
     expect(snap).toMatch(/- button "Host button" \[ref=e\d+\]/);
     expect(snap).toMatch(/- Iframe "payment-frame" \[ref=e\d+\]\n {2}- textbox/);
     expect(snap).toMatch(/ {2}- textbox "Card number" \[ref=e\d+\]/);
     expect(snap).toMatch(/ {2}- button "Pay" \[ref=e\d+\]/);
     // a same-process iframe inside the out-of-process one is inlined too
     expect(snap).toMatch(/ {4}- button "Deep button" \[ref=e\d+\]/);
-    const full = (await bctl('snapshot')).stdout;
+    const full = (await bvl('snapshot')).stdout;
     expect(full).toMatch(/- Iframe "payment-frame" \[ref=e\d+\]\n {2}- heading "Payment"/);
   });
 
   it('keeps refs stable and unique across the process boundary', async () => {
     await openFrames();
-    const a = (await bctl('snapshot', '-i')).stdout;
-    const b = (await bctl('snapshot')).stdout;
+    const a = (await bvl('snapshot', '-i')).stdout;
+    const b = (await bvl('snapshot')).stdout;
     for (const re of [/button "Host button"/, /textbox "Card number"/, /button "Pay"/]) {
       expect(refOf(b, re)).toBe(refOf(a, re));
     }
     const refs = [...a.matchAll(/ref=(e\d+)/g)].map((m) => m[1]);
     expect(new Set(refs).size).toBe(refs.length);
     // a full, unscoped snapshot did not drop the iframe refs
-    const json = (await bctlJson('snapshot', '-i')).data as { removedRefs: string[] };
+    const json = (await bvlJson('snapshot', '-i')).data as { removedRefs: string[] };
     expect(json.removedRefs).toEqual([]);
   });
 
   it('fill and click inside the iframe work through refs', async () => {
     await openFrames();
-    const snap = (await bctl('snapshot', '-i')).stdout;
+    const snap = (await bvl('snapshot', '-i')).stdout;
     const card = refOf(snap, /textbox "Card number"/);
     const pay = refOf(snap, /button "Pay"/);
-    expect((await bctl('fill', `@${card}`, '4242')).code).toBe(0);
-    expect((await bctl('click', `@${pay}`)).code).toBe(0);
-    expect((await bctl('frame', 'payment-frame')).code).toBe(0);
-    expect((await bctl('get', 'text', '#out')).stdout.trim()).toBe('paid:4242');
-    expect((await bctl('get', 'value', `@${card}`)).stdout.trim()).toBe('4242');
-    await bctl('frame', 'main');
+    expect((await bvl('fill', `@${card}`, '4242')).code).toBe(0);
+    expect((await bvl('click', `@${pay}`)).code).toBe(0);
+    expect((await bvl('frame', 'payment-frame')).code).toBe(0);
+    expect((await bvl('get', 'text', '#out')).stdout.trim()).toBe('paid:4242');
+    expect((await bvl('get', 'value', `@${card}`)).stdout.trim()).toBe('4242');
+    await bvl('frame', 'main');
   });
 
   it('type and press reach the focused field of the iframe', async () => {
     await openFrames();
-    const card = refOf((await bctl('snapshot', '-i')).stdout, /textbox "Card number"/);
-    expect((await bctl('type', `@${card}`, 'ab')).code).toBe(0);
-    expect((await bctl('press', 'c')).code).toBe(0);
-    expect((await bctl('get', 'value', `@${card}`)).stdout.trim()).toBe('abc');
+    const card = refOf((await bvl('snapshot', '-i')).stdout, /textbox "Card number"/);
+    expect((await bvl('type', `@${card}`, 'ab')).code).toBe(0);
+    expect((await bvl('press', 'c')).code).toBe(0);
+    expect((await bvl('get', 'value', `@${card}`)).stdout.trim()).toBe('abc');
   });
 
   it('clicks a button in a nested frame (offsets add up)', async () => {
     await openFrames();
-    const deep = refOf((await bctl('snapshot', '-i')).stdout, /button "Deep button"/);
-    expect((await bctl('click', `@${deep}`)).code).toBe(0);
-    await bctl('frame', 'deep-frame');
-    expect((await bctl('get', 'text', '#deep-out')).stdout.trim()).toBe('deep clicked');
-    await bctl('frame', 'main');
+    const deep = refOf((await bvl('snapshot', '-i')).stdout, /button "Deep button"/);
+    expect((await bvl('click', `@${deep}`)).code).toBe(0);
+    await bvl('frame', 'deep-frame');
+    expect((await bvl('get', 'text', '#deep-out')).stdout.trim()).toBe('deep clicked');
+    await bvl('frame', 'main');
   });
 
   it('reaches an out-of-process iframe inside an out-of-process iframe', async () => {
     // host (127.0.0.1) > inner (localhost) > deep (127.0.0.1 again: a third document, own target)
     await openFrames('', `?deep=${encodeURIComponent(fixture('/frame-deep.html'))}`);
-    const deep = refOf((await bctl('snapshot', '-i')).stdout, /button "Deep button"/);
-    expect((await bctl('click', `@${deep}`)).code).toBe(0);
-    await bctl('frame', 'deep-frame');
-    expect((await bctl('get', 'text', '#deep-out')).stdout.trim()).toBe('deep clicked');
-    await bctl('frame', 'main');
+    const deep = refOf((await bvl('snapshot', '-i')).stdout, /button "Deep button"/);
+    expect((await bvl('click', `@${deep}`)).code).toBe(0);
+    await bvl('frame', 'deep-frame');
+    expect((await bvl('get', 'text', '#deep-out')).stdout.trim()).toBe('deep clicked');
+    await bvl('frame', 'main');
   });
 
   it('scrolls an iframe far down the page into view before clicking', async () => {
     await openFrames('&pad=2500');
-    const snap = (await bctl('snapshot', '-i')).stdout;
+    const snap = (await bvl('snapshot', '-i')).stdout;
     const pay = refOf(snap, /button "Pay"/);
-    await bctl('eval', `document.querySelector('#out')?.remove()`); // main frame: no-op
-    expect((await bctl('click', `@${pay}`)).code).toBe(0);
-    await bctl('frame', 'payment-frame');
-    expect((await bctl('get', 'text', '#out')).stdout.trim()).toBe('paid:');
-    await bctl('frame', 'main');
+    await bvl('eval', `document.querySelector('#out')?.remove()`); // main frame: no-op
+    expect((await bvl('click', `@${pay}`)).code).toBe(0);
+    await bvl('frame', 'payment-frame');
+    expect((await bvl('get', 'text', '#out')).stdout.trim()).toBe('paid:');
+    await bvl('frame', 'main');
   });
 
   it('hover on a ref inside the iframe is accepted', async () => {
     await openFrames();
-    const pay = refOf((await bctl('snapshot', '-i')).stdout, /button "Pay"/);
-    expect((await bctl('hover', `@${pay}`)).code).toBe(0);
+    const pay = refOf((await bvl('snapshot', '-i')).stdout, /button "Pay"/);
+    expect((await bvl('hover', `@${pay}`)).code).toBe(0);
   });
 });
 
 describe('screenshot --annotate', () => {
   it('boxes refs inside a cross-origin iframe at their place on the page', async () => {
     await openFrames('&pad=400');
-    await bctl('set', 'viewport', '1000', '700'); // earlier files may have left a small one
-    await bctl('eval', 'window.scrollTo(0, 380)');
-    const pay = refOf((await bctl('snapshot', '-i')).stdout, /button "Pay"/);
-    const j = (await bctlJson('screenshot', '--annotate', 'frames-ann.png')).data as {
+    await bvl('set', 'viewport', '1000', '700'); // earlier files may have left a small one
+    await bvl('eval', 'window.scrollTo(0, 380)');
+    const pay = refOf((await bvl('snapshot', '-i')).stdout, /button "Pay"/);
+    const j = (await bvlJson('screenshot', '--annotate', 'frames-ann.png')).data as {
       annotations: {
         ref: string;
         role: string;
@@ -145,39 +145,39 @@ describe('screenshot --annotate', () => {
     expect(Math.abs((mine?.box.x ?? 0) - (want?.x ?? 999))).toBeLessThanOrEqual(2);
     expect(Math.abs((mine?.box.y ?? 0) - (want?.y ?? 999))).toBeLessThanOrEqual(2);
     expect(Math.abs((mine?.box.width ?? 0) - (want?.width ?? 999))).toBeLessThanOrEqual(2);
-    await bctl('set', 'viewport', 'reset');
+    await bvl('set', 'viewport', 'reset');
   });
 });
 
 describe('frame command', () => {
   it('scopes snapshot, selectors, get, eval and wait --fn; main resets', async () => {
     await openFrames();
-    const snap = (await bctl('snapshot', '-i')).stdout;
+    const snap = (await bvl('snapshot', '-i')).stdout;
     const iframe = refOf(snap, /Iframe "payment-frame"/);
 
-    const r = await bctlJson('frame', `@${iframe}`);
+    const r = await bvlJson('frame', `@${iframe}`);
     expect(r).toMatchObject({ success: true, data: { frame: 'payment-frame' } });
 
-    const scoped = (await bctl('snapshot', '-i')).stdout;
+    const scoped = (await bvl('snapshot', '-i')).stdout;
     expect(scoped).toContain('button "Pay"');
     expect(scoped).not.toContain('Host button');
     expect(scoped).not.toContain('Frames Host');
 
-    expect((await bctl('eval', 'document.title')).stdout.trim()).toBe('"Frame Inner"');
-    expect((await bctl('eval', 'location.hostname')).stdout.trim()).toBe('"localhost"');
-    expect((await bctl('get', 'text', 'h2')).stdout.trim()).toBe('Payment');
-    expect((await bctl('get', 'count', 'button')).stdout.trim()).toBe('1');
-    expect((await bctl('wait', '--fn', "document.title === 'Frame Inner'")).code).toBe(0);
-    expect((await bctl('is', 'visible', '#pay')).stdout.trim()).toBe('true');
+    expect((await bvl('eval', 'document.title')).stdout.trim()).toBe('"Frame Inner"');
+    expect((await bvl('eval', 'location.hostname')).stdout.trim()).toBe('"localhost"');
+    expect((await bvl('get', 'text', 'h2')).stdout.trim()).toBe('Payment');
+    expect((await bvl('get', 'count', 'button')).stdout.trim()).toBe('1');
+    expect((await bvl('wait', '--fn', "document.title === 'Frame Inner'")).code).toBe(0);
+    expect((await bvl('is', 'visible', '#pay')).stdout.trim()).toBe('true');
     // the tab itself still reports the main page
-    expect((await bctl('get', 'title')).stdout.trim()).toBe('Frames Host');
-    expect((await bctl('session', 'info')).stdout).toContain('Frame: payment-frame');
+    expect((await bvl('get', 'title')).stdout.trim()).toBe('Frames Host');
+    expect((await bvl('session', 'info')).stdout).toContain('Frame: payment-frame');
 
-    expect((await bctl('frame', 'main')).code).toBe(0);
-    expect((await bctl('eval', 'document.title')).stdout.trim()).toBe('"Frames Host"');
-    expect((await bctl('get', 'count', 'button')).stdout.trim()).toBe('1');
-    expect((await bctl('snapshot', '-i')).stdout).toContain('Host button');
-    expect((await bctl('session', 'info')).stdout).toContain('Frame: main');
+    expect((await bvl('frame', 'main')).code).toBe(0);
+    expect((await bvl('eval', 'document.title')).stdout.trim()).toBe('"Frames Host"');
+    expect((await bvl('get', 'count', 'button')).stdout.trim()).toBe('1');
+    expect((await bvl('snapshot', '-i')).stdout).toContain('Host button');
+    expect((await bvl('session', 'info')).stdout).toContain('Frame: main');
   });
 
   it('selects by CSS selector, name and URL', async () => {
@@ -188,53 +188,53 @@ describe('frame command', () => {
       'payment-frame',
       'frame-inner.html',
     ]) {
-      expect((await bctl('frame', what)).code, what).toBe(0);
-      expect((await bctl('eval', 'document.title')).stdout.trim(), what).toBe('"Frame Inner"');
-      await bctl('frame', 'main');
+      expect((await bvl('frame', what)).code, what).toBe(0);
+      expect((await bvl('eval', 'document.title')).stdout.trim(), what).toBe('"Frame Inner"');
+      await bvl('frame', 'main');
     }
   });
 
   it('can scope to a same-process frame inside the iframe', async () => {
     await openFrames();
-    expect((await bctl('frame', 'deep-frame')).code).toBe(0);
-    expect((await bctl('eval', 'document.title')).stdout.trim()).toBe('"Frame Deep"');
-    expect((await bctl('snapshot', '-i')).stdout).toContain('Deep button');
-    expect((await bctl('get', 'text', '#deep-btn')).stdout.trim()).toBe('Deep button');
-    await bctl('frame', 'main');
+    expect((await bvl('frame', 'deep-frame')).code).toBe(0);
+    expect((await bvl('eval', 'document.title')).stdout.trim()).toBe('"Frame Deep"');
+    expect((await bvl('snapshot', '-i')).stdout).toContain('Deep button');
+    expect((await bvl('get', 'text', '#deep-btn')).stdout.trim()).toBe('Deep button');
+    await bvl('frame', 'main');
   });
 
   it('fails clearly on unknown frames and non-iframe elements, keeping the old scope', async () => {
     await openFrames();
-    const missing = await bctl('frame', 'nope');
+    const missing = await bvl('frame', 'nope');
     expect(missing.code).toBe(1);
     expect(missing.stderr).toContain('Frame not found: nope');
-    const notFrame = await bctl('frame', '#host-btn');
+    const notFrame = await bvl('frame', '#host-btn');
     expect(notFrame.code).toBe(1);
     expect(notFrame.stderr).toContain('not an iframe');
-    const ref = refOf((await bctl('snapshot', '-i')).stdout, /button "Host button"/);
-    expect((await bctl('frame', `@${ref}`)).stderr).toContain('not an iframe');
-    expect((await bctl('frame', '@e999')).stderr).toContain('Unknown ref');
-    expect((await bctl('frame')).code).toBe(1);
+    const ref = refOf((await bvl('snapshot', '-i')).stdout, /button "Host button"/);
+    expect((await bvl('frame', `@${ref}`)).stderr).toContain('not an iframe');
+    expect((await bvl('frame', '@e999')).stderr).toContain('Unknown ref');
+    expect((await bvl('frame')).code).toBe(1);
 
-    await bctl('frame', 'payment-frame');
-    expect((await bctl('frame', 'nope')).code).toBe(1);
-    expect((await bctl('eval', 'document.title')).stdout.trim()).toBe('"Frame Inner"');
-    await bctl('frame', 'main');
+    await bvl('frame', 'payment-frame');
+    expect((await bvl('frame', 'nope')).code).toBe(1);
+    expect((await bvl('eval', 'document.title')).stdout.trim()).toBe('"Frame Inner"');
+    await bvl('frame', 'main');
   });
 
   it('is reset by navigation', async () => {
     await openFrames();
-    await bctl('frame', 'payment-frame');
-    await bctl('open', fixture('/form.html'));
-    expect((await bctl('session', 'info')).stdout).toContain('Frame: main');
-    expect((await bctl('eval', 'document.title')).stdout.trim()).not.toBe('"Frame Inner"');
+    await bvl('frame', 'payment-frame');
+    await bvl('open', fixture('/form.html'));
+    expect((await bvl('session', 'info')).stdout).toContain('Frame: main');
+    expect((await bvl('eval', 'document.title')).stdout.trim()).not.toBe('"Frame Inner"');
   });
 
   it('refs of a frame that went away fail clearly', async () => {
     await openFrames();
-    const pay = refOf((await bctl('snapshot', '-i')).stdout, /button "Pay"/);
-    await bctl('eval', `document.getElementById('inner').remove()`);
-    const r = await bctl('click', `@${pay}`);
+    const pay = refOf((await bvl('snapshot', '-i')).stdout, /button "Pay"/);
+    await bvl('eval', `document.getElementById('inner').remove()`);
+    const r = await bvl('click', `@${pay}`);
     expect(r.code).toBe(1);
     expect(r.stderr).toMatch(/iframe .*gone|Stale ref/);
   });
@@ -243,23 +243,23 @@ describe('frame command', () => {
 describe('service-worker restart', () => {
   it('keeps working with old refs and the frame scope', async () => {
     await openFrames();
-    const snap = (await bctl('snapshot', '-i')).stdout;
+    const snap = (await bvl('snapshot', '-i')).stdout;
     const card = refOf(snap, /textbox "Card number"/);
     const pay = refOf(snap, /button "Pay"/);
-    await bctl('frame', 'main');
+    await bvl('frame', 'main');
     await restartExtensionWorker();
 
-    expect((await bctl('fill', `@${card}`, '77')).code).toBe(0);
-    expect((await bctl('click', `@${pay}`)).code).toBe(0);
+    expect((await bvl('fill', `@${card}`, '77')).code).toBe(0);
+    expect((await bvl('click', `@${pay}`)).code).toBe(0);
     // a new snapshot reads the iframe again and keeps the refs
-    const again = (await bctl('snapshot', '-i')).stdout;
+    const again = (await bvl('snapshot', '-i')).stdout;
     expect(refOf(again, /button "Pay"/)).toBe(pay);
-    await bctl('frame', 'payment-frame');
-    expect((await bctl('get', 'text', '#out')).stdout.trim()).toBe('paid:77');
+    await bvl('frame', 'payment-frame');
+    expect((await bvl('get', 'text', '#out')).stdout.trim()).toBe('paid:77');
 
     await restartExtensionWorker();
-    expect((await bctl('eval', 'document.title')).stdout.trim()).toBe('"Frame Inner"');
-    await bctl('frame', 'main');
+    expect((await bvl('eval', 'document.title')).stdout.trim()).toBe('"Frame Inner"');
+    await bvl('frame', 'main');
   });
 });
 
@@ -272,12 +272,12 @@ describe('with an allowed-domains policy', () => {
     // frames.html is on 127.0.0.1 and embeds a frame from localhost, which the policy does not list.
     await setGuardrails({ allowedDomains: ['127.0.0.1'] });
     await openFrames(); // fails if the iframe never shows up
-    const snap = (await bctl('snapshot', '-i')).stdout;
+    const snap = (await bvl('snapshot', '-i')).stdout;
     const pay = refOf(snap, /button "Pay"/);
-    expect((await bctl('click', `@${pay}`)).code).toBe(0);
+    expect((await bvl('click', `@${pay}`)).code).toBe(0);
     // Top-level navigation to the same unlisted site is still refused.
     const out = fixture('/form.html').replace('127.0.0.1', 'localhost');
-    const r = await bctlJson('open', out);
+    const r = await bvlJson('open', out);
     expect(r).toMatchObject({ success: false, code: 'domain_blocked' });
   });
 });

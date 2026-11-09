@@ -14,7 +14,7 @@ use data::{EXT_FILES, SKILL_FILES};
 pub const EMBEDDED_EXT_VERSION: Option<&str> = data::EXT_VERSION;
 pub const PAIRING: &str = "pairing.json";
 pub const NO_EXT: &str =
-    "this bctl build doesn't include the extension; build it with `cd extension && pnpm build` and rebuild bctl";
+    "this bvl build doesn't include the extension; build it with `cd extension && pnpm build` and rebuild bvl";
 
 pub fn ext_dir() -> PathBuf {
     dir().join("extension")
@@ -110,7 +110,7 @@ fn references(name: &str) -> Vec<(&'static str, &'static [u8])> {
         .collect()
 }
 
-/// Write skills to `<config dir>/skills/<name>/` (refreshing when the bctl version changed).
+/// Write skills to `<config dir>/skills/<name>/` (refreshing when the bvl version changed).
 fn materialize(only: Option<&str>) -> Result<PathBuf> {
     let root = dir().join("skills");
     let stamp = root.join(".version");
@@ -140,17 +140,17 @@ fn materialize(only: Option<&str>) -> Result<PathBuf> {
 }
 
 const STUB: &str = "---
-name: bctl
-description: Drive the user's real, logged-in Chrome with the `bctl` CLI (Browser Bridge). Use when a task needs the user's actual browser session (logins, cookies, open tabs) rather than a fresh test browser.
-allowed-tools: Bash(bctl:*)
+name: bvl
+description: Drive the user's real, logged-in Chrome with the `bvl` CLI (Browser Valet). Use when a task needs the user's actual browser session (logins, cookies, open tabs) rather than a fresh test browser.
+allowed-tools: Bash(bvl:*)
 ---
 
-# bctl
+# bvl
 
-Controls the user's real Chrome through the Browser Bridge extension.
+Controls the user's real Chrome through the Browser Valet extension.
 
-Before using it, run `bctl skills get core` and follow that guide (it is versioned with the
-installed `bctl`). Full command reference: `bctl skills get core --ref commands`.
+Before using it, run `bvl skills get core` and follow that guide (it is versioned with the
+installed `bvl`). Full command reference: `bvl skills get core --ref commands`.
 ";
 
 pub fn skills(args: &[String]) -> Result<i32> {
@@ -172,7 +172,7 @@ pub fn skills(args: &[String]) -> Result<i32> {
             let name = rest
                 .get(1)
                 .filter(|a| !a.starts_with("--"))
-                .context("usage: bctl skills get <name> [--full] [--ref <ref>]")?;
+                .context("usage: bvl skills get <name> [--full] [--ref <ref>]")?;
             let name = name.as_str();
             if let Some(r) = opt("--ref") {
                 let Some(t) = skill_text(name, &format!("references/{r}.md")) else {
@@ -185,7 +185,7 @@ pub fn skills(args: &[String]) -> Result<i32> {
                 print!("{t}");
             } else {
                 let Some(t) = skill_text(name, "SKILL.md") else {
-                    bail!("unknown skill '{name}' (see `bctl skills list`)");
+                    bail!("unknown skill '{name}' (see `bvl skills list`)");
                 };
                 print!("{t}");
                 if has("--full") {
@@ -199,28 +199,28 @@ pub fn skills(args: &[String]) -> Result<i32> {
             let name = rest.get(1).filter(|a| !a.starts_with("--")).map(|s| s.as_str());
             if let Some(n) = name {
                 if !skill_names().contains(&n) {
-                    bail!("unknown skill '{n}' (see `bctl skills list`)");
+                    bail!("unknown skill '{n}' (see `bvl skills list`)");
                 }
             }
             println!("{}", materialize(name)?.display());
         }
         Some("install") => {
             let targets: Vec<PathBuf> = match opt("--dir") {
-                Some(d) => vec![PathBuf::from(d).join("bctl")],
+                Some(d) => vec![PathBuf::from(d).join("bvl")],
                 None => {
                     let home = dirs::home_dir().context("cannot determine home directory")?;
                     let mut t = Vec::new();
                     if home.join(".claude").is_dir() {
-                        t.push(home.join(".claude/skills/bctl"));
+                        t.push(home.join(".claude/skills/bvl"));
                     }
-                    t.push(home.join(".agents/skills/bctl"));
+                    t.push(home.join(".agents/skills/bvl"));
                     t
                 }
             };
             for t in targets {
                 std::fs::create_dir_all(&t)?;
                 std::fs::write(t.join("SKILL.md"), STUB)?;
-                println!("Installed bctl skill: {}", t.join("SKILL.md").display());
+                println!("Installed bvl skill: {}", t.join("SKILL.md").display());
             }
         }
         Some(x) => bail!("unknown skills subcommand '{x}' (list | get <name> | path [name] | install)"),

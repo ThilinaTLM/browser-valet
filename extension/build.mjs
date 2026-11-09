@@ -21,7 +21,7 @@ for (const [family, weights] of Object.entries(FONTS)) {
   }
 }
 
-// pairing.json only ever exists in bctl's managed folder, never in a build.
+// pairing.json only ever exists in bvl's managed folder, never in a build.
 await rm('dist/pairing.json', { force: true });
 
 const options = {

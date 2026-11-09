@@ -1,5 +1,5 @@
 // Vitest globalSetup for the E2E suite: builds everything once, then starts the fixture server,
-// a temp bctl config + proxy, and a Chrome (for Testing) with the managed extension loaded.
+// a temp bvl config + proxy, and a Chrome (for Testing) with the managed extension loaded.
 // Test files get the connection details through `inject('e2e')` (see harness.ts).
 
 import { execFileSync } from 'node:child_process';
@@ -13,9 +13,9 @@ import puppeteer, { type Browser, TargetType } from 'puppeteer-core';
 import type { TestProject } from 'vitest/node';
 
 export interface E2eInfo {
-  /** Path of the bctl binary under test. */
+  /** Path of the bvl binary under test. */
   bin: string;
-  /** Environment for every bctl subprocess (temp BCTL_CONFIG_DIR, non-default BCTL_PORT). */
+  /** Environment for every bvl subprocess (temp BVL_CONFIG_DIR, non-default BVL_PORT). */
   env: Record<string, string>;
   /** Browser WebSocket endpoint (connect with puppeteer). */
   wsEndpoint: string;
@@ -37,7 +37,7 @@ declare module 'vitest' {
 
 const extDir = resolve(import.meta.dirname, '../..');
 const repoDir = resolve(extDir, '..');
-const exe = process.platform === 'win32' ? 'bctl.exe' : 'bctl';
+const exe = process.platform === 'win32' ? 'bvl.exe' : 'bvl';
 
 /** $CHROME_PATH, else the newest Chrome for Testing in puppeteer's cache. */
 function findChrome(): string {
@@ -149,7 +149,7 @@ function sleep(ms: number): Promise<void> {
 
 export default async function setup(project: TestProject): Promise<() => Promise<void>> {
   // 1. Build: the CLI embeds extension/dist, so the extension goes first.
-  let bin = process.env.BCTL_BIN;
+  let bin = process.env.BVL_BIN;
   if (!bin) {
     if (!process.env.E2E_SKIP_BUILD) {
       execFileSync(process.execPath, ['build.mjs'], { cwd: extDir, stdio: 'inherit' });
@@ -158,10 +158,10 @@ export default async function setup(project: TestProject): Promise<() => Promise
     const target = process.env.CARGO_TARGET_DIR ?? join(repoDir, 'cli', 'target');
     bin = join(target, 'debug', exe);
   }
-  if (!existsSync(bin)) throw new Error(`bctl binary not found: ${bin}`);
+  if (!existsSync(bin)) throw new Error(`bvl binary not found: ${bin}`);
 
-  // 2. Isolated bctl: temp config dir, non-default port. Never the user's real ones.
-  const tmp = await mkdtemp(join(tmpdir(), 'bctl-e2e-'));
+  // 2. Isolated bvl: temp config dir, non-default port. Never the user's real ones.
+  const tmp = await mkdtemp(join(tmpdir(), 'bvl-e2e-'));
   const configDir = join(tmp, 'config');
   const workDir = join(tmp, 'work');
   const profileDir = join(tmp, 'profile');
@@ -169,12 +169,12 @@ export default async function setup(project: TestProject): Promise<() => Promise
   const port = await freePort();
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
-    BCTL_CONFIG_DIR: configDir,
-    BCTL_PORT: String(port),
-    BCTL_IDLE_TIMEOUT: '0',
-    BCTL_SESSION: 'e2e',
+    BVL_CONFIG_DIR: configDir,
+    BVL_PORT: String(port),
+    BVL_IDLE_TIMEOUT: '0',
+    BVL_SESSION: 'e2e',
   };
-  delete env.BCTL_EXT_WAIT_MS;
+  delete env.BVL_EXT_WAIT_MS;
 
   // `setup` copies the folder path to the clipboard when a clipboard tool exists; run it with an
   // empty PATH so the test never touches the developer's clipboard.
@@ -222,7 +222,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
     );
     const extensionOrigin = /^chrome-extension:\/\/[^/]+/.exec(sw.url())?.[0] ?? '';
 
-    // 4. Start the proxy (any bctl command does) and wait for the extension to connect.
+    // 4. Start the proxy (any bvl command does) and wait for the extension to connect.
     const deadline = Date.now() + 60_000;
     for (;;) {
       let out = '';

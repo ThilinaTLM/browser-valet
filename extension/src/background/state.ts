@@ -68,7 +68,7 @@ async function readPairing(): Promise<Pairing | undefined> {
       return { secret: p.secret, port: p.port };
     }
   } catch {
-    // not installed by bctl (file missing)
+    // not installed by bvl (file missing)
   }
   return undefined;
 }

@@ -1,4 +1,4 @@
-// WebSocket client to the local `bctl` proxy (see docs/architecture/protocol.md), with mutual HMAC authentication.
+// WebSocket client to the local `bvl` proxy (see docs/architecture/protocol.md), with mutual HMAC authentication.
 
 import type { CliRequest, ConnStatus } from '../shared';
 import { execute } from './dispatch';
@@ -74,7 +74,7 @@ export function connect(): void {
   }
   if (ws || connecting) return;
   connecting = true;
-  // Re-read pairing.json first so re-pairing (`bctl setup`) needs no extension reload.
+  // Re-read pairing.json first so re-pairing (`bvl setup`) needs no extension reload.
   void refreshPairing()
     .catch(() => undefined)
     .then(() => {
@@ -90,7 +90,7 @@ async function selfUpdate(version: string): Promise<void> {
   }>('updateTried');
   // Loop guard: a reload that didn't pick up the new version is retried at most every 10 minutes.
   if (updateTried?.version === version && Date.now() - updateTried.ts < UPDATE_RETRY_MS) {
-    console.warn(`bctl: already tried updating to ${version} and it did not take; ignoring`);
+    console.warn(`bvl: already tried updating to ${version} and it did not take; ignoring`);
     return;
   }
   if (updating || VERSION === version) return;
@@ -100,10 +100,10 @@ async function selfUpdate(version: string): Promise<void> {
   while (inflight.size > 0 && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
   }
-  console.info(`bctl: updating extension ${VERSION} -> ${version}`);
+  console.info(`bvl: updating extension ${VERSION} -> ${version}`);
   log({
     ts: Date.now(),
-    session: 'bctl',
+    session: 'bvl',
     command: `update ${VERSION} → ${version}`,
     ok: true,
   });

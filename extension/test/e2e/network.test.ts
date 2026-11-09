@@ -1,11 +1,11 @@
 // `network requests` / `network request <id>`: lazy recording, filters, redaction, bodies.
 
 import { describe, expect, it } from 'vitest';
-import { bctlWith, fixture, useBrowser } from './harness';
+import { bvlWith, fixture, useBrowser } from './harness';
 
 useBrowser();
 
-const net = (...args: string[]) => bctlWith({ BCTL_SESSION: 'net' }, ...args);
+const net = (...args: string[]) => bvlWith({ BVL_SESSION: 'net' }, ...args);
 
 const SECRETS = [
   'tok-SECRET-123',

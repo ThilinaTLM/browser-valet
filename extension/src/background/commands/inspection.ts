@@ -95,7 +95,7 @@ export const inspectionCommands: Command[] = [
     name: 'snapshot',
     details:
       'Prints the accessibility tree; interactive elements get @refs you can pass to click, fill, get and so on. Refs stay stable across snapshots while the element lives; a new snapshot of a changed page shows what changed with --delta. Re-snapshot after navigation: refs of an old document are gone.',
-    examples: ['bctl snapshot -i', 'bctl snapshot -i --delta', 'bctl snapshot -s main -d 3'],
+    examples: ['bvl snapshot -i', 'bvl snapshot -i --delta', 'bvl snapshot -s main -d 3'],
     show: Infinity,
     showFlags: ['depth', 'selector'],
     group: 'Reading',
@@ -173,10 +173,10 @@ export const inspectionCommands: Command[] = [
     details:
       'Reads one value from the page: text, html, value, attr, title, url, count, box or styles. `get attr` prints `null` for a missing attribute. `get styles` is curated by default; name properties or use --all for everything.',
     examples: [
-      'bctl get title',
-      'bctl get text @e2',
-      'bctl get attr @e4 href',
-      'bctl get count "li.item"',
+      'bvl get title',
+      'bvl get text @e2',
+      'bvl get attr @e4 href',
+      'bvl get count "li.item"',
     ],
     show: Infinity,
     group: 'Reading',
@@ -282,11 +282,11 @@ export const inspectionCommands: Command[] = [
     details:
       'Polls until the condition holds or the timeout (--timeout, default 25000 ms) passes. `--text` prints the text it found and `--url` prints the URL it matched; the other waits print `\u2713 Done`. Wait for something to disappear with `--state hidden|detached`. Fails with code `timeout` when the condition never holds.',
     examples: [
-      'bctl wait @e3',
-      'bctl wait 1000',
-      'bctl wait --text "Welcome back"',
-      'bctl wait --url "**/dashboard"',
-      'bctl wait "#spinner" --state hidden',
+      'bvl wait @e3',
+      'bvl wait 1000',
+      'bvl wait --text "Welcome back"',
+      'bvl wait --url "**/dashboard"',
+      'bvl wait "#spinner" --state hidden',
     ],
     show: Infinity,
     showFlags: ['text', 'url', 'load', 'state'],
@@ -377,7 +377,7 @@ export const inspectionCommands: Command[] = [
     name: 'screenshot',
     details:
       'Saves a PNG (or .jpg when the path ends in .jpg) of the visible page, or the whole scrollable page with --full. Without a path it writes to a temp file and prints the path.',
-    examples: ['bctl screenshot', 'bctl screenshot page.png --full'],
+    examples: ['bvl screenshot', 'bvl screenshot page.png --full'],
     show: Infinity,
     group: 'Reading',
     showFlags: ['threshold'],
@@ -418,7 +418,7 @@ export const inspectionCommands: Command[] = [
       const id = await ctx.tab();
       const path = a.pos[0]
         ? ctx.path(a.pos[0])
-        : ctx.tmpPath('bctl', 'screenshots', `screenshot-${Date.now()}.png`);
+        : ctx.tmpPath('bvl', 'screenshots', `screenshot-${Date.now()}.png`);
       const format = /\.jpe?g$/i.test(path) ? 'jpeg' : 'png';
 
       // Always the plain capture first; the comparison ignores annotations.
@@ -494,9 +494,9 @@ export const inspectionCommands: Command[] = [
     details:
       'Runs JavaScript in the page and prints the result as JSON (promises are awaited). Use -b <base64> or --stdin for scripts with awkward quoting.',
     examples: [
-      'bctl eval document.title',
-      'bctl eval "[...document.links].length"',
-      "echo 'document.body.innerText.length' | bctl eval --stdin",
+      'bvl eval document.title',
+      'bvl eval "[...document.links].length"',
+      "echo 'document.body.innerText.length' | bvl eval --stdin",
     ],
     log(a, req) {
       // Never log the script; its size is enough to tell commands apart.
@@ -543,7 +543,7 @@ export const inspectionCommands: Command[] = [
     name: 'dialog',
     details:
       'Confirm and prompt dialogs block the page until answered. `status` reports whether one is open; `accept [text]` and `dismiss` answer it. Alerts and beforeunload dialogs are accepted automatically.',
-    examples: ['bctl dialog status', 'bctl dialog accept', 'bctl dialog dismiss'],
+    examples: ['bvl dialog status', 'bvl dialog accept', 'bvl dialog dismiss'],
     group: 'Waiting',
     usage: 'dialog <status|accept [text]|dismiss>',
     summary: 'Handle confirm/prompt dialogs (alerts are accepted automatically)',

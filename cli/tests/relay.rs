@@ -1,4 +1,4 @@
-//! Integration tests: run `bctl proxy` as a child process (temp BCTL_CONFIG_DIR, free port) and talk to it
+//! Integration tests: run `bvl proxy` as a child process (temp BVL_CONFIG_DIR, free port) and talk to it
 //! with fake extension / CLI clients.
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{json, Value};
@@ -43,19 +43,19 @@ fn try_start(extra: &[&str]) -> Option<Proxy> {
         .local_addr()
         .unwrap()
         .port();
-    let dir = std::env::temp_dir().join(format!("bctl-test-{}-{port}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bvl-test-{}-{port}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("config.json"),
         json!({"secret":SECRET,"port":port}).to_string(),
     )
     .unwrap();
-    let child = Command::new(env!("CARGO_BIN_EXE_bctl"))
+    let child = Command::new(env!("CARGO_BIN_EXE_bvl"))
         .arg("proxy")
         .args(extra)
-        .env("BCTL_CONFIG_DIR", &dir)
-        .env("BCTL_EXT_WAIT_MS", "400")
-        .env_remove("BCTL_PORT")
+        .env("BVL_CONFIG_DIR", &dir)
+        .env("BVL_EXT_WAIT_MS", "400")
+        .env_remove("BVL_PORT")
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
@@ -348,10 +348,10 @@ fn newer_cli_does_not_restart_a_busy_proxy() {
         }
         seen
     });
-    let o = Command::new(env!("CARGO_BIN_EXE_bctl"))
+    let o = Command::new(env!("CARGO_BIN_EXE_bvl"))
         .arg("tabs")
-        .env("BCTL_CONFIG_DIR", &d)
-        .env("BCTL_PORT", port.to_string())
+        .env("BVL_CONFIG_DIR", &d)
+        .env("BVL_PORT", port.to_string())
         .output()
         .unwrap();
     let seen = t.join().unwrap();
@@ -390,11 +390,11 @@ fn shutdown_exits() {
     assert!(wait_exit(&mut p, 5));
 }
 
-fn bctl(p: &Proxy, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_bctl"))
+fn bvl(p: &Proxy, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_bvl"))
         .args(args)
-        .env("BCTL_CONFIG_DIR", &p.dir)
-        .env("BCTL_PORT", p.port.to_string())
+        .env("BVL_CONFIG_DIR", &p.dir)
+        .env("BVL_PORT", p.port.to_string())
         .output()
         .unwrap()
 }
@@ -418,13 +418,13 @@ fn cli_binary_end_to_end() {
         );
         e
     });
-    let o = bctl(&p, &["echo", "hi"]);
+    let o = bvl(&p, &["echo", "hi"]);
     let _e = t.join().unwrap();
     assert_eq!(o.status.code(), Some(3));
     assert_eq!(o.stdout, b"out");
     assert_eq!(String::from_utf8_lossy(&o.stderr), "progress\nerr");
     assert_eq!(std::fs::read(&out).unwrap(), b"hello");
-    let s = bctl(&p, &["status"]);
+    let s = bvl(&p, &["status"]);
     let s = String::from_utf8_lossy(&s.stdout).to_string();
     assert!(s.contains("extension: Test Chrome 1 (extension v9.9.9)"), "{s}");
 }
@@ -433,7 +433,7 @@ fn cli_binary_end_to_end() {
 fn cli_binary_unpaired_and_bad_server_mac() {
     let p = start(&[]);
     std::fs::remove_file(p.dir.join("config.json")).unwrap();
-    let o = bctl(&p, &["tabs"]);
+    let o = bvl(&p, &["tabs"]);
     assert_eq!(o.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&o.stderr).starts_with("Not paired."));
 
@@ -452,10 +452,10 @@ fn cli_binary_unpaired_and_bad_server_mac() {
         recv(&mut ws);
         send(&mut ws, json!({"t":"welcome","mac":"00","version":"x"}));
     });
-    let o = Command::new(env!("CARGO_BIN_EXE_bctl"))
+    let o = Command::new(env!("CARGO_BIN_EXE_bvl"))
         .arg("tabs")
-        .env("BCTL_CONFIG_DIR", &p.dir)
-        .env("BCTL_PORT", port.to_string())
+        .env("BVL_CONFIG_DIR", &p.dir)
+        .env("BVL_PORT", port.to_string())
         .output()
         .unwrap();
     t.join().unwrap();
@@ -535,18 +535,18 @@ fn unmanaged_or_current_ext_gets_no_update() {
     assert!(!p.dir.join("extension").exists());
 }
 
-fn run_bctl(dir: &std::path::Path, home: &std::path::Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_bctl"))
+fn run_bvl(dir: &std::path::Path, home: &std::path::Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_bvl"))
         .args(args)
-        .env("BCTL_CONFIG_DIR", dir)
+        .env("BVL_CONFIG_DIR", dir)
         .env("HOME", home)
         .env("USERPROFILE", home)
-        .env_remove("BCTL_PORT")
+        .env_remove("BVL_PORT")
         .output()
         .unwrap()
 }
 fn tmpdir(tag: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("bctl-{tag}-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("bvl-{tag}-{}", std::process::id()));
     std::fs::remove_dir_all(&d).ok();
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -559,18 +559,18 @@ fn skills_list_get_path_install() {
     std::fs::create_dir_all(&home).unwrap();
     let cfg = d.join("cfg");
     let out = |a: &[&str]| {
-        let o = run_bctl(&cfg, &home, a);
+        let o = run_bvl(&cfg, &home, a);
         assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stdout).to_string()
     };
     assert!(out(&["skills"]).starts_with("core\t"));
     assert_eq!(out(&["skills"]), out(&["skills", "list"]));
     let core = out(&["skills", "get", "core"]);
-    assert!(core.starts_with("---\nname: core\n") && core.contains("bctl setup"));
+    assert!(core.starts_with("---\nname: core\n") && core.contains("bvl setup"));
     let r = out(&["skills", "get", "core", "--ref", "commands"]);
     assert!(r.contains("snapshot"));
     assert!(out(&["skills", "get", "core", "--full"]).contains(&r));
-    assert!(!run_bctl(&cfg, &home, &["skills", "get", "nope"]).status.success());
+    assert!(!run_bvl(&cfg, &home, &["skills", "get", "nope"]).status.success());
     let path = out(&["skills", "path", "core"]);
     assert!(std::path::Path::new(path.trim()).join("SKILL.md").is_file());
     assert!(std::path::Path::new(path.trim())
@@ -578,21 +578,21 @@ fn skills_list_get_path_install() {
         .is_file());
 
     out(&["skills", "install"]);
-    let stub = std::fs::read_to_string(home.join(".agents/skills/bctl/SKILL.md")).unwrap();
-    assert!(stub.contains("name: bctl") && stub.contains("bctl skills get core"));
+    let stub = std::fs::read_to_string(home.join(".agents/skills/bvl/SKILL.md")).unwrap();
+    assert!(stub.contains("name: bvl") && stub.contains("bvl skills get core"));
     assert!(!home.join(".claude").exists());
     std::fs::create_dir_all(home.join(".claude")).unwrap();
     out(&["skills", "install"]);
-    assert!(home.join(".claude/skills/bctl/SKILL.md").is_file());
+    assert!(home.join(".claude/skills/bvl/SKILL.md").is_file());
     out(&["skills", "install", "--dir", d.join("custom").to_str().unwrap()]);
-    assert!(d.join("custom/bctl/SKILL.md").is_file());
+    assert!(d.join("custom/bvl/SKILL.md").is_file());
     std::fs::remove_dir_all(&d).ok();
 }
 
 #[test]
 fn setup_writes_folder_and_pairing() {
     let d = tmpdir("setup");
-    let o = run_bctl(&d, &d, &["setup", "--no-open", "--no-wait"]);
+    let o = run_bvl(&d, &d, &["setup", "--no-open", "--no-wait"]);
     if !embedded() {
         assert!(!o.status.success());
         assert!(String::from_utf8_lossy(&o.stderr).contains("doesn't include the extension"));
@@ -605,11 +605,11 @@ fn setup_writes_folder_and_pairing() {
     assert_eq!(pairing, cfg);
     assert!(d.join("extension/manifest.json").is_file());
     // Idempotent: keeps the secret.
-    assert!(run_bctl(&d, &d, &["setup", "--no-open", "--no-wait"]).status.success());
+    assert!(run_bvl(&d, &d, &["setup", "--no-open", "--no-wait"]).status.success());
     let cfg2: Value = serde_json::from_slice(&std::fs::read(d.join("config.json")).unwrap()).unwrap();
     assert_eq!(cfg, cfg2);
     // unpair removes pairing.json
-    run_bctl(&d, &d, &["unpair"]);
+    run_bvl(&d, &d, &["unpair"]);
     assert!(!d.join("extension/pairing.json").exists());
     std::fs::remove_dir_all(&d).ok();
 }
@@ -617,12 +617,12 @@ fn setup_writes_folder_and_pairing() {
 // ---- doctor ----
 
 fn doctor(dir: &std::path::Path, port: u16, args: &[&str]) -> (Value, i32) {
-    let o = Command::new(env!("CARGO_BIN_EXE_bctl"))
+    let o = Command::new(env!("CARGO_BIN_EXE_bvl"))
         .arg("doctor")
         .args(args)
         .arg("--json")
-        .env("BCTL_CONFIG_DIR", dir)
-        .env("BCTL_PORT", port.to_string())
+        .env("BVL_CONFIG_DIR", dir)
+        .env("BVL_PORT", port.to_string())
         .output()
         .unwrap();
     let v: Value = serde_json::from_slice(&o.stdout).unwrap_or_else(|e| {
@@ -678,7 +678,7 @@ fn doctor_all_green_with_extension() {
     }
     assert!(check(&v, "round trip")["message"].as_str().unwrap().contains(" ms"));
     // Text output uses marks and ends with a summary.
-    let o = bctl(&p, &["doctor", "--quick"]);
+    let o = bvl(&p, &["doctor", "--quick"]);
     let s = String::from_utf8_lossy(&o.stdout);
     assert!(s.contains("✓ proxy:") && s.ends_with("All good.\n"), "{s}");
 }

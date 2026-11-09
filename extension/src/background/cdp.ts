@@ -264,7 +264,7 @@ export async function send<T = Record<string, unknown>>(
     if (GONE.test((e as Error).message)) {
       forgetChild(tabId, sessionId);
       throw new UserError(
-        'The iframe is gone (it navigated or was removed). Run `bctl snapshot` again.',
+        'The iframe is gone (it navigated or was removed). Run `bvl snapshot` again.',
         'stale_ref',
         { cause: e },
       );

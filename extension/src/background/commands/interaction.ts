@@ -285,9 +285,9 @@ export const interactionCommands: Command[] = [
     details:
       "Clicks the element's center with trusted mouse input. Fails, instead of reporting success, when the element is hidden, disabled, covered by another element or outside the viewport. If the click opens a confirm or prompt dialog, a warning is printed on stderr; answer it with `dialog accept` or `dialog dismiss`.",
     examples: [
-      'bctl click @e3',
-      'bctl click "button[type=submit]"',
-      'bctl click "//button[@type=\'submit\']"',
+      'bvl click @e3',
+      'bvl click "button[type=submit]"',
+      'bvl click "//button[@type=\'submit\']"',
     ],
     show: Infinity,
     group: 'Interaction',
@@ -346,7 +346,7 @@ export const interactionCommands: Command[] = [
     name: 'fill',
     details:
       'Clears the field and types the text. Use `type` to append without clearing. Fails if the element is not editable.',
-    examples: ['bctl fill @e5 "user@example.com"', 'bctl fill "#search" "bridge"'],
+    examples: ['bvl fill @e5 "user@example.com"', 'bvl fill "#search" "bridge"'],
     group: 'Interaction',
     usage: 'fill <target> <text>',
     summary: 'Clear an input and fill it with text',
@@ -369,7 +369,7 @@ export const interactionCommands: Command[] = [
   {
     name: 'press',
     details: 'Presses a key at the current focus; combine modifiers with +.',
-    examples: ['bctl press Enter', 'bctl press Control+a', 'bctl press ControlOrMeta+c'],
+    examples: ['bvl press Enter', 'bvl press Control+a', 'bvl press ControlOrMeta+c'],
     show: Infinity,
     aliases: ['key'],
     group: 'Interaction',
@@ -544,9 +544,9 @@ export const interactionCommands: Command[] = [
     details:
       'Finds an element by role, text, label, placeholder, alt, title or test id and optionally acts on it, so you do not need a snapshot first.',
     examples: [
-      'bctl find role button click --name Submit',
-      'bctl find text "Sign in" click',
-      'bctl find label Email fill "me@example.com"',
+      'bvl find role button click --name Submit',
+      'bvl find text "Sign in" click',
+      'bvl find label Email fill "me@example.com"',
     ],
     showFlags: ['name'],
     // Show the locator and the action; redact the action's value (typed text) after it.

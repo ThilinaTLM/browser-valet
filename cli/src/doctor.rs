@@ -1,4 +1,4 @@
-//! `bctl doctor`: CLI-local diagnosis of config, managed folder, proxy, extension and a round trip.
+//! `bvl doctor`: CLI-local diagnosis of config, managed folder, proxy, extension and a round trip.
 use crate::embed::{self, EMBEDDED_EXT_VERSION};
 use crate::{addr, connect_raw, dir, ensure_proxy, load, recv, send, shutdown, Config, VERSION};
 use anyhow::Result;
@@ -68,7 +68,7 @@ fn config(r: &mut Report, o: &Opts) -> Option<Config> {
             "config",
             St::Fail,
             format!("{} does not exist", path.display()),
-            Some("run `bctl setup`"),
+            Some("run `bvl setup`"),
         );
         return None;
     }
@@ -77,7 +77,7 @@ fn config(r: &mut Report, o: &Opts) -> Option<Config> {
             "config",
             St::Fail,
             format!("{} is unreadable or has no secret", path.display()),
-            Some("run `bctl setup` (keeps nothing from the broken file) or `bctl pair <code>`"),
+            Some("run `bvl setup` (keeps nothing from the broken file) or `bvl pair <code>`"),
         );
         return None;
     };
@@ -98,7 +98,7 @@ fn config(r: &mut Report, o: &Opts) -> Option<Config> {
                     "config",
                     St::Fail,
                     format!("{} has mode {mode:o}; it holds the pairing secret", path.display()),
-                    Some(&format!("chmod 600 {} (or `bctl doctor --fix`)", path.display())),
+                    Some(&format!("chmod 600 {} (or `bvl doctor --fix`)", path.display())),
                 );
             }
             return Some(c);
@@ -137,7 +137,7 @@ fn managed(r: &mut Report, c: &Config, o: &Opts) {
     let ver = read("manifest.json").and_then(|m| m["version"].as_str().map(String::from));
     match (&ver, EMBEDDED_EXT_VERSION) {
         (None, _) => problems.push("manifest.json is missing or unreadable".into()),
-        (Some(v), Some(e)) if v != e => problems.push(format!("extension files are v{v}, this bctl bundles v{e}")),
+        (Some(v), Some(e)) if v != e => problems.push(format!("extension files are v{v}, this bvl bundles v{e}")),
         _ => {}
     }
     if problems.is_empty() {
@@ -176,7 +176,7 @@ fn managed(r: &mut Report, c: &Config, o: &Opts) {
         "managed folder",
         St::Fail,
         msg,
-        Some("run `bctl doctor --fix` (rewrites the folder), then reload the extension"),
+        Some("run `bvl doctor --fix` (rewrites the folder), then reload the extension"),
     );
 }
 
@@ -215,7 +215,7 @@ fn proxy_and_ext(r: &mut Report, c: &Config, o: &Opts) -> Option<Proxy> {
                 "proxy",
                 St::Warn,
                 format!("not running on 127.0.0.1:{} (--quick: not started)", c.port),
-                Some("any bctl command starts it"),
+                Some("any bvl command starts it"),
             );
             r.add("extension", St::Skip, "needs a running proxy", None);
             return None;
@@ -241,7 +241,7 @@ fn proxy_and_ext(r: &mut Report, c: &Config, o: &Opts) -> Option<Proxy> {
                 St::Fail,
                 m,
                 Some(&format!(
-                    "port {} may be taken by another program, or the proxy was started with a different secret: try `bctl stop`, use BCTL_PORT/`bctl pair <code> --port N`, or re-run `bctl setup`",
+                    "port {} may be taken by another program, or the proxy was started with a different secret: try `bvl stop`, use BVL_PORT/`bvl pair <code> --port N`, or re-run `bvl setup`",
                     c.port
                 )),
             );
@@ -272,17 +272,17 @@ fn proxy_and_ext(r: &mut Report, c: &Config, o: &Opts) -> Option<Proxy> {
             "proxy",
             St::Warn,
             format!(
-                "v{} differs from bctl v{VERSION} and is busy with {} request(s)",
+                "v{} differs from bvl v{VERSION} and is busy with {} request(s)",
                 p.version, p.pending
             ),
-            Some("wait for them to finish, then `bctl doctor --fix`; use one bctl version at a time"),
+            Some("wait for them to finish, then `bvl doctor --fix`; use one bvl version at a time"),
         );
     } else {
         r.add(
             "proxy",
             St::Warn,
-            format!("v{} differs from bctl v{VERSION}", p.version),
-            Some("run `bctl doctor --fix` (or `bctl stop`; the next command restarts it)"),
+            format!("v{} differs from bvl v{VERSION}", p.version),
+            Some("run `bvl doctor --fix` (or `bvl stop`; the next command restarts it)"),
         );
     }
 
@@ -309,7 +309,7 @@ fn extension(r: &mut Report, p: &Proxy) {
             "extension",
             St::Fail,
             "not connected to the proxy",
-            Some("open the browser with the Browser Bridge extension enabled; if it was never installed or paired, run `bctl setup`; check the popup for errors"),
+            Some("open the browser with the Browser Valet extension enabled; if it was never installed or paired, run `bvl setup`; check the popup for errors"),
         );
         return;
     };
@@ -321,11 +321,11 @@ fn extension(r: &mut Report, p: &Proxy) {
     let mut fix = None;
     if ver != VERSION {
         st = St::Warn;
-        issues.push(format!("extension v{ver} differs from bctl v{VERSION}"));
+        issues.push(format!("extension v{ver} differs from bvl v{VERSION}"));
         fix = Some(if managed {
             "the managed extension updates itself when it reconnects; if not, reload it at the browser's extensions page"
         } else {
-            "rebuild/reload the unpacked extension (or run `bctl setup` for the managed one)"
+            "rebuild/reload the unpacked extension (or run `bvl setup` for the managed one)"
         });
     }
     match browser_major(browser) {
@@ -424,7 +424,7 @@ fn trip(r: &mut Report, c: &Config, o: &Opts, p: Option<Proxy>) {
                 "round trip",
                 St::Fail,
                 e,
-                Some("run `bctl doctor --fix` to restart the proxy; if it persists, reload the extension"),
+                Some("run `bvl doctor --fix` to restart the proxy; if it persists, reload the extension"),
             );
         }
     }

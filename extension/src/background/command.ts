@@ -51,7 +51,7 @@ export interface Result {
 
 export const GLOBAL_FLAGS: Flag[] = [
   { name: 'json', type: 'bool', desc: 'Machine-readable output: {success, data, error}' },
-  { name: 'session', type: 'string', desc: 'Session name (default: $BCTL_SESSION or "default")' },
+  { name: 'session', type: 'string', desc: 'Session name (default: $BVL_SESSION or "default")' },
   {
     name: 'timeout',
     type: 'string',
@@ -206,7 +206,7 @@ export class Ctx {
     const id = sessionState(this.session).tab;
     if (id === undefined) {
       throw new UserError(
-        'No tab yet. Run `bctl open <url>` to open one, or `bctl tab` to list tabs.',
+        'No tab yet. Run `bvl open <url>` to open one, or `bvl tab` to list tabs.',
         'no_tab',
       );
     }
@@ -217,19 +217,19 @@ export class Ctx {
     );
     if (!exists)
       throw new UserError(
-        `Tab ${tid} was closed. Run \`bctl open <url>\` or \`bctl tab\`.`,
+        `Tab ${tid} was closed. Run \`bvl open <url>\` or \`bvl tab\`.`,
         'tab_gone',
       );
     if (!isControlled(id)) {
       throw new UserError(
-        `Tab ${tid} is not shared with the agent (the user revoked control). Run \`bctl tab ${tid}\` to ask again, or \`bctl open <url>\`.`,
+        `Tab ${tid} is not shared with the agent (the user revoked control). Run \`bvl tab ${tid}\` to ask again, or \`bvl open <url>\`.`,
         'revoked',
       );
     }
     const dialog = cdp.tabEvents(id).dialog;
     if (dialog) {
       throw new UserError(
-        `A ${dialog.type} dialog is open: "${dialog.message}". Run \`bctl dialog accept\` or \`bctl dialog dismiss\`.`,
+        `A ${dialog.type} dialog is open: "${dialog.message}". Run \`bvl dialog accept\` or \`bvl dialog dismiss\`.`,
         'dialog_open',
       );
     }

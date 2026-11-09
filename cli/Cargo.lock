@@ -24,8 +24,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "browser-bridge"
-version = "0.3.0"
+name = "browser-valet"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",

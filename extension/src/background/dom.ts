@@ -144,7 +144,7 @@ async function resolveRef(tabId: number, target: string): Promise<Handle> {
   const info = state.refs[tabId]?.[ref];
   if (!info)
     throw new UserError(
-      `Unknown ref: ${ref}. Run \`bctl snapshot\` to get fresh refs.`,
+      `Unknown ref: ${ref}. Run \`bvl snapshot\` to get fresh refs.`,
       'unknown_ref',
     );
   // A node in an out-of-process iframe is reached through that iframe's session. The session id
@@ -154,7 +154,7 @@ async function resolveRef(tabId: number, target: string): Promise<Handle> {
     sessionId = (await cdp.sessionForFrame(tabId, info.frameId))?.sessionId;
     if (!sessionId) {
       throw new UserError(
-        `The iframe of ${ref} is gone (navigated or removed). Run \`bctl snapshot\` again.`,
+        `The iframe of ${ref} is gone (navigated or removed). Run \`bvl snapshot\` again.`,
         'stale_ref',
       );
     }
@@ -178,7 +178,7 @@ async function resolveRef(tabId: number, target: string): Promise<Handle> {
       return await fromBackend(tabId, matches[0].backendDOMNodeId, sessionId);
     }
     throw new UserError(
-      `Stale ref ${ref} (${info.role} "${info.name}") cannot be recovered. Run \`bctl snapshot\` again.`,
+      `Stale ref ${ref} (${info.role} "${info.name}") cannot be recovered. Run \`bvl snapshot\` again.`,
       'stale_ref',
     );
   }

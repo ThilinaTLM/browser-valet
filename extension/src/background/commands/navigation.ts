@@ -181,10 +181,10 @@ function currentTab(ctx: Ctx): number | undefined {
 
 function resolveTabRef(ref: string): number {
   if (/^\d+$/.test(ref))
-    throw new UserError(`Use a tab id like t${ref} (see \`bctl tab\`)`, 'bad_args');
+    throw new UserError(`Use a tab id like t${ref} (see \`bvl tab\`)`, 'bad_args');
   const id = findTab(ref);
   if (id === undefined)
-    throw new UserError(`Unknown tab: ${ref}. Run \`bctl tab\` to list tabs.`, 'not_found');
+    throw new UserError(`Unknown tab: ${ref}. Run \`bvl tab\` to list tabs.`, 'not_found');
   return id;
 }
 
@@ -209,7 +209,7 @@ export const navigationCommands: Command[] = [
     name: 'open',
     details:
       "Navigates the session's current agent tab, or opens a new background agent tab when there is none. If the current tab is one you shared, it opens a new agent tab instead of navigating yours. Prints the page title and URL. Does not wait for the page to be idle; use `wait --load networkidle` for that.",
-    examples: ['bctl open https://example.com', 'bctl open localhost:3000'],
+    examples: ['bvl open https://example.com', 'bvl open localhost:3000'],
     show: Infinity,
     aliases: ['goto', 'navigate'],
     group: 'Navigation',
@@ -300,10 +300,10 @@ export const navigationCommands: Command[] = [
     details:
       'Without arguments lists tabs; `[not shared]` marks tabs you opened yourself that the agent may not use. Switching to a tab the agent did not open asks the user in the browser and waits for the answer (code `denied` if refused). `tab new` opens an agent tab, `tab close` closes one.',
     examples: [
-      'bctl tab',
-      'bctl tab t3',
-      'bctl tab new --label docs https://example.com',
-      'bctl tab close docs',
+      'bvl tab',
+      'bvl tab t3',
+      'bvl tab new --label docs https://example.com',
+      'bvl tab close docs',
     ],
     show: Infinity,
     showFlags: ['label'],
@@ -337,7 +337,7 @@ export const navigationCommands: Command[] = [
         return {
           text,
           warning: rows.some((r) => !r.controlled)
-            ? 'Tabs marked [not shared] need user approval: `bctl tab <id>` asks the user.'
+            ? 'Tabs marked [not shared] need user approval: `bvl tab <id>` asks the user.'
             : undefined,
           data: {
             tabs: rows.map(({ id, m, t, controlled, current: cur }) => ({

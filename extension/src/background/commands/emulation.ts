@@ -14,7 +14,7 @@ async function agentTab(ctx: Ctx, what: string): Promise<number> {
   const id = await ctx.tab();
   if (state.tabs[id]?.control !== 'agent') {
     throw new UserError(
-      `${what} is only allowed on tabs the agent opened; ${meta(id).tid} is the user's shared tab (the user would see their page change). Run \`bctl open <url>\` for an agent tab.`,
+      `${what} is only allowed on tabs the agent opened; ${meta(id).tid} is the user's shared tab (the user would see their page change). Run \`bvl open <url>\` for an agent tab.`,
     );
   }
   return id;
@@ -27,8 +27,8 @@ function positive(v: string | undefined, what: string, usage: string): number {
   return n;
 }
 
-const VIEWPORT_USAGE = 'Usage: bctl set viewport <width> <height> [scale] | set viewport reset';
-const MEDIA_USAGE = 'Usage: bctl set media [dark|light] [reduced-motion] | set media reset';
+const VIEWPORT_USAGE = 'Usage: bvl set viewport <width> <height> [scale] | set viewport reset';
+const MEDIA_USAGE = 'Usage: bvl set media [dark|light] [reduced-motion] | set media reset';
 
 async function setViewport(ctx: Ctx, rest: string[]) {
   const id = await agentTab(ctx, 'set viewport');
@@ -89,7 +89,7 @@ export const emulationCommands: Command[] = [
     ],
     async run(ctx, a) {
       const id = await ctx.tab();
-      const path = ctx.path(a.need(0, 'path. Usage: bctl pdf <path> [--landscape] [--background]'));
+      const path = ctx.path(a.need(0, 'path. Usage: bvl pdf <path> [--landscape] [--background]'));
       let data: string;
       try {
         ({ data } = await cdp.send<{ data: string }>(id, 'Page.printToPDF', {
@@ -118,7 +118,7 @@ export const emulationCommands: Command[] = [
       if (sub === 'media') return setMedia(ctx, rest);
       if (sub === undefined) {
         throw new UserError(
-          'Missing arguments for: set\nUsage: bctl set <viewport|media> [args...]',
+          'Missing arguments for: set\nUsage: bvl set <viewport|media> [args...]',
           'bad_args',
         );
       }

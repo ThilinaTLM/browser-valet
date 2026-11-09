@@ -1,7 +1,7 @@
-//! bctl: thin CLI + relay proxy for Browser Bridge (see ../docs/architecture/protocol.md).
+//! bvl: thin CLI + relay proxy for Browser Valet (see ../docs/architecture/protocol.md).
 //!
-//! Env: BCTL_PORT (port), BCTL_SESSION, BCTL_IDLE_TIMEOUT (proxy), BCTL_EXT_WAIT_MS (proxy; test hook),
-//! BCTL_CONFIG_DIR (replaces `<config_dir>/browser-bridge`; used by tests).
+//! Env: BVL_PORT (port), BVL_SESSION, BVL_IDLE_TIMEOUT (proxy), BVL_EXT_WAIT_MS (proxy; test hook),
+//! BVL_CONFIG_DIR (replaces `<config_dir>/browser-valet`; used by tests).
 mod doctor;
 mod embed;
 mod proxy;
@@ -54,15 +54,15 @@ pub struct Config {
     pub port: u16,
 }
 pub fn dir() -> PathBuf {
-    match std::env::var_os("BCTL_CONFIG_DIR") {
+    match std::env::var_os("BVL_CONFIG_DIR") {
         Some(d) => d.into(),
-        None => dirs::config_dir().unwrap_or_else(|| ".".into()).join("browser-bridge"),
+        None => dirs::config_dir().unwrap_or_else(|| ".".into()).join("browser-valet"),
     }
 }
 pub fn env_port() -> Option<u16> {
-    std::env::var("BCTL_PORT").ok()?.parse().ok()
+    std::env::var("BVL_PORT").ok()?.parse().ok()
 }
-/// Port precedence: BCTL_PORT > config.json > default.
+/// Port precedence: BVL_PORT > config.json > default.
 pub fn load() -> Option<Config> {
     let v: Value = serde_json::from_slice(&std::fs::read(dir().join("config.json")).ok()?).ok()?;
     let port = env_port()
@@ -111,25 +111,25 @@ pub fn send(ws: &mut Ws, v: Value) -> Result<()> {
     Ok(ws.send(Message::text(v.to_string()))?)
 }
 
-/// Connect as role `cli`; if the proxy runs a different bctl version and is idle, restart it from this binary (once).
+/// Connect as role `cli`; if the proxy runs a different bvl version and is idle, restart it from this binary (once).
 pub fn connect(c: &Config) -> Result<Ws> {
     let (ws, v) = connect_raw(c)?;
     if v == VERSION {
         return Ok(ws);
     }
-    // Never kill a proxy that is serving requests (possibly for another bctl version): report instead.
+    // Never kill a proxy that is serving requests (possibly for another bvl version): report instead.
     let mut ws = ws;
     if send(&mut ws, json!({"t":"status"})).is_ok() {
         let busy = recv(&mut ws).map_or(0, |s| s["proxy"]["pending"].as_u64().unwrap_or(0));
         if busy > 0 {
             bail!(
-                "the running proxy (v{v}) is busy with {busy} request(s), and this bctl is v{VERSION}; not restarting it. \
-                 Wait for them to finish or run `bctl stop`, and use one bctl version at a time"
+                "the running proxy (v{v}) is busy with {busy} request(s), and this bvl is v{VERSION}; not restarting it. \
+                 Wait for them to finish or run `bvl stop`, and use one bvl version at a time"
             );
         }
     }
     drop(ws);
-    eprintln!("bctl: restarting the proxy (v{v} -> v{VERSION})");
+    eprintln!("bvl: restarting the proxy (v{v} -> v{VERSION})");
     if !shutdown(c) {
         return Ok(connect_raw(c)?.0);
     }
@@ -176,7 +176,7 @@ pub(crate) fn connect_raw(c: &Config) -> Result<(Ws, String)> {
     }
 }
 
-/// Start `bctl proxy` detached (log in proxy.log) unless something already accepts connections.
+/// Start `bvl proxy` detached (log in proxy.log) unless something already accepts connections.
 pub fn ensure_proxy(c: &Config) -> Result<()> {
     let up = || TcpStream::connect_timeout(&addr(c.port), Duration::from_millis(500)).is_ok();
     if up() {
@@ -216,18 +216,18 @@ pub(crate) fn shutdown(c: &Config) -> bool {
 
 fn paired() -> Config {
     load().unwrap_or_else(|| {
-        eprintln!("Not paired. Run `bctl setup` to install the browser extension and pair.");
+        eprintln!("Not paired. Run `bvl setup` to install the browser extension and pair.");
         std::process::exit(1)
     })
 }
 
-const HELP: &str = "bctl local commands:
+const HELP: &str = "bvl local commands:
   setup [--browser chrome|edge|brave|chromium] [--no-open] [--no-wait]
                              install the browser extension (load it once) and pair automatically
   skills [list]              list agent skills; `skills get core` prints the usage guide (read it first!)
   skills get <name> [--full] [--ref <ref>]   print a skill (+ all / one reference)
   skills path [name]         write skills to the config dir and print the path
-  skills install [--dir D]   install a stub `bctl` skill for Claude Code / other agents
+  skills install [--dir D]   install a stub `bvl` skill for Claude Code / other agents
   pair <secret> [--port N]   pair manually with a code (normally `setup` does this)
   unpair                     forget the secret and stop the proxy
   status [--json]            show proxy and extension connection
@@ -236,7 +236,7 @@ const HELP: &str = "bctl local commands:
   stop                       stop the background proxy
   version                    print version
 All other commands are forwarded to the browser extension.
-New here? Run `bctl skills get core`.";
+New here? Run `bvl skills get core`.";
 
 /// The `--json` error envelope for failures that happen before the extension answers
 /// (same shape as the extension's, see automation.md).
@@ -250,7 +250,7 @@ fn forward(argv: Vec<String>) -> Result<i32> {
         println!(
             "{}",
             json_error(
-                "Not paired. Run `bctl setup` to install the browser extension and pair.",
+                "Not paired. Run `bvl setup` to install the browser extension and pair.",
                 "not_paired"
             )
         );
@@ -269,7 +269,7 @@ fn forward_inner(argv: Vec<String>) -> Result<i32> {
     let json_out = argv.iter().any(|a| a == "--json");
     let helpish = matches!(argv.first().map(String::as_str), None | Some("help" | "--help" | "-h"));
     if helpish && load().is_none() {
-        println!("{HELP}\n\nNot paired. Run `bctl setup` to install the browser extension and pair.");
+        println!("{HELP}\n\nNot paired. Run `bvl setup` to install the browser extension and pair.");
         return Ok(1);
     }
     let c = paired();
@@ -294,7 +294,7 @@ fn forward_inner(argv: Vec<String>) -> Result<i32> {
         "tmp": std::env::temp_dir().to_string_lossy(),
         "sep": std::path::MAIN_SEPARATOR.to_string(),
         "platform": match std::env::consts::OS { "macos" => "macos", "windows" => "windows", _ => "linux" },
-        "session": std::env::var("BCTL_SESSION").unwrap_or_else(|_| "default".into()),
+        "session": std::env::var("BVL_SESSION").unwrap_or_else(|_| "default".into()),
     });
     if let Some(s) = stdin {
         req["stdin"] = s.into();
@@ -382,7 +382,7 @@ fn status(json_out: bool) -> Result<i32> {
             println!("managed:   {}", if managed { "yes" } else { "no" });
             if let Some(emb) = embed::EMBEDDED_EXT_VERSION.filter(|emb| *emb != ver) {
                 println!(
-                    "note:      extension v{ver} differs from the version bundled with this bctl (v{emb}); {}",
+                    "note:      extension v{ver} differs from the version bundled with this bvl (v{emb}); {}",
                     if managed {
                         "it will update automatically"
                     } else {
@@ -409,7 +409,7 @@ fn local(args: Vec<String>) -> Result<i32> {
             let secret = args
                 .get(1)
                 .filter(|s| !s.starts_with("--"))
-                .context("usage: bctl pair <secret> [--port N]")?
+                .context("usage: bvl pair <secret> [--port N]")?
                 .clone();
             // Pairing codes are 32 random bytes, base64url (43 chars); reject anything else early.
             if secret.len() < 32
@@ -417,7 +417,7 @@ fn local(args: Vec<String>) -> Result<i32> {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
             {
-                bail!("that doesn't look like a pairing code; copy it from the Browser Bridge extension popup");
+                bail!("that doesn't look like a pairing code; copy it from the Browser Valet extension popup");
             }
             let port = match flag(&args, "--port") {
                 Some(p) => p.parse().context("invalid --port")?,
@@ -431,9 +431,9 @@ fn local(args: Vec<String>) -> Result<i32> {
                 embed::write_pairing(&secret, port)?;
             }
             save(&Config { secret, port })?;
-            println!("Paired. Run `bctl status` to check the connection.");
+            println!("Paired. Run `bvl status` to check the connection.");
             if !stopped && TcpStream::connect_timeout(&addr(port), Duration::from_millis(300)).is_ok() {
-                println!("Note: a proxy with the previous secret is still running; run `bctl stop` or wait for it to exit when idle.");
+                println!("Note: a proxy with the previous secret is still running; run `bvl stop` or wait for it to exit when idle.");
             }
             Ok(0)
         }
@@ -463,7 +463,7 @@ fn local(args: Vec<String>) -> Result<i32> {
         Some("status") => status(args.iter().any(|a| a == "--json")),
         Some("proxy") => {
             let c = paired();
-            let idle = flag(&args, "--idle-timeout").or_else(|| std::env::var("BCTL_IDLE_TIMEOUT").ok());
+            let idle = flag(&args, "--idle-timeout").or_else(|| std::env::var("BVL_IDLE_TIMEOUT").ok());
             let idle = idle.map_or(Ok(600), |s| s.parse()).context("invalid idle timeout")?;
             let port = flag(&args, "--port")
                 .map_or(Ok(c.port), |p| p.parse())
@@ -472,7 +472,7 @@ fn local(args: Vec<String>) -> Result<i32> {
             Ok(0)
         }
         Some("version" | "--version") => {
-            println!("bctl {VERSION}");
+            println!("bvl {VERSION}");
             Ok(0)
         }
         _ => forward(args),
@@ -483,7 +483,7 @@ fn main() {
     match local(std::env::args().skip(1).collect()) {
         Ok(code) => std::process::exit(code),
         Err(e) => {
-            eprintln!("bctl: {e:#}");
+            eprintln!("bvl: {e:#}");
             std::process::exit(1)
         }
     }

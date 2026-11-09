@@ -47,7 +47,7 @@ struct Shared {
 }
 
 pub fn run(secret: String, port: u16, idle: u64) -> Result<()> {
-    let ext_wait = std::env::var("BCTL_EXT_WAIT_MS")
+    let ext_wait = std::env::var("BVL_EXT_WAIT_MS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10_000);
@@ -175,7 +175,7 @@ async fn conn(sh: Arc<Shared>, tcp: TcpStream) -> Result<()> {
         anyhow::bail!("rejected: bad auth message or role/origin mismatch (role '{role}')");
     }
     if !verify(&sh.secret, &format!("bctl1|client|{role}|{np}|{nc}"), &s("mac")) {
-        send(&mut ws, fail("authentication failed (re-pair with `bctl pair`)"))
+        send(&mut ws, fail("authentication failed (re-pair with `bvl pair`)"))
             .await
             .ok();
         anyhow::bail!("authentication failed (role {role})");
@@ -328,7 +328,7 @@ async fn request(sh: &Shared, ws: &mut Ws, req: Value) -> Result<()> {
             break t;
         }
         if start.elapsed() >= sh.ext_wait {
-            return send(ws, err_res("browser extension is not connected. Open Chrome with the Browser Bridge extension installed and paired.")).await;
+            return send(ws, err_res("browser extension is not connected. Open Chrome with the Browser Valet extension installed and paired.")).await;
         }
         sleep(Duration::from_millis(50)).await;
     };

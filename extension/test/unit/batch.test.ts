@@ -103,22 +103,22 @@ describe('batch through execute', () => {
   it('runs items in order and joins their stdout', async () => {
     const r = await run(['batch', 'help click', 'help eval']);
     expect(r.exitCode).toBe(0);
-    const [a, b] = r.stdout.split('\n\nUsage: bctl ').map((s) => s);
-    expect(a).toMatch(/^Usage: bctl click /);
+    const [a, b] = r.stdout.split('\n\nUsage: bvl ').map((s) => s);
+    expect(a).toMatch(/^Usage: bvl click /);
     expect(b).toContain('eval');
   });
 
   it('continues after a failure, reports it on stderr and exits 1', async () => {
     const r = await run(['batch', 'help click', 'frobnicate', 'help eval']);
     expect(r.exitCode).toBe(1);
-    expect(r.stderr).toBe('✗ Unknown command: frobnicate. Run `bctl help`.\n');
-    expect(r.stdout).toContain('Usage: bctl eval');
+    expect(r.stderr).toBe('✗ Unknown command: frobnicate. Run `bvl help`.\n');
+    expect(r.stdout).toContain('Usage: bvl eval');
   });
 
   it('--bail stops at the first failure', async () => {
     const r = await run(['batch', '--bail', 'help click', 'frobnicate', 'help eval']);
     expect(r.exitCode).toBe(1);
-    expect(r.stdout).not.toContain('Usage: bctl eval');
+    expect(r.stdout).not.toContain('Usage: bvl eval');
   });
 
   it('--json is a top-level array; --omit-command uses index', async () => {
@@ -171,7 +171,7 @@ describe('batch through execute', () => {
 
   it('shows help', async () => {
     const r = await run(['batch', '--help']);
-    expect(r.stdout).toMatch(/^Usage: bctl batch /);
+    expect(r.stdout).toMatch(/^Usage: bvl batch /);
     expect(r.stdout).toContain('--bail');
   });
 });

@@ -167,7 +167,7 @@ async function iframeTree(
  */
 async function clickables(tabId: number, withText: boolean): Promise<Map<number, ClickableInfo>> {
   const found = new Map<number, ClickableInfo>();
-  const group = 'bctl-clickable';
+  const group = 'bvl-clickable';
   try {
     const holder = await cdp.send<{ result: { objectId?: string }; exceptionDetails?: unknown }>(
       tabId,

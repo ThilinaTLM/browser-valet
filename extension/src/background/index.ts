@@ -21,7 +21,7 @@ setReady(ready);
 
 chrome.runtime.onStartup.addListener(() => void ready.then(connect));
 chrome.runtime.onInstalled.addListener(() => void ready.then(connect));
-void chrome.alarms.create('bctl-keepalive', { periodInMinutes: 0.5 });
+void chrome.alarms.create('bvl-keepalive', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(() => void ready.then(connect));
 startKeepAlive();
 

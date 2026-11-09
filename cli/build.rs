@@ -43,12 +43,12 @@ fn main() {
         let want = std::env::var("CARGO_PKG_VERSION").unwrap();
         assert!(
             v == want,
-            "extension/dist/manifest.json version {v} != bctl version {want}; rebuild the extension (cd extension && pnpm build)"
+            "extension/dist/manifest.json version {v} != bvl version {want}; rebuild the extension (cd extension && pnpm build)"
         );
         code += &table("EXT_FILES", &dist);
         writeln!(code, "pub const EXT_VERSION: Option<&str> = Some({v:?});").unwrap();
     } else {
-        println!("cargo:warning=extension/dist not found: this bctl build won't include the extension (cd extension && pnpm build)");
+        println!("cargo:warning=extension/dist not found: this bvl build won't include the extension (cd extension && pnpm build)");
         println!("cargo:rerun-if-changed={}", dist.display());
         code += "pub static EXT_FILES: &[(&str, &[u8])] = &[];\npub const EXT_VERSION: Option<&str> = None;\n";
     }

@@ -1,21 +1,21 @@
 // Helpers for E2E test files. See docs/architecture/development.md ("Testing").
 //
-//   import { bctl, approveNextConsent, openUserTab, fixture, useBrowser } from './harness';
+//   import { bvl, approveNextConsent, openUserTab, fixture, useBrowser } from './harness';
 //
 //   const browser = useBrowser();            // connects in beforeAll, disconnects in afterAll
 //   it('...', async () => {
-//     const r = await bctl('open', fixture('/form.html'));
+//     const r = await bvl('open', fixture('/form.html'));
 //     expect(r.code).toBe(0);
 //   });
 //
-// All bctl subprocesses run against the temp config dir and non-default port created by
-// global-setup.ts, never against the developer's real bctl or browser.
+// All bvl subprocesses run against the temp config dir and non-default port created by
+// global-setup.ts, never against the developer's real bvl or browser.
 
 import { spawn } from 'node:child_process';
 import puppeteer, { type Browser, type Page } from 'puppeteer-core';
 import { afterAll, beforeAll, inject } from 'vitest';
 
-export interface BctlResult {
+export interface BvlResult {
   code: number;
   stdout: string;
   stderr: string;
@@ -33,21 +33,21 @@ export const crossFixture = (path = '/'): string => `${info().crossFixtureUrl}${
 export const framesPage = (query = '', innerQuery = ''): string =>
   `${fixture('/frames.html')}?inner=${encodeURIComponent(crossFixture(`/frame-inner.html${innerQuery}`))}${query}`;
 
-/** Scratch directory used as the cwd of every bctl run (for screenshots and the like). */
+/** Scratch directory used as the cwd of every bvl run (for screenshots and the like). */
 export const workDir = (): string => info().workDir;
 
-/** Run `bctl <args>` and collect its output. Never rejects; check `code`. */
-export function bctl(...args: string[]): Promise<BctlResult> {
-  return bctlWith({}, ...args);
+/** Run `bvl <args>` and collect its output. Never rejects; check `code`. */
+export function bvl(...args: string[]): Promise<BvlResult> {
+  return bvlWith({}, ...args);
 }
 
-/** Like `bctl` with extra environment variables (e.g. `{ BCTL_SESSION: 'other' }`). */
-export function bctlWith(env: Record<string, string>, ...args: string[]): Promise<BctlResult> {
+/** Like `bvl` with extra environment variables (e.g. `{ BVL_SESSION: 'other' }`). */
+export function bvlWith(env: Record<string, string>, ...args: string[]): Promise<BvlResult> {
   return run(env, undefined, args);
 }
 
-/** `bctl <args>` with `stdin` piped in (for `--stdin` commands). */
-export function bctlStdin(stdin: string, ...args: string[]): Promise<BctlResult> {
+/** `bvl <args>` with `stdin` piped in (for `--stdin` commands). */
+export function bvlStdin(stdin: string, ...args: string[]): Promise<BvlResult> {
   return run({}, stdin, args);
 }
 
@@ -55,7 +55,7 @@ function run(
   env: Record<string, string>,
   stdin: string | undefined,
   args: string[],
-): Promise<BctlResult> {
+): Promise<BvlResult> {
   const { bin, env: base, workDir: cwd } = info();
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { env: { ...base, ...env }, cwd });
@@ -71,11 +71,11 @@ function run(
   });
 }
 
-/** `bctl --json …`, parsed: `{ success, data, error }`. */
-export async function bctlJson(
+/** `bvl --json …`, parsed: `{ success, data, error }`. */
+export async function bvlJson(
   ...args: string[]
 ): Promise<{ success: boolean; data: unknown; error: string | null }> {
-  const r = await bctl(...args, '--json');
+  const r = await bvl(...args, '--json');
   return JSON.parse(r.stdout) as { success: boolean; data: unknown; error: string | null };
 }
 
@@ -86,7 +86,7 @@ export function useBrowser(): { readonly current: Browser } {
   beforeAll(async () => {
     shared = await puppeteer.connect({
       browserWSEndpoint: info().wsEndpoint,
-      // No viewport emulation: puppeteer would override the page size bctl sets.
+      // No viewport emulation: puppeteer would override the page size bvl sets.
       defaultViewport: null,
     });
   });
@@ -135,9 +135,9 @@ export async function openUserTab(url: string): Promise<Page> {
   return page;
 }
 
-/** Find the `tN` id that `bctl tab` shows for a page title (optionally only unshared tabs). */
+/** Find the `tN` id that `bvl tab` shows for a page title (optionally only unshared tabs). */
 export async function tidForTitle(title: string): Promise<string> {
-  const r = await bctl('tab', '--json');
+  const r = await bvl('tab', '--json');
   const tabs = (JSON.parse(r.stdout) as { data: { tabs: { tabId: string; title: string }[] } }).data
     .tabs;
   const hit = tabs.find((t) => t.title === title);
@@ -150,7 +150,7 @@ export async function tidForTitle(title: string): Promise<string> {
  * Allow (default) or Deny. Start the consenting command first (do not await it), then call this,
  * then await the command:
  *
- *   const pending = bctl('tab', tid);
+ *   const pending = bvl('tab', tid);
  *   await approveNextConsent();           // or approveNextConsent('deny')
  *   expect((await pending).code).toBe(0);
  */
@@ -226,7 +226,7 @@ export async function restartExtensionWorker(): Promise<void> {
   }
   // Let the proxy notice the disconnect, so that "connected" below means the new worker.
   for (let i = 0; i < 20; i++) {
-    if ((await bctl('status')).stdout.includes('extension: not connected')) break;
+    if ((await bvl('status')).stdout.includes('extension: not connected')) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   // Opening an extension page starts the worker again; it reconnects to the proxy by itself.
@@ -235,7 +235,7 @@ export async function restartExtensionWorker(): Promise<void> {
     await page.goto(`${info().extensionOrigin}/popup.html?window=1`);
     const deadline = Date.now() + 30_000;
     for (;;) {
-      const r = await bctl('status');
+      const r = await bvl('status');
       if (/extension: \S/.test(r.stdout) && !r.stdout.includes('extension: not connected')) break;
       if (Date.now() > deadline) throw new Error(`extension did not reconnect:\n${r.stdout}`);
       await new Promise((resolve) => setTimeout(resolve, 300));

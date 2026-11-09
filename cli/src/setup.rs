@@ -1,4 +1,4 @@
-//! `bctl setup`: write the managed extension folder, open the browser's extensions page, wait for the connection.
+//! `bvl setup`: write the managed extension folder, open the browser's extensions page, wait for the connection.
 use crate::embed::{self, EMBEDDED_EXT_VERSION, NO_EXT};
 use crate::{connect, ensure_proxy, load, recv, save, send, Config, DEFAULT_PORT};
 use anyhow::{bail, Result};
@@ -134,7 +134,7 @@ pub fn run(args: &[String]) -> Result<i32> {
             "✓ Already connected: {} (extension v{ver}). Nothing more to do.",
             e["browser"].as_str().unwrap_or("browser")
         );
-        println!("Next: `bctl skills install` to teach your agents about bctl.");
+        println!("Next: `bvl skills install` to teach your agents about bvl.");
         return Ok(0);
     }
 
@@ -169,7 +169,7 @@ pub fn run(args: &[String]) -> Result<i32> {
                         "✓ Connected: {} (extension v{ver})",
                         e["browser"].as_str().unwrap_or("browser")
                     );
-                    println!("\nNext: `bctl skills install` to teach your agents about bctl.");
+                    println!("\nNext: `bvl skills install` to teach your agents about bvl.");
                     return Ok(0);
                 }
                 if !said_update {
@@ -182,9 +182,9 @@ pub fn run(args: &[String]) -> Result<i32> {
             }
             std::thread::sleep(Duration::from_secs(1));
         }
-        println!("Timed out waiting for the extension; run `bctl status` after loading it.");
+        println!("Timed out waiting for the extension; run `bvl status` after loading it.");
         return Ok(1);
     }
-    println!("\nThen run `bctl status` to check. For agents: `bctl skills install`.");
+    println!("\nThen run `bvl status` to check. For agents: `bvl skills install`.");
     Ok(0)
 }

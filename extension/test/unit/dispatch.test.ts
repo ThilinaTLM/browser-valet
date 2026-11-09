@@ -47,21 +47,21 @@ describe('help generation', () => {
     const a = await run('help', 'click');
     const b = await run('click', '--help');
     expect(a.stdout).toBe(b.stdout);
-    expect(a.stdout).toMatch(/^Usage: bctl click /);
+    expect(a.stdout).toMatch(/^Usage: bvl click /);
     expect(a.stdout).toContain('--json');
     expect(a.stdout).toContain('--session <value>');
   });
 
   it('points agents at the core skill in the top-level help', async () => {
     expect((await run('help')).stdout).toContain(
-      'Start here (for AI agents): `bctl skills get core`',
+      'Start here (for AI agents): `bvl skills get core`',
     );
   });
 
   it('renders details and examples when a command has them', async () => {
     const r = await run('help', 'click');
     expect(r.stdout).toMatch(/\n\nClicks the element/);
-    expect(r.stdout).toContain('\nExamples:\n  bctl click @e3\n');
+    expect(r.stdout).toContain('\nExamples:\n  bvl click @e3\n');
     // Examples come after the flags, details before them.
     expect(r.stdout.indexOf('Clicks the element')).toBeLessThan(r.stdout.indexOf('Flags:'));
     expect(r.stdout.indexOf('Flags:')).toBeLessThan(r.stdout.indexOf('Examples:'));
@@ -69,7 +69,7 @@ describe('help generation', () => {
     expect((await run('help', 'highlight')).stdout).not.toContain('Examples:');
   });
 
-  it('every example starts with bctl and names its own command', async () => {
+  it('every example starts with bvl and names its own command', async () => {
     for (const name of [
       'open',
       'snapshot',
@@ -84,7 +84,7 @@ describe('help generation', () => {
       const out = (await run('help', name)).stdout;
       const ex = out.split('Examples:\n')[1]?.split('\n').filter(Boolean) ?? [];
       expect(ex.length, name).toBeGreaterThan(0);
-      for (const line of ex) expect(line.trim(), name).toMatch(/bctl /);
+      for (const line of ex) expect(line.trim(), name).toMatch(/bvl /);
     }
   });
 
@@ -100,12 +100,12 @@ describe('help generation', () => {
   it('fails on an unknown command (plain and --json)', async () => {
     const plain = await run('zzz');
     expect(plain).toMatchObject({ exitCode: 1, stdout: '' });
-    expect(plain.stderr).toBe('✗ Unknown command: zzz. Run `bctl help`.\n');
+    expect(plain.stderr).toBe('✗ Unknown command: zzz. Run `bvl help`.\n');
     const json = await run('zzz', '--json');
     expect(JSON.parse(json.stdout)).toEqual({
       success: false,
       data: null,
-      error: 'Unknown command: zzz. Run `bctl help`.',
+      error: 'Unknown command: zzz. Run `bvl help`.',
       code: 'unknown_command',
       type: 'unknown_command',
     });
@@ -126,21 +126,21 @@ describe('error codes and usage', () => {
 
   it('keeps the plain-text error unchanged by the code', async () => {
     const r = await run('wait', '--bogus');
-    expect(r.stderr).toMatch(/^✗ Unknown flag: --bogus\nUsage: bctl wait /);
+    expect(r.stderr).toMatch(/^✗ Unknown flag: --bogus\nUsage: bvl wait /);
   });
 
   it('missing arguments print the usage line and carry bad_args', async () => {
     const r = await run('get', 'attr', '--bogus', '--json');
     const j = JSON.parse(r.stdout) as { error: string; code: string };
     expect(j.code).toBe('bad_args');
-    expect(j.error).toContain('Usage: bctl get ');
+    expect(j.error).toContain('Usage: bvl get ');
   });
 
   it('does not repeat a usage line the message already has', () => {
     const cmd = { usage: 'find <kind> <value>' } as Command;
     expect(withUsage(cmd, new UserError('Usage: find …', 'bad_args'))).toBe('Usage: find …');
     expect(withUsage(cmd, new UserError('Missing x', 'bad_args'))).toBe(
-      'Missing x\nUsage: bctl find <kind> <value>',
+      'Missing x\nUsage: bvl find <kind> <value>',
     );
     expect(withUsage(cmd, new UserError('Element is disabled', 'disabled'))).toBe(
       'Element is disabled',

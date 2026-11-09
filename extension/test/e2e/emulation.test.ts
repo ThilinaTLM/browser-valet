@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   approveNextConsent,
-  bctl,
-  bctlJson,
+  bvl,
+  bvlJson,
   fixture,
   openUserTab,
   stopTabInPopup,
@@ -17,18 +17,18 @@ import {
 
 useBrowser();
 
-const evalNum = async (js: string) => Number((await bctl('eval', js)).stdout.trim());
+const evalNum = async (js: string) => Number((await bvl('eval', js)).stdout.trim());
 
 describe('pdf', () => {
   it('writes a PDF file (relative to the cwd), with --landscape and --background', async () => {
-    await bctl('open', fixture('/form.html'));
-    const r = await bctl('pdf', 'page.pdf');
+    await bvl('open', fixture('/form.html'));
+    const r = await bvl('pdf', 'page.pdf');
     expect(r).toMatchObject({ code: 0, stderr: '' });
     expect(r.stdout).toBe(`✓ PDF saved to ${join(workDir(), 'page.pdf')}\n`);
     const bytes = await readFile(join(workDir(), 'page.pdf'));
     expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
 
-    const l = await bctlJson('pdf', 'land.pdf', '--landscape', '--background');
+    const l = await bvlJson('pdf', 'land.pdf', '--landscape', '--background');
     expect(l).toMatchObject({ success: true, data: { path: join(workDir(), 'land.pdf') } });
     const land = await readFile(join(workDir(), 'land.pdf'));
     expect(land.subarray(0, 5).toString()).toBe('%PDF-');
@@ -38,7 +38,7 @@ describe('pdf', () => {
   });
 
   it('requires a path', async () => {
-    const r = await bctl('pdf');
+    const r = await bvl('pdf');
     expect(r.code).toBe(1);
     expect(r.stderr).toContain('Missing path');
   });
@@ -46,60 +46,60 @@ describe('pdf', () => {
 
 describe('set viewport / set media on an agent tab', () => {
   it('viewport applies, survives navigation, and resets', async () => {
-    await bctl('open', fixture('/form.html'));
+    await bvl('open', fixture('/form.html'));
     const natural = await evalNum('innerWidth');
 
-    const r = await bctl('set', 'viewport', '500', '400', '2');
+    const r = await bvl('set', 'viewport', '500', '400', '2');
     expect(r).toMatchObject({ code: 0, stdout: '✓ Done\n' });
     expect(await evalNum('innerWidth')).toBe(500);
     expect(await evalNum('innerHeight')).toBe(400);
     expect(await evalNum('devicePixelRatio')).toBe(2);
 
-    await bctl('open', fixture('/other.html'));
+    await bvl('open', fixture('/other.html'));
     expect(await evalNum('innerWidth')).toBe(500);
 
-    const j = await bctlJson('set', 'viewport', 'reset');
+    const j = await bvlJson('set', 'viewport', 'reset');
     expect(j).toMatchObject({ success: true });
     expect(await evalNum('innerWidth')).toBe(natural);
     expect(await evalNum('devicePixelRatio')).toBe(1);
   });
 
   it('media applies and resets', async () => {
-    await bctl('open', fixture('/form.html'));
+    await bvl('open', fixture('/form.html'));
     const dark = "matchMedia('(prefers-color-scheme: dark)').matches";
     const reduced = "matchMedia('(prefers-reduced-motion: reduce)').matches";
-    const baseDark = (await bctl('eval', dark)).stdout.trim(); // depends on the OS theme
-    expect((await bctl('set', 'media', 'light')).code).toBe(0);
-    expect((await bctl('eval', dark)).stdout.trim()).toBe('false');
+    const baseDark = (await bvl('eval', dark)).stdout.trim(); // depends on the OS theme
+    expect((await bvl('set', 'media', 'light')).code).toBe(0);
+    expect((await bvl('eval', dark)).stdout.trim()).toBe('false');
 
-    expect((await bctl('set', 'media', 'dark')).code).toBe(0);
-    expect((await bctl('eval', dark)).stdout.trim()).toBe('true');
-    expect((await bctl('eval', reduced)).stdout.trim()).toBe('false');
+    expect((await bvl('set', 'media', 'dark')).code).toBe(0);
+    expect((await bvl('eval', dark)).stdout.trim()).toBe('true');
+    expect((await bvl('eval', reduced)).stdout.trim()).toBe('false');
 
-    expect((await bctl('set', 'media', 'light', 'reduced-motion')).code).toBe(0);
-    expect((await bctl('eval', dark)).stdout.trim()).toBe('false');
-    expect((await bctl('eval', reduced)).stdout.trim()).toBe('true');
+    expect((await bvl('set', 'media', 'light', 'reduced-motion')).code).toBe(0);
+    expect((await bvl('eval', dark)).stdout.trim()).toBe('false');
+    expect((await bvl('eval', reduced)).stdout.trim()).toBe('true');
 
-    expect((await bctl('set', 'media', 'reset')).code).toBe(0);
-    expect((await bctl('eval', dark)).stdout.trim()).toBe(baseDark);
-    expect((await bctl('eval', reduced)).stdout.trim()).toBe('false');
+    expect((await bvl('set', 'media', 'reset')).code).toBe(0);
+    expect((await bvl('eval', dark)).stdout.trim()).toBe(baseDark);
+    expect((await bvl('eval', reduced)).stdout.trim()).toBe('false');
   });
 
   it('validates arguments and refuses unsupported subcommands', async () => {
-    await bctl('open', fixture('/form.html'));
-    expect((await bctl('set', 'viewport', '800')).stderr).toContain('Missing arguments');
-    expect((await bctl('set', 'viewport', 'a', 'b')).stderr).toContain('Width must be');
-    expect((await bctl('set', 'media', 'purple')).stderr).toContain('Unknown media option');
-    expect((await bctl('set', 'geo', '1', '2')).stderr).toContain('not supported');
-    expect((await bctl('set', 'bogus')).stderr).toContain('Unknown subcommand');
+    await bvl('open', fixture('/form.html'));
+    expect((await bvl('set', 'viewport', '800')).stderr).toContain('Missing arguments');
+    expect((await bvl('set', 'viewport', 'a', 'b')).stderr).toContain('Width must be');
+    expect((await bvl('set', 'media', 'purple')).stderr).toContain('Unknown media option');
+    expect((await bvl('set', 'geo', '1', '2')).stderr).toContain('not supported');
+    expect((await bvl('set', 'bogus')).stderr).toContain('Unknown subcommand');
   });
 
   it('viewport is cleared when the agent tab is closed', async () => {
-    await bctl('open', fixture('/form.html'));
-    await bctl('set', 'viewport', '420', '420');
+    await bvl('open', fixture('/form.html'));
+    await bvl('set', 'viewport', '420', '420');
     expect(await evalNum('innerWidth')).toBe(420);
-    await bctl('close');
-    await bctl('open', fixture('/form.html'));
+    await bvl('close');
+    await bvl('open', fixture('/form.html'));
     expect(await evalNum('innerWidth')).not.toBe(420);
   });
 });
@@ -109,11 +109,11 @@ describe('shared tab', () => {
     const page = await openUserTab(fixture('/other.html'));
     try {
       const tid = await tidForTitle('Fixture Other');
-      const pending = bctl('tab', tid);
+      const pending = bvl('tab', tid);
       await approveNextConsent('allow');
       expect((await pending).code).toBe(0);
 
-      const pdf = await bctl('pdf', 'shared.pdf');
+      const pdf = await bvl('pdf', 'shared.pdf');
       expect(pdf.code).toBe(0);
       expect((await readFile(join(workDir(), 'shared.pdf'))).subarray(0, 5).toString()).toBe(
         '%PDF-',
@@ -123,7 +123,7 @@ describe('shared tab', () => {
         ['set', 'viewport', '500', '400'],
         ['set', 'media', 'dark'],
       ]) {
-        const r = await bctl(...args);
+        const r = await bvl(...args);
         expect(r.code).toBe(1);
         expect(r.stderr).toContain("user's shared tab");
       }

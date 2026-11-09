@@ -25,7 +25,7 @@ export interface Connection {
   status: ConnStatus;
   /** Set once the CLI has successfully connected with the current secret. */
   paired: boolean;
-  /** Secret and port come from `pairing.json` (installed by `bctl setup`). */
+  /** Secret and port come from `pairing.json` (installed by `bvl setup`). */
   managed?: boolean;
   /** Effective port (from pairing.json when managed). */
   port?: number;
@@ -38,7 +38,7 @@ export interface TabMeta {
   label?: string;
   /** Present when the agent may control this tab: opened by the agent, or approved by the user. */
   control?: Control;
-  /** Session that opened the tab (agent-owned tabs are closed by `bctl close`). */
+  /** Session that opened the tab (agent-owned tabs are closed by `bvl close`). */
   owner?: string;
 }
 

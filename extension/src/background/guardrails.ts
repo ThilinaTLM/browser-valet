@@ -120,7 +120,7 @@ export function boundariesOn(a: Args, user: Guardrails = guardrails): boolean {
 }
 
 /**
- * Does this command print text that came from the page (as opposed to bctl's own status lines,
+ * Does this command print text that came from the page (as opposed to bvl's own status lines,
  * tab ids, counts or URLs)? Only that output is wrapped. Keep in step with the table in
  * automation.md.
  */

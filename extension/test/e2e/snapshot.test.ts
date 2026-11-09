@@ -2,7 +2,7 @@
 // --delta. Fixtures: form.html, other.html, clickable.html.
 
 import { describe, expect, it } from 'vitest';
-import { bctl, bctlJson, fixture, useBrowser } from './harness';
+import { bvl, bvlJson, fixture, useBrowser } from './harness';
 
 useBrowser();
 
@@ -16,56 +16,56 @@ const num = (ref: string) => Number(ref.slice(1));
 
 describe('stable refs', () => {
   it('keeps a ref for the same element across snapshots, -i and full', async () => {
-    await bctl('open', fixture('/form.html'));
-    const first = (await bctl('snapshot', '-i')).stdout;
+    await bvl('open', fixture('/form.html'));
+    const first = (await bvl('snapshot', '-i')).stdout;
     const inc = refOf(first, /button "Increment"/);
     const name = refOf(first, /textbox "Name"/);
 
     // New element before the others must not shift the existing refs.
-    await bctl(
+    await bvl(
       'eval',
       `document.body.insertAdjacentHTML('afterbegin', '<button id="late">Late</button>')`,
     );
-    const second = (await bctl('snapshot', '-i')).stdout;
+    const second = (await bvl('snapshot', '-i')).stdout;
     expect(refOf(second, /button "Increment"/)).toBe(inc);
     expect(refOf(second, /textbox "Name"/)).toBe(name);
     expect(num(refOf(second, /button "Late"/))).toBeGreaterThan(num(inc));
 
-    const full = (await bctl('snapshot')).stdout;
+    const full = (await bvl('snapshot')).stdout;
     expect(refOf(full, /button "Increment"/)).toBe(inc);
     expect(refOf(full, /button "Late"/)).toBe(refOf(second, /button "Late"/));
   });
 
   it('old refs fail after navigation and new refs continue upwards', async () => {
-    await bctl('open', fixture('/form.html'));
-    const before = (await bctl('snapshot', '-i')).stdout;
+    await bvl('open', fixture('/form.html'));
+    const before = (await bvl('snapshot', '-i')).stdout;
     const inc = refOf(before, /button "Increment"/);
     const highest = Math.max(...[...before.matchAll(/ref=e(\d+)/g)].map((m) => Number(m[1])));
 
-    await bctl('open', fixture('/other.html'));
-    const stale = await bctl('click', `@${inc}`);
+    await bvl('open', fixture('/other.html'));
+    const stale = await bvl('click', `@${inc}`);
     expect(stale.code).toBe(1);
     expect(stale.stderr).toContain(`Unknown ref: ${inc}`);
 
-    const after = (await bctl('snapshot', '-i')).stdout;
+    const after = (await bvl('snapshot', '-i')).stdout;
     expect(num(refOf(after, /button "Do nothing"/))).toBeGreaterThan(highest);
   });
 
   it('a reload also invalidates refs', async () => {
-    await bctl('open', fixture('/form.html'));
-    const snap = (await bctl('snapshot', '-i')).stdout;
+    await bvl('open', fixture('/form.html'));
+    const snap = (await bvl('snapshot', '-i')).stdout;
     const inc = refOf(snap, /button "Increment"/);
-    await bctl('reload');
-    expect((await bctl('click', `@${inc}`)).stderr).toContain('Unknown ref');
-    const again = (await bctl('snapshot', '-i')).stdout;
+    await bvl('reload');
+    expect((await bvl('click', `@${inc}`)).stderr).toContain('Unknown ref');
+    const again = (await bvl('snapshot', '-i')).stdout;
     expect(num(refOf(again, /button "Increment"/))).toBeGreaterThan(num(inc));
   });
 });
 
 describe('clickable elements', () => {
   it('gives div/span clickables a ref and a clickable suffix; -i lifts the text', async () => {
-    await bctl('open', fixture('/clickable.html'));
-    const snap = (await bctl('snapshot', '-i')).stdout;
+    await bvl('open', fixture('/clickable.html'));
+    const snap = (await bvl('snapshot', '-i')).stdout;
     expect(snap).toContain('generic "Clickable div" [ref=');
     expect(snap).toMatch(/"Clickable div" \[ref=e\d+\] clickable \[cursor:pointer, onclick\]/);
     expect(snap).toMatch(/"Pointer only inner span" \[ref=e\d+\] clickable \[cursor:pointer\]/);
@@ -84,7 +84,7 @@ describe('clickable elements', () => {
     expect(snap).toMatch(/link "Link in link" \[ref=e\d+\]\n/);
 
     // the full snapshot keeps the text as children and shares the refs
-    const full = (await bctl('snapshot')).stdout;
+    const full = (await bvl('snapshot')).stdout;
     const div = refOf(snap, /"Clickable div"/);
     expect(full).toContain(
       `generic [ref=${div}] clickable [cursor:pointer, onclick]\n  - StaticText "Clickable div"`,
@@ -92,18 +92,18 @@ describe('clickable elements', () => {
   });
 
   it('a clickable div can be clicked through its ref', async () => {
-    await bctl('open', fixture('/clickable.html'));
-    const div = refOf((await bctl('snapshot', '-i')).stdout, /"Clickable div"/);
-    expect((await bctl('click', `@${div}`)).code).toBe(0);
-    expect((await bctl('eval', 'window.hits.join(",")')).stdout).toContain('a');
+    await bvl('open', fixture('/clickable.html'));
+    const div = refOf((await bvl('snapshot', '-i')).stdout, /"Clickable div"/);
+    expect((await bvl('click', `@${div}`)).code).toBe(0);
+    expect((await bvl('eval', 'window.hits.join(",")')).stdout).toContain('a');
   });
 });
 
 describe('snapshot --json', () => {
   it('returns origin, title, refs, removedRefs and snapshot', async () => {
-    await bctl('open', fixture('/form.html'));
-    await bctl('snapshot', '-i');
-    const r = await bctlJson('snapshot', '-i');
+    await bvl('open', fixture('/form.html'));
+    await bvl('snapshot', '-i');
+    const r = await bvlJson('snapshot', '-i');
     const d = r.data as Record<string, unknown>;
     expect(Object.keys(d).sort()).toEqual(['origin', 'refs', 'removedRefs', 'snapshot', 'title']);
     expect(d.origin).toBe(fixture('/form.html'));
@@ -114,15 +114,15 @@ describe('snapshot --json', () => {
   });
 
   it('reports refs that left the page in removedRefs', async () => {
-    await bctl('open', fixture('/form.html'));
-    const snap = (await bctl('snapshot')).stdout;
+    await bvl('open', fixture('/form.html'));
+    const snap = (await bvl('snapshot')).stdout;
     const inc = refOf(snap, /button "Increment"/);
-    await bctl('eval', `document.getElementById('inc').remove()`);
-    const d = (await bctlJson('snapshot')).data as { removedRefs: string[]; refs: object };
+    await bvl('eval', `document.getElementById('inc').remove()`);
+    const d = (await bvlJson('snapshot')).data as { removedRefs: string[]; refs: object };
     expect(d.removedRefs).toContain(inc);
     expect(d.refs).not.toHaveProperty(inc);
-    expect((await bctl('snapshot')).stdout).not.toContain(`ref=${inc}`);
-    expect((await bctlJson('snapshot')).data).toMatchObject({ removedRefs: [] });
+    expect((await bvl('snapshot')).stdout).not.toContain(`ref=${inc}`);
+    expect((await bvlJson('snapshot')).data).toMatchObject({ removedRefs: [] });
   });
 });
 
@@ -131,13 +131,13 @@ describe('snapshot --delta', () => {
     Array.from({ length: n }, (_, i) => `<button>Row ${String(i)}</button>`).join('');
 
   async function openList(): Promise<void> {
-    await bctl('open', fixture('/form.html'));
-    await bctl(
+    await bvl('open', fixture('/form.html'));
+    await bvl(
       'eval',
       `document.body.insertAdjacentHTML('beforeend', '<div id="list">${rows(30)}</div>')`,
     );
   }
-  const delta = async (...a: string[]) => bctl('snapshot', '-i', '--delta', ...a);
+  const delta = async (...a: string[]) => bvl('snapshot', '-i', '--delta', ...a);
 
   it('first call prints the tree, then unchanged, then a delta with ref changes', async () => {
     await openList();
@@ -148,7 +148,7 @@ describe('snapshot --delta', () => {
     const same = await delta();
     expect(same.stdout.trim()).toMatch(/^unchanged \(revision \d+\)$/);
 
-    await bctl(
+    await bvl(
       'eval',
       `document.querySelectorAll('#list button')[10].insertAdjacentHTML('afterend','<button>Added</button>')`,
     );
@@ -167,7 +167,7 @@ describe('snapshot --delta', () => {
     expect(d.treeChange.lines).toEqual([`- button "Added" [ref=${d.changes[0]?.ref.slice(1)}]`]);
     expect(d.treeChange.startLine).toBeGreaterThan(10);
 
-    await bctl('eval', `document.querySelectorAll('#list button')[3].remove()`);
+    await bvl('eval', `document.querySelectorAll('#list button')[3].remove()`);
     const rm = JSON.parse((await delta()).stdout) as { changes: { op: string }[] };
     expect(rm.changes).toMatchObject([{ op: 'remove' }]);
   });
@@ -175,7 +175,7 @@ describe('snapshot --delta', () => {
   it('--json shapes: unchanged and delta carry origin and a snapshot object', async () => {
     await openList();
     await delta();
-    const un = (await bctlJson('snapshot', '-i', '--delta')).data as {
+    const un = (await bvlJson('snapshot', '-i', '--delta')).data as {
       origin: string;
       snapshot: { kind: string; baseRevision: number; revision: number };
     };
@@ -183,8 +183,8 @@ describe('snapshot --delta', () => {
     expect(un.snapshot).toMatchObject({ kind: 'unchanged' });
     expect(un.snapshot.revision).toBe(un.snapshot.baseRevision + 1);
 
-    await bctl('eval', `document.querySelectorAll('#list button')[0].textContent = 'Renamed'`);
-    const d = (await bctlJson('snapshot', '-i', '--delta')).data as {
+    await bvl('eval', `document.querySelectorAll('#list button')[0].textContent = 'Renamed'`);
+    const d = (await bvlJson('snapshot', '-i', '--delta')).data as {
       snapshot: { kind: string; changes: object[] };
     };
     expect(d.snapshot.kind).toBe('delta');
@@ -194,26 +194,26 @@ describe('snapshot --delta', () => {
   it('--full returns the tree and resets the baseline; option sets have separate baselines', async () => {
     await openList();
     await delta();
-    const full = await bctl('snapshot', '-i', '--delta', '--full');
+    const full = await bvl('snapshot', '-i', '--delta', '--full');
     expect(full.stdout).toContain('button "Row 0"');
     expect(full.stdout).not.toContain('unchanged');
-    const j = (await bctlJson('snapshot', '-i', '--full')).data as {
+    const j = (await bvlJson('snapshot', '-i', '--full')).data as {
       snapshot: { kind: string; revision: number; tree: string; refs: object };
     };
     expect(j.snapshot.kind).toBe('full');
     expect(j.snapshot.tree).toContain('Row 0');
     expect(Object.keys(j.snapshot.refs).length).toBeGreaterThan(30);
     // a different option set has no baseline yet
-    expect((await bctl('snapshot', '--delta')).stdout).toContain('heading "Fixture Form"');
-    expect((await bctl('snapshot', '--delta')).stdout).toContain('unchanged');
+    expect((await bvl('snapshot', '--delta')).stdout).toContain('heading "Fixture Form"');
+    expect((await bvl('snapshot', '--delta')).stdout).toContain('unchanged');
   });
 
   it('a URL or document change returns the full tree', async () => {
     await openList();
     await delta();
-    await bctl('eval', `location.hash = '#moved'`);
+    await bvl('eval', `location.hash = '#moved'`);
     expect((await delta()).stdout).toContain('button "Row 29"');
-    await bctl('open', fixture('/other.html'));
+    await bvl('open', fixture('/other.html'));
     const after = (await delta()).stdout;
     expect(after).toContain('button "Do nothing"');
     expect(after).not.toContain('"kind"');
@@ -222,7 +222,7 @@ describe('snapshot --delta', () => {
   it('plain snapshots do not disturb the baseline', async () => {
     await openList();
     await delta();
-    await bctl('snapshot', '-i');
+    await bvl('snapshot', '-i');
     expect((await delta()).stdout).toMatch(/^unchanged/);
   });
 });

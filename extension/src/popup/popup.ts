@@ -130,7 +130,7 @@ async function render(): Promise<void> {
   }
 
   // 2. Pairing / connection help.
-  const pairCmd = `bctl pair ${settings.secret ?? ''}${
+  const pairCmd = `bvl pair ${settings.secret ?? ''}${
     settings.port && settings.port !== 47823 ? ` --port ${settings.port}` : ''
   }`;
   const pairBox = `<div class="code"><span>${esc(pairCmd)}</span>
@@ -140,20 +140,20 @@ async function render(): Promise<void> {
     if (status === 'auth-failed') {
       parts.push(`<section class="card alert"><h2>Pairing mismatch</h2>
         <p>The pairing file is out of date. Run this in a terminal:</p>
-        <div class="code"><span>bctl setup</span>
-        <button data-action="copy" data-text="bctl setup">Copy</button></div></section>`);
+        <div class="code"><span>bvl setup</span>
+        <button data-action="copy" data-text="bvl setup">Copy</button></div></section>`);
     } else if (status !== 'connected') {
-      parts.push(`<section class="card"><h2>Paired automatically by bctl</h2>
-        <p class="small muted">Run any <code>bctl</code> command; this connects on its own.</p></section>`);
+      parts.push(`<section class="card"><h2>Paired automatically by bvl</h2>
+        <p class="small muted">Run any <code>bvl</code> command; this connects on its own.</p></section>`);
     }
   } else if (status === 'auth-failed') {
     parts.push(`<section class="card alert"><h2>Pairing mismatch</h2>
       <p>The CLI is using a different pairing code. Run this in a terminal:</p>${pairBox}</section>`);
   } else if (!state.conn.paired && status !== 'off') {
     parts.push(`<section class="card"><h2>Connect the CLI</h2><ol>
-      <li>Easiest: install via <code>bctl setup</code>, which pairs automatically.</li>
+      <li>Easiest: install via <code>bvl setup</code>, which pairs automatically.</li>
       <li>Or pair manually. Run in a terminal:${pairBox}</li>
-      <li>Run <code>bctl status</code>. This turns green when connected.</li></ol></section>`);
+      <li>Run <code>bvl status</code>. This turns green when connected.</li></ol></section>`);
   }
 
   // 3. The tab the user is looking at.
@@ -237,7 +237,7 @@ async function render(): Promise<void> {
         <button data-action="port"${managed ? ' disabled' : ''}>Save</button></div>
       ${
         managed
-          ? '<p class="small muted" style="margin-top:8px">The port comes from bctl (re-run <code>bctl setup</code> to change it).</p>'
+          ? '<p class="small muted" style="margin-top:8px">The port comes from bvl (re-run <code>bvl setup</code> to change it).</p>'
           : `<p class="small muted" style="margin-top:8px">Pairing command:</p>${pairBox}
       <div class="actions"><button class="danger" data-action="repair">New pairing code</button></div>`
       }
