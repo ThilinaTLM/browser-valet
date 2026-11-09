@@ -10,6 +10,7 @@ Message formats: [protocol.md](protocol.md).
 - **MUST** keep the managed folder path (`<config>/browser-bridge/extension`) and the `config.json` / `pairing.json` keys (`secret`, `port`) stable. *Why:* the user picked that folder once in Load unpacked. Moving it or renaming keys strands every install.
 - **MUST** auto-update only managed extensions, and only when the binary embeds an extension of a different version. *Why:* a dev build loaded from `extension/dist` must never be overwritten. `bctl status` only reports its mismatch.
 - **Default:** new fields in the extension's `State` must have a default in `initial()`. *Why:* stored and handed-off state is spread over `initial()`, so state from an older version lacks the field.
+- **Default:** the user's guardrail policy (`guardrails` in `chrome.storage.local`: `maxOutput`, `contentBoundaries`, `allowedDomains`, `confirm`) is read by `loadGuardrails` through `sanitize`, so a missing or malformed key falls back to `DEFAULT_GUARDRAILS` (everything off). It is not part of `State`, so it is untouched by handoff and by revoke. *Why:* it is the user's setting, not session state; turning the switch off must not erase it.
 - **Default:** one extension connection at a time; the newest authenticated one replaces the old one.
 
 ## Lifetimes
@@ -20,7 +21,7 @@ Message formats: [protocol.md](protocol.md).
 | Proxy | started detached by the CLI on demand. Exits after `BCTL_IDLE_TIMEOUT` (default 600 s, `0` = never) with no requests in flight. Pings don't count as activity. | nothing; it holds no durable state |
 | Extension service worker | killed by Chrome when idle. The 20 s keep-alive ping and a 30 s alarm limit this. | `chrome.storage.session` |
 | `chrome.storage.session` `state` (tabs, grants, sessions, refs, iframe sessions, frame scope, approvals, log) | until the extension is reloaded or disabled, or the browser restarts | SW and proxy restarts; self-update (via handoff) |
-| `chrome.storage.local` (`secret`, `port`, `enabled`, `paired`, `handoff`, `updateTried`) | persistent | everything except uninstall |
+| `chrome.storage.local` (`secret`, `port`, `enabled`, `paired`, `handoff`, `updateTried`, `guardrails`) | persistent | everything except uninstall |
 | In memory (debugger attachments, console/error and network buffers, approval waiters, in-flight requests, held modifier keys) | SW lifetime | nothing |
 
 ## Persisted files (CLI side)

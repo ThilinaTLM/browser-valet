@@ -3,6 +3,7 @@
 import * as cdp from '../cdp';
 import { type Command, type Ctx } from '../command';
 import { call, evaluate, type Handle, resolve, UserError } from '../dom';
+import { assertNavigable } from '../guardrails';
 import { heldModifiers, prime, sendInput } from '../input';
 import { meta, state } from '../state';
 import { isControlled, sleep } from '../tabs';
@@ -286,6 +287,11 @@ const pushstate: Command = {
   async run(ctx, a) {
     const input = a.need(0, 'url');
     const id = await ctx.tab();
+    try {
+      assertNavigable(ctx, new URL(input, (await chrome.tabs.get(id)).url).href);
+    } catch (e) {
+      if (e instanceof UserError) throw e; // an unparsable URL is reported by the page below
+    }
     const r = await evaluate(
       id,
       `((input) => {

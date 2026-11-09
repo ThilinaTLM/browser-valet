@@ -18,7 +18,7 @@ const args = (flags: Record<string, string | true> = {}) =>
 describe('policy storage', () => {
   it('defaults when nothing is stored, and coerces bad values', async () => {
     await g.loadGuardrails();
-    expect(g.guardrails).toEqual({ maxOutput: 0, contentBoundaries: false });
+    expect(g.guardrails).toEqual({ maxOutput: 0, contentBoundaries: false, allowedDomains: [] });
     mock.local.data.guardrails = { maxOutput: 'lots' };
     await g.loadGuardrails();
     expect(g.guardrails.maxOutput).toBe(0);
@@ -93,10 +93,10 @@ describe('content boundaries', () => {
   });
 
   it('is off by default; on by the flag or the user setting', () => {
-    expect(g.boundariesOn(pos(), { maxOutput: 0, contentBoundaries: false })).toBe(false);
+    expect(g.boundariesOn(pos(), { ...g.DEFAULT_GUARDRAILS })).toBe(false);
     const flag = new Args([], new Map([['content-boundaries', true as const]]));
-    expect(g.boundariesOn(flag, { maxOutput: 0, contentBoundaries: false })).toBe(true);
-    expect(g.boundariesOn(pos(), { maxOutput: 0, contentBoundaries: true })).toBe(true);
+    expect(g.boundariesOn(flag, { ...g.DEFAULT_GUARDRAILS })).toBe(true);
+    expect(g.boundariesOn(pos(), { ...g.DEFAULT_GUARDRAILS, contentBoundaries: true })).toBe(true);
   });
 
   it('classifies page-derived commands only', () => {
@@ -148,5 +148,113 @@ describe('content boundaries', () => {
     expect(b.boundary).toBeUndefined();
     const c = await g.applyBoundaries('eval', pos('1'), text('1'), false, undefined);
     expect(c.boundary?.origin).toBe('unknown');
+  });
+});
+
+describe('allowed domains', () => {
+  const ok = (patterns: string[], url: string) => g.urlAllowed(patterns, url);
+
+  it('example.com matches the domain and its subdomains, not look-alikes', () => {
+    const p = ['example.com'];
+    expect(ok(p, 'https://example.com/')).toBe(true);
+    expect(ok(p, 'https://www.example.com/a?b=1')).toBe(true);
+    expect(ok(p, 'http://a.b.example.com:8080/')).toBe(true);
+    expect(ok(p, 'https://evilexample.com/')).toBe(false);
+    expect(ok(p, 'https://example.com.evil.test/')).toBe(false);
+    expect(ok(p, 'https://evil.test/example.com')).toBe(false);
+    expect(ok(p, 'https://user@evil.test:80@example.com/')).toBe(true); // host is example.com
+    expect(ok(p, 'https://example.com@evil.test/')).toBe(false);
+  });
+
+  it('*.example.com matches subdomains only', () => {
+    const p = ['*.example.com'];
+    expect(ok(p, 'https://www.example.com/')).toBe(true);
+    expect(ok(p, 'https://example.com/')).toBe(false);
+  });
+
+  it('host:port pins the host and the port (default ports count)', () => {
+    expect(ok(['localhost:3000'], 'http://localhost:3000/x')).toBe(true);
+    expect(ok(['localhost:3000'], 'http://localhost:3001/')).toBe(false);
+    expect(ok(['localhost:3000'], 'http://localhost/')).toBe(false);
+    expect(ok(['localhost:3000'], 'http://sub.localhost:3000/')).toBe(false);
+    expect(ok(['example.com:443'], 'https://example.com/')).toBe(true);
+    expect(ok(['example.com:443'], 'http://example.com/')).toBe(false);
+    expect(ok(['[::1]:3000'], 'http://[::1]:3000/')).toBe(true);
+    expect(ok(['localhost'], 'http://localhost:9999/')).toBe(true);
+  });
+
+  it('is case-insensitive and ignores a trailing dot in the host', () => {
+    expect(ok(['example.com'], 'https://EXAMPLE.com./')).toBe(true);
+    expect(g.normalizePattern(' HTTPS://Example.COM/path ')).toBe('example.com');
+  });
+
+  it('an empty list is unrestricted; otherwise only http(s) and about:blank are reachable', () => {
+    expect(ok([], 'https://anything.test/')).toBe(true);
+    expect(ok([], 'file:///etc/passwd')).toBe(true);
+    expect(ok(['example.com'], 'about:blank')).toBe(true);
+    expect(ok(['example.com'], 'file:///etc/passwd')).toBe(false);
+    expect(ok(['example.com'], 'data:text/html,hi')).toBe(false);
+    expect(ok(['example.com'], 'javascript:alert(1)')).toBe(false);
+    expect(ok(['example.com'], 'not a url')).toBe(false);
+  });
+
+  it('rejects malformed patterns', () => {
+    for (const bad of ['', '*', '*.', 'a b', 'exa$mple.com', 'example.com:abc', '*example.com']) {
+      expect(g.normalizePattern(bad), bad).toBeUndefined();
+    }
+    expect(() => g.parseDomainList('example.com,*')).toThrow(/Invalid --allowed-domains/);
+    expect(() => g.parseDomainList(' ')).toThrow(/at least one/);
+    expect(g.parseDomainList('a.com, *.b.com localhost:3000')).toEqual([
+      'a.com',
+      '*.b.com',
+      'localhost:3000',
+    ]);
+    expect(g.parseDomainList(undefined)).toBeUndefined();
+  });
+
+  it('agent flags can only narrow the user policy', () => {
+    const user = ['example.com'];
+    // user restricts, agent narrows further
+    expect(g.blockedBy('https://example.com/', ['example.com'], user)).toBeUndefined();
+    expect(g.blockedBy('https://a.example.com/', ['b.example.com'], user)).toBe('agent');
+    // agent tries to widen: still blocked by the user
+    expect(g.blockedBy('https://evil.test/', ['evil.test'], user)).toBe('user');
+    expect(g.blockedBy('https://evil.test/', ['evil.test', 'example.com'], user)).toBe('user');
+    // user unrestricted: the agent flag is the only restriction
+    expect(g.blockedBy('https://evil.test/', ['example.com'], [])).toBe('agent');
+    expect(g.blockedBy('https://evil.test/', undefined, [])).toBeUndefined();
+  });
+
+  it('stores validated patterns and refuses bad input', async () => {
+    await g.updateGuardrails({ allowedDomains: ['Example.com', 'example.com', 'localhost:3000'] });
+    expect(g.guardrails.allowedDomains).toEqual(['example.com', 'localhost:3000']);
+    expect((mock.local.data.guardrails as { allowedDomains: string[] }).allowedDomains).toEqual([
+      'example.com',
+      'localhost:3000',
+    ]);
+    await expect(g.updateGuardrails({ allowedDomains: ['exmple$.com'] })).rejects.toThrow(
+      /Invalid domain pattern/,
+    );
+    expect(g.guardrails.allowedDomains).toEqual(['example.com', 'localhost:3000']);
+  });
+
+  it('assertNavigable throws domain_blocked naming the policy', async () => {
+    await g.updateGuardrails({ allowedDomains: ['example.com'] });
+    const ctx = { agentAllowedDomains: undefined } as import('../../src/background/command').Ctx;
+    expect(() => {
+      g.assertNavigable(ctx, 'https://www.example.com/');
+    }).not.toThrow();
+    try {
+      g.assertNavigable(ctx, 'https://evil.test/x');
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toMatchObject({ code: 'domain_blocked' });
+      expect((e as Error).message).toContain("user's allowed-domains policy");
+      expect((e as Error).message).toContain('Allowed: example.com');
+    }
+    ctx.agentAllowedDomains = ['a.example.com'];
+    expect(() => {
+      g.assertNavigable(ctx, 'https://b.example.com/');
+    }).toThrow(/your --allowed-domains/);
   });
 });

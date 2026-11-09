@@ -56,7 +56,12 @@ async function render(): Promise<void> {
   const { state } = await chrome.storage.session.get<{ state?: State }>('state');
   const settings = await chrome.storage.local.get<Partial<Settings>>(['secret', 'port', 'enabled']);
   const stored = await chrome.storage.local.get<{ guardrails?: Partial<Guardrails> }>('guardrails');
-  const policy: Guardrails = { maxOutput: 0, contentBoundaries: false, ...stored.guardrails };
+  const policy: Guardrails = {
+    maxOutput: 0,
+    contentBoundaries: false,
+    allowedDomains: [],
+    ...stored.guardrails,
+  };
   // Do not rebuild the page under a field the user is typing in.
   if (document.activeElement?.closest('#guardrails')) return;
   if (!state) {
@@ -174,6 +179,8 @@ async function render(): Promise<void> {
   // 6. Guardrails: the user's policy for agents (enforced by the worker).
   if (!isWindow) {
     parts.push(`<details id="guardrails"${guardrailsOpen ? ' open' : ''}><summary>Guardrails</summary>
+      <label class="field"><span>Allowed domains for agent navigation (one per line; empty = any)</span>
+        <textarea id="g-domains" rows="3" spellcheck="false" placeholder="example.com&#10;*.example.com&#10;localhost:3000">${esc(policy.allowedDomains.join('\n'))}</textarea></label>
       <label class="check"><input id="g-boundaries" type="checkbox"${policy.contentBoundaries ? ' checked' : ''} />
         Always mark page content in output</label>
       <label class="field"><span>Default output limit (characters, 0 = none)</span>
@@ -237,10 +244,15 @@ app.addEventListener('click', (ev) => {
         type: 'guardrails',
         guardrails: {
           maxOutput: Number.isInteger(max) && max > 0 ? max : 0,
+          allowedDomains: (document.getElementById('g-domains') as HTMLTextAreaElement).value
+            .split(/[\s,]+/)
+            .filter(Boolean),
           contentBoundaries: (document.getElementById('g-boundaries') as HTMLInputElement).checked,
         },
-      }).then(() => {
-        el.textContent = 'Saved';
+      }).then((res) => {
+        const r = res as { ok: boolean; error?: string };
+        el.textContent = r.ok ? 'Saved' : 'Not saved';
+        if (!r.ok) alert(r.error?.replace(/^Error: /, '') ?? 'Could not save');
         setTimeout(() => (el.textContent = 'Save'), 1500);
       });
       break;

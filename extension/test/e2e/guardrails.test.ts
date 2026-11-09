@@ -117,3 +117,79 @@ describe('--content-boundaries', () => {
     expect(m?.[1]).not.toBe('00000000000000000000000000000000');
   });
 });
+
+describe('allowed domains (commands layer)', () => {
+  const other = () => fixture('/form.html').replace('127.0.0.1', 'localhost');
+  const blocked = async (...args: string[]) => {
+    const r = await bctl(...args, '--json');
+    return {
+      ...(JSON.parse(r.stdout) as { success: boolean; error: string; code?: string }),
+      exit: r.code,
+      stderr: r.stderr,
+    };
+  };
+
+  it('is unrestricted by default', async () => {
+    expect((await bctl('open', fixture('/prose.html'))).code).toBe(0);
+  });
+
+  it('the popup policy blocks open, tab new and read <url> with code domain_blocked', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    expect((await bctl('open', fixture('/prose.html'))).code).toBe(0);
+    for (const args of [
+      ['open', other()],
+      ['tab', 'new', other()],
+      ['read', other()],
+    ]) {
+      const r = await blocked(...args);
+      expect(r, args.join(' ')).toMatchObject({ success: false, code: 'domain_blocked', exit: 1 });
+      expect(r.error).toContain("the user's allowed-domains policy");
+    }
+    // The blocked attempt did not navigate anything.
+    expect((await bctl('get', 'title')).stdout).toBe('Prose\n');
+  });
+
+  it('click --new-tab to a blocked link and pushstate are checked too', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    await bctl('open', fixture('/prose.html'));
+    await bctl(
+      'eval',
+      `document.body.insertAdjacentHTML('beforeend', '<a id="out" href="${other()}">out</a>')`,
+    );
+    expect(await blocked('click', '#out', '--new-tab')).toMatchObject({ code: 'domain_blocked' });
+    // The page's own origin is fine for pushstate...
+    expect((await bctl('open', fixture('/spa.html'))).code).toBe(0);
+    expect((await bctl('pushstate', '/next')).code).toBe(0);
+    // ...until the policy no longer covers it.
+    await setGuardrails({ allowedDomains: ['example.com'] });
+    expect(await blocked('pushstate', '/again')).toMatchObject({ code: 'domain_blocked' });
+  });
+
+  it('--allowed-domains narrows; it can never widen the popup policy', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    expect(
+      await blocked('open', fixture('/prose.html'), '--allowed-domains', 'example.com'),
+    ).toMatchObject({
+      code: 'domain_blocked',
+    });
+    const widen = await blocked('open', other(), '--allowed-domains', 'localhost,127.0.0.1');
+    expect(widen).toMatchObject({ code: 'domain_blocked' });
+    expect(widen.error).toContain("the user's");
+    expect(
+      (await bctl('open', fixture('/prose.html'), '--allowed-domains', '127.0.0.1')).code,
+    ).toBe(0);
+  });
+
+  it('the flag works on its own when the user set no policy, and rejects bad patterns', async () => {
+    expect(await blocked('open', other(), '--allowed-domains', '127.0.0.1')).toMatchObject({
+      code: 'domain_blocked',
+    });
+    expect((await blocked('open', other(), '--allowed-domains', 'a b$')).code).toBe('bad_args');
+  });
+
+  it('rejects a mistyped pattern in the popup instead of dropping it', async () => {
+    await expect(setGuardrails({ allowedDomains: ['ok.com', 'bad$host'] })).rejects.toThrow(
+      /Invalid domain pattern/,
+    );
+  });
+});

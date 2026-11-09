@@ -26,6 +26,7 @@ To add a colour, add an input for both themes, or derive one from existing input
 ## Design
 
 - Sections: connection status and the on/off switch; pairing (only for manual pairing); permission requests (Allow/Deny); This tab (share/stop); Agent tabs (Stop / Stop all); Recent activity.
+- **Guardrails** (collapsed `<details>`, hidden in the approval window): default output limit, "always mark page content", allowed domains (textarea, one pattern per line) and, for action confirmation, category checkboxes. One Save button sends a `guardrails` message; the worker validates it (a bad domain pattern is rejected and shown). The popup holds no policy logic ([security.md](security.md#guardrails)).
 - When a permission request arrives, the worker opens the popup, or a small window if Chrome isn't focused.
 - Badge: `AI` on controlled tabs and `!` while an approval is pending. Its colours are hex literals in `tabs.ts` (`chrome.action` takes no CSS variables). Keep them close to `--primary` / `--warning`.
 

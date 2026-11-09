@@ -1,6 +1,7 @@
 import { type Command, type Ctx, type Result } from '../command';
 import * as cdp from '../cdp';
 import { evaluate, UserError } from '../dom';
+import { assertNavigable } from '../guardrails';
 import { findTab, meta, save, session, state } from '../state';
 import { grant, isControlled, requestControl, revoke, sleep, waitForLoad } from '../tabs';
 
@@ -148,6 +149,7 @@ async function newTab(ctx: Ctx, url?: string): Promise<number> {
     .catch(() => undefined);
   // Load the first URL through the tabs API: the first navigation out of a fresh tab swaps
   // renderer processes, which would detach a debugger attached to the blank page.
+  if (url) assertNavigable(ctx, normalizeUrl(url));
   const tab = await chrome.tabs.create({
     url: url ? normalizeUrl(url) : 'about:blank',
     active: false,
@@ -215,7 +217,10 @@ export const navigationCommands: Command[] = [
       // A tab the user shared is theirs: don't navigate it somewhere else, open our own instead.
       const shared = id !== undefined && state.tabs[id]?.control === 'user';
       if (id === undefined || (shared && url)) id = await newTab(ctx, url);
-      else if (url) await navigate(ctx, id, normalizeUrl(url));
+      else if (url) {
+        assertNavigable(ctx, normalizeUrl(url));
+        await navigate(ctx, id, normalizeUrl(url));
+      }
       ctx.setTab(id);
       save();
       return pageResult(id);

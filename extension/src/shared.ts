@@ -119,6 +119,8 @@ export interface Guardrails {
   maxOutput: number;
   /** Wrap page-derived output in nonce markers on every command ("always"). */
   contentBoundaries: boolean;
+  /** Domain patterns agent navigation may reach; empty = unrestricted. See guardrails.ts. */
+  allowedDomains: string[];
 }
 
 /** Messages from the popup to the background worker. */

@@ -16,6 +16,7 @@ export type ErrorCode =
   | 'tab_gone'
   | 'not_shared'
   | 'denied'
+  | 'domain_blocked'
   | 'revoked';
 
 /** A failure with a message written for the agent (shown without a stack, no "Error:" prefix). */

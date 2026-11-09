@@ -21,7 +21,7 @@ import { navigationCommands } from './commands/navigation';
 import { readCommands } from './commands/read';
 import { networkCommands } from './commands/network';
 import { type ErrorCode, UserError } from './errors';
-import { applyBoundaries, effectiveMaxOutput, limitOutput } from './guardrails';
+import { applyBoundaries, effectiveMaxOutput, limitOutput, parseDomainList } from './guardrails';
 import { log, meta } from './state';
 
 const DEFAULT_TIMEOUT = 25_000;
@@ -122,7 +122,7 @@ export function withUsage(cmd: Command, e: UserError): string {
 
 /** Split argv into the command name and the rest (global flags may precede the command). */
 function splitCommand(argv: string[]): { name: string | undefined; rest: string[] } {
-  const withValue = new Set(['--session', '--timeout', '--max-output']);
+  const withValue = new Set(['--session', '--timeout', '--max-output', '--allowed-domains']);
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i] ?? '';
     if (withValue.has(tok)) {
@@ -252,6 +252,7 @@ export async function execute(
     const session = args.str('session') ?? req.session;
     ctx = new Ctx(req, session, json, args.num('timeout') ?? DEFAULT_TIMEOUT, signal, progress);
     const max = effectiveMaxOutput(args);
+    ctx.agentAllowedDomains = parseDomainList(args.str('allowed-domains'));
     const limited = limitOutput((await raceDialog(ctx, cmd.run(ctx, args))) ?? {}, max);
     const { result, boundary } = await applyBoundaries(cmd.name, args, limited, json, ctx.tabId);
     response = {

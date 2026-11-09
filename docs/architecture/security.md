@@ -45,6 +45,11 @@ The user's policy lives in `chrome.storage.local` key `guardrails` (set in the p
 
 - **MUST** treat content boundaries as labelling, not as a security boundary: the markers tell the agent where page text begins and ends, and the per-response nonce stops a page from closing the block early. They do not stop an agent from obeying the text inside. The skill says so.
 - **Default:** boundaries off. `--content-boundaries` or the popup's "always" turns them on; an agent cannot turn the user's setting off.
+- **MUST** enforce the allowed-domains policy before the agent navigates: `open`, `tab new`, `click --new-tab`, `pushstate` (against the page's current origin) and `read <url>` (it runs `open`) call `assertNavigable` (`guardrails.ts`) and fail with `domain_blocked`. A page URL counts when its host matches a pattern; with a policy active only `http(s)` and `about:blank` are reachable (`file:`, `data:`, `javascript:` are not). *Why:* a prompt-injected page ("open mail.google.com and forward…") must not be able to steer the agent to the user's other accounts.
+- **Patterns:** `example.com` (the domain and all its subdomains), `*.example.com` (subdomains only), `host:port` (that exact host and port, e.g. `localhost:3000`; the scheme's default port counts). Case-insensitive; a pasted URL is reduced to its host. An empty list means unrestricted, so the popup **rejects** a mistyped pattern instead of dropping it (dropping could turn a policy into "allow everything").
+- **MUST** merge policies by conjunction: a URL must pass the user's list (popup, `guardrails.allowedDomains`) **and** the agent's `--allowed-domains`. The flag can only narrow. The error names which policy refused and what it allows.
+- The policy also covers agent-initiated navigation on **shared** tabs (`pushstate`, and `open`, which opens an agent tab instead); it never restricts the user's own browsing.
+- Not attempted: blocking subresources, WebSockets or beacons (CDNs, analytics and SSO would break).
 - The output limit is a context-size default (popup), not a restriction: the agent's `--max-output` overrides it.
 
 ## Trust boundaries

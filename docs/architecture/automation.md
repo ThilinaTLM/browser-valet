@@ -44,6 +44,7 @@ How commands are parsed and run, and how CDP is used to read and drive pages. Co
     | `timeout` | waits and the user not answering a consent prompt |
     | `dialog_open` | a confirm/prompt dialog blocks the tab |
     | `no_tab`, `tab_gone`, `not_shared`, `denied`, `revoked` | tabs and consent |
+    | `domain_blocked` | navigation refused by the user's or the agent's allowed-domains policy |
     | `not_connected`, `not_paired` | extension/proxy unreachable, CLI not paired (produced by the CLI and proxy, see [protocol.md](protocol.md)) |
 
     Errors that come straight from the page or Chrome (a JS exception in `eval`, a CDP failure, "Element is not editable") have no code.

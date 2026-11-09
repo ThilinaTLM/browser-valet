@@ -6,10 +6,14 @@
 
 import type { Guardrails } from '../shared';
 import { UserError } from './errors';
-import type { Args, Result } from './command';
+import type { Args, Ctx, Result } from './command';
 import { truncate } from './read-format';
 
-export const DEFAULT_GUARDRAILS: Guardrails = { maxOutput: 0, contentBoundaries: false };
+export const DEFAULT_GUARDRAILS: Guardrails = {
+  maxOutput: 0,
+  contentBoundaries: false,
+  allowedDomains: [],
+};
 
 /** The current user policy (in memory; mirrored to `chrome.storage.local` key `guardrails`). */
 export let guardrails: Guardrails = { ...DEFAULT_GUARDRAILS };
@@ -21,6 +25,7 @@ export function sanitize(raw: unknown): Guardrails {
   return {
     maxOutput: Number.isInteger(max) && max > 0 ? max : DEFAULT_GUARDRAILS.maxOutput,
     contentBoundaries: r.contentBoundaries === true,
+    allowedDomains: cleanPatterns(r.allowedDomains),
   };
 }
 
@@ -32,6 +37,14 @@ export async function loadGuardrails(): Promise<void> {
 }
 
 export async function updateGuardrails(patch: Partial<Guardrails>): Promise<void> {
+  // A mistyped pattern must not silently shrink the list (an empty list means "no restriction").
+  for (const raw of patch.allowedDomains ?? []) {
+    if (!normalizePattern(raw)) {
+      throw new Error(
+        `Invalid domain pattern "${raw}". Use example.com, *.example.com or host:port.`,
+      );
+    }
+  }
   guardrails = sanitize({ ...guardrails, ...patch });
   await chrome.storage.local.set({ guardrails });
 }
@@ -176,4 +189,132 @@ export async function applyBoundaries(
   return json
     ? { result, boundary }
     : { result: { ...result, text: wrapContent(result.text, boundary) }, boundary };
+}
+
+// ---------------------------------------------------------------------------
+// Allowed domains
+// ---------------------------------------------------------------------------
+
+const MAX_PATTERNS = 100;
+const PATTERN = /^(\*\.)?(\[[0-9a-f:.]+\]|[a-z0-9_-]+(\.[a-z0-9_-]+)*)(:\d{1,5})?$/;
+
+/**
+ * A canonical pattern, or undefined if `raw` is not one. Accepted: `example.com` (the domain and
+ * its subdomains), `*.example.com` (subdomains only), `host:port` (that host only, that port only;
+ * e.g. `localhost:3000`). A scheme and path are dropped, so a pasted URL works.
+ */
+export function normalizePattern(raw: string): string | undefined {
+  let p = raw.trim().toLowerCase();
+  p = p.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/\/.*$/, '');
+  p = p.replace(/\.$/, '');
+  return PATTERN.test(p) ? p : undefined;
+}
+
+function cleanPatterns(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(/[\s,]+/) : [];
+  const out = new Set<string>();
+  for (const x of list) {
+    const p = typeof x === 'string' ? normalizePattern(x) : undefined;
+    if (p) out.add(p);
+  }
+  return [...out].slice(0, MAX_PATTERNS);
+}
+
+/** Patterns from `--allowed-domains a.com,*.b.com`; undefined when the flag is absent. */
+export function parseDomainList(flag: string | undefined): string[] | undefined {
+  if (flag === undefined) return undefined;
+  const parts = flag.split(/[\s,]+/).filter(Boolean);
+  const out: string[] = [];
+  for (const part of parts) {
+    const p = normalizePattern(part);
+    if (!p) {
+      throw new UserError(
+        `Invalid --allowed-domains pattern "${part}". Use example.com, *.example.com or host:port.`,
+        'bad_args',
+      );
+    }
+    out.push(p);
+  }
+  if (out.length === 0)
+    throw new UserError('--allowed-domains needs at least one pattern', 'bad_args');
+  return out;
+}
+
+function matches(pattern: string, u: URL): boolean {
+  const m = /^(\*\.)?(.*?)(?::(\d+))?$/.exec(pattern);
+  // `[::1]:3000`: the colons inside the brackets are not a port separator.
+  const bracket = /^(\[[^\]]+\])(?::(\d+))?$/.exec(pattern);
+  const wild = !bracket && m?.[1] !== undefined;
+  const host = bracket ? bracket[1] : m?.[2];
+  const port = bracket ? bracket[2] : m?.[3];
+  if (!host) return false;
+  const h = u.hostname.replace(/\.$/, '');
+  if (port !== undefined) {
+    const actual = u.port || (u.protocol === 'https:' ? '443' : '80');
+    if (actual !== port) return false;
+    return wild ? h.endsWith(`.${host}`) : h === host;
+  }
+  return wild ? h.endsWith(`.${host}`) : h === host || h.endsWith(`.${host}`);
+}
+
+/** Is `url` reachable under `patterns`? An empty list means unrestricted. */
+export function urlAllowed(patterns: readonly string[], url: string): boolean {
+  if (patterns.length === 0) return true;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.href === 'about:blank') return true;
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  return patterns.some((p) => matches(p, u));
+}
+
+/**
+ * Which policy refuses `url`: the user's (popup) or the agent's own `--allowed-domains`.
+ * The two combine by conjunction, so the flag can only narrow what the user allows.
+ */
+export function blockedBy(
+  url: string,
+  agent: readonly string[] | undefined,
+  user: readonly string[] = guardrails.allowedDomains,
+): 'user' | 'agent' | undefined {
+  if (!urlAllowed(user, url)) return 'user';
+  if (agent && !urlAllowed(agent, url)) return 'agent';
+  return undefined;
+}
+
+function describeUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.protocol.startsWith('http') ? u.host : u.protocol;
+  } catch {
+    return url;
+  }
+}
+
+/** The `domain_blocked` error for `url` (message says which policy and what is allowed). */
+export function blockedError(
+  url: string,
+  by: 'user' | 'agent',
+  patterns: readonly string[],
+): UserError {
+  const who = by === 'user' ? "the user's allowed-domains policy" : 'your --allowed-domains';
+  return new UserError(
+    `${describeUrl(url)} is blocked by ${who}. Allowed: ${patterns.join(', ') || '(nothing)'}`,
+    'domain_blocked',
+  );
+}
+
+/** Refuse agent-initiated navigation to `url` (open, tab new, click --new-tab, pushstate, read <url>). */
+export function assertNavigable(ctx: Ctx, url: string): void {
+  const by = blockedBy(url, ctx.agentAllowedDomains);
+  if (by) {
+    throw blockedError(
+      url,
+      by,
+      (by === 'user' ? guardrails.allowedDomains : ctx.agentAllowedDomains) ?? [],
+    );
+  }
 }

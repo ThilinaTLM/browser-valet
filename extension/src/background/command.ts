@@ -58,6 +58,11 @@ export const GLOBAL_FLAGS: Flag[] = [
     desc: 'Timeout in ms for waits and navigation (default 25000)',
   },
   {
+    name: 'allowed-domains',
+    type: 'string',
+    desc: 'Comma-separated domain patterns agent navigation may reach (narrows the popup policy)',
+  },
+  {
     name: 'content-boundaries',
     type: 'bool',
     desc: 'Wrap page-derived output in nonce markers (not a security boundary)',
@@ -175,6 +180,8 @@ export class Ctx {
   readonly files: { path: string; base64: string }[] = [];
   /** Tab touched by this command, for the activity log. */
   tabId: number | undefined;
+  /** Narrowing flags from the command line (see guardrails.ts); the user's policy still applies. */
+  agentAllowedDomains: string[] | undefined;
 
   constructor(
     readonly req: CliRequest,

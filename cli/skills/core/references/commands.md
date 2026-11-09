@@ -32,7 +32,7 @@ network request <id>
 `frame` scopes later commands to an iframe until `frame main` or a navigation; `get title|url` stay on the tab.
 `highlight` outlines the element for 3 s. `pushstate` does client-side navigation (same origin only).
 `mouse` is for canvases, maps and sliders; on a background tab `mouse wheel` scrolls by script. Global flags: `--json`, `--session <name>`,
-`--timeout <ms>` (default 25000), `--max-output <chars>`, `--content-boundaries`. `bctl <command> --help` shows details and examples.
+`--timeout <ms>` (default 25000), `--max-output <chars>`, `--content-boundaries`, `--allowed-domains <list>`. `bctl <command> --help` shows details and examples.
 
 `batch` runs the items in order (quotes and backslashes like a shell, nothing expanded). Text output is each item's output; failures
 go to stderr and the exit code is 1 if any failed (`--bail` stops at the first). `--json` prints a top-level array of
