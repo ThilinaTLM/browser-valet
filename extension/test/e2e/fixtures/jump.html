@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Jump</title>
+  </head>
+  <body>
+    <h1>Jump page</h1>
+    <a id="out" href="#">link</a>
+    <a id="pop" target="_blank" href="#">popup</a>
+    <script>
+      // ?to=<url>: link targets; ?auto=1 navigates by script after a short delay.
+      const q = new URLSearchParams(location.search);
+      const to = q.get('to') || '/prose.html';
+      document.getElementById('out').href = to;
+      document.getElementById('pop').href = to;
+      if (q.get('auto')) setTimeout(() => (location.href = to), 300);
+    </script>
+  </body>
+</html>

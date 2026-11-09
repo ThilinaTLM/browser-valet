@@ -256,3 +256,17 @@ export async function setGuardrails(patch: Record<string, unknown>): Promise<voi
     await page.close().catch(() => undefined);
   }
 }
+
+/**
+ * Open `url` in a new tab the way a popup is created: Chrome gives a tab opened while another is
+ * active that tab as its opener, so activate the tab showing `openerUrlPart` first. The caller
+ * closes the returned page.
+ */
+export async function openFromTab(openerUrlPart: string, url: string): Promise<Page> {
+  const opener = (await browser().pages()).find((p) => p.url().includes(openerUrlPart));
+  if (!opener) throw new Error(`no tab showing ${openerUrlPart}`);
+  await opener.bringToFront();
+  const page = await browser().newPage();
+  void page.goto(url).catch(() => undefined); // may be blocked on purpose
+  return page;
+}

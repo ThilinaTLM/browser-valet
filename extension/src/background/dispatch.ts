@@ -21,6 +21,7 @@ import { navigationCommands } from './commands/navigation';
 import { readCommands } from './commands/read';
 import { networkCommands } from './commands/network';
 import { type ErrorCode, UserError } from './errors';
+import { blockedMessage, narrowFor, takeBlocked } from './navigation-guard';
 import {
   applyBoundaries,
   confirmCommand,
@@ -29,7 +30,7 @@ import {
   parseConfirmList,
   parseDomainList,
 } from './guardrails';
-import { log, meta } from './state';
+import { log, meta, session as sessionState } from './state';
 
 const DEFAULT_TIMEOUT = 25_000;
 
@@ -44,6 +45,8 @@ const COMMANDS: Command[] = [
   ...emulationCommands,
   ...batchCommands,
 ];
+/** Commands whose whole point is to reach a page: a refused redirect makes them fail. */
+const NAVIGATES = new Set(['open', 'read']);
 const GROUPS = ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging'];
 
 function lookup(name: string): Command | undefined {
@@ -269,7 +272,25 @@ export async function execute(
     ctx.agentConfirm = parseConfirmList(args.str('confirm-actions'));
     ctx.described = describe(cmd, req, args);
     await confirmCommand(ctx, cmd.name, args);
-    const limited = limitOutput((await raceDialog(ctx, cmd.run(ctx, args))) ?? {}, max);
+    const release = await narrowFor(ctx);
+    const navigates = NAVIGATES.has(cmd.name) || (cmd.name === 'tab' && args.pos[0] === 'new');
+    let raw: Result | undefined;
+    try {
+      raw = await raceDialog(ctx, cmd.run(ctx, args));
+    } catch (e) {
+      // A navigation the policy refused mid-flight usually surfaces as a generic load failure.
+      const refused = takeBlocked(ctx.tabId ?? sessionState(ctx.session).tab);
+      if (refused.length && navigates)
+        throw new UserError(blockedMessage(refused), 'domain_blocked');
+      throw e;
+    } finally {
+      release();
+    }
+    const refused = takeBlocked(ctx.tabId ?? sessionState(ctx.session).tab); // navigations the page started and the policy refused
+    if (refused.length && navigates) throw new UserError(blockedMessage(refused), 'domain_blocked');
+    if (refused.length)
+      raw = { ...raw, warning: [raw?.warning ?? [], blockedMessage(refused)].flat() };
+    const limited = limitOutput(raw ?? {}, max);
     const { result, boundary } = await applyBoundaries(cmd.name, args, limited, json, ctx.tabId);
     response = {
       ...ok(

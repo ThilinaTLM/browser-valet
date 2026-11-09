@@ -2,6 +2,7 @@ import { type Command, type Ctx, type Result } from '../command';
 import * as cdp from '../cdp';
 import { evaluate, UserError } from '../dom';
 import { guardNavigation } from '../guardrails';
+import { assertLanded, hasBlocked } from '../navigation-guard';
 import { findTab, meta, save, session, state } from '../state';
 import { grant, isControlled, requestControl, revoke, sleep, waitForLoad } from '../tabs';
 
@@ -60,6 +61,7 @@ function loadEvent(
 async function tabLoaded(tabId: number, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (hasBlocked(tabId)) return; // the navigation guard refused the page and blanked the tab
     const t = await chrome.tabs.get(tabId);
     if (t.status === 'complete' && !t.pendingUrl && t.url !== 'about:blank') return;
     await sleep(100);
@@ -158,7 +160,10 @@ async function newTab(ctx: Ctx, url?: string): Promise<number> {
   if (tab.id === undefined) throw new Error('Failed to create a tab');
   await grant(tab.id, 'agent', ctx.session);
   ctx.setTab(tab.id);
-  if (url) await tabLoaded(tab.id, ctx.timeout);
+  if (url) {
+    await tabLoaded(tab.id, ctx.timeout);
+    await assertLanded(ctx, tab.id);
+  }
   return tab.id;
 }
 

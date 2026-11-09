@@ -42,6 +42,12 @@ const events = new Map<number, TabEvents>();
 const listeners = new Set<(tabId: number, method: string, params: unknown) => void>();
 const MAX_BUFFER = 500;
 const detachListeners = new Set<(tabId: number) => void>();
+const attachListeners = new Set<(tabId: number) => void>();
+
+/** Called after a tab's debugger session is ready (Page and Runtime enabled). */
+export function onAttached(fn: (tabId: number) => void): void {
+  attachListeners.add(fn);
+}
 
 /** Called whenever a tab's debugger session ends (revoke, user detach, navigation swap). */
 export function onDetached(fn: (tabId: number) => void): void {
@@ -107,6 +113,7 @@ export async function attach(tabId: number): Promise<void> {
     chrome.debugger.sendCommand({ tabId }, 'Runtime.enable'),
   ]);
   await autoAttach(tabId);
+  for (const fn of attachListeners) fn(tabId);
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 import type { PopupMessage } from '../shared';
 import { connect, disconnect, startKeepAlive } from './connection';
 import { loadState, regenerateSecret, save, state, updateSettings } from './state';
+import { setReady, syncAll } from './navigation-guard';
 import { loadGuardrails, updateGuardrails } from './guardrails';
 import { decide, grant, refreshBadge, refreshGlobalBadge, revoke } from './tabs';
 
@@ -15,6 +16,8 @@ const ready = loadState().then(async () => {
   await refreshGlobalBadge();
   connect();
 });
+
+setReady(ready);
 
 chrome.runtime.onStartup.addListener(() => void ready.then(connect));
 chrome.runtime.onInstalled.addListener(() => void ready.then(connect));
@@ -57,6 +60,7 @@ async function handle(msg: PopupMessage): Promise<void> {
       break;
     case 'guardrails':
       await updateGuardrails(msg.guardrails);
+      await syncAll();
       break;
     case 'repair':
       await regenerateSecret();

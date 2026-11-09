@@ -110,6 +110,12 @@ function serveFixtures(): Promise<{ server: Server; url: string }> {
   const root = join(import.meta.dirname, 'fixtures');
   const server = createServer((req, res) => {
     const path = new URL(req.url ?? '/', 'http://x').pathname;
+    if (path === '/redirect') {
+      // /redirect?to=<url>: a 302, for navigation-guard tests.
+      const to = new URL(req.url ?? '/', 'http://x').searchParams.get('to') ?? '/';
+      res.writeHead(302, { location: to }).end();
+      return;
+    }
     if (path.startsWith('/api/')) {
       serveApi(path, res);
       return;

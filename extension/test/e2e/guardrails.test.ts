@@ -3,7 +3,15 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { approveNextConsent, bctl, fixture, setGuardrails, useBrowser, workDir } from './harness';
+import {
+  approveNextConsent,
+  bctl,
+  openFromTab,
+  fixture,
+  setGuardrails,
+  useBrowser,
+  workDir,
+} from './harness';
 
 useBrowser();
 
@@ -275,5 +283,106 @@ describe('action confirmation', () => {
     await setGuardrails({ confirm: ['navigate-new-site'], allowedDomains: ['127.0.0.1'] });
     const r = await bctl('open', 'https://example.org/', '--session', 'confirm-blocked', '--json');
     expect(jsonOf(r.stdout)).toMatchObject({ success: false, code: 'domain_blocked' });
+  });
+});
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+};
+
+describe('allowed domains (navigation guard on agent tabs)', () => {
+  const S = ['--session', 'guard-e2e'];
+  const outside = (path: string) => fixture(path).replace('127.0.0.1', 'localhost');
+  const redirectTo = (target: string) => fixture(`/redirect?to=${encodeURIComponent(target)}`);
+  const errOf = async (...args: string[]) =>
+    JSON.parse((await bctl(...args, '--json')).stdout) as {
+      success: boolean;
+      error: string;
+      code?: string;
+    };
+
+  it('fails on an agent tab when a redirect leaves the allowed domains', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    await bctl('open', fixture('/prose.html'), ...S);
+    const r = await errOf('open', redirectTo(outside('/form.html')), ...S);
+    expect(r).toMatchObject({ success: false, code: 'domain_blocked' });
+    expect(r.error).toContain('localhost');
+    // The agent tab never rendered the outside page.
+    expect((await bctl('get', 'title', ...S)).stdout).not.toContain('Fixture Form');
+  });
+
+  it('a redirect on the first load of a new tab is caught after the fact', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    const r = await errOf('open', redirectTo(outside('/form.html')), '--session', 'guard-new');
+    expect(r).toMatchObject({ success: false, code: 'domain_blocked' });
+    expect((await bctl('get', 'url', '--session', 'guard-new')).stdout.trim()).toBe('about:blank');
+  });
+
+  it('a script navigation (location =) is blocked and reported on the next command', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    await bctl('open', fixture('/prose.html'), ...S);
+    await bctl(
+      'open',
+      fixture(`/jump.html?auto=1&to=${encodeURIComponent(outside('/form.html'))}`),
+      ...S,
+    );
+    await new Promise((r) => setTimeout(r, 1200));
+    const r = await bctl('get', 'url', ...S);
+    expect(hostOf(r.stdout.trim())).not.toBe('localhost');
+    expect(r.stderr).toContain('Navigation to localhost');
+    expect(r.stderr).toContain('domain_blocked');
+  });
+
+  it('a clicked link to a refused site is blocked; allowed links still work', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    await bctl('open', fixture(`/jump.html?to=${encodeURIComponent(outside('/form.html'))}`), ...S);
+    const bad = await bctl('click', '#out', ...S);
+    expect(bad.stderr).toContain('domain_blocked');
+    expect(hostOf((await bctl('get', 'url', ...S)).stdout.trim())).not.toBe('localhost');
+    await bctl('open', fixture('/jump.html?to=/form.html'), ...S);
+    expect((await bctl('click', '#out', ...S)).code).toBe(0);
+    await bctl('wait', '--url', '**/form.html', ...S);
+    expect((await bctl('get', 'title', ...S)).stdout).toBe('Fixture Form\n');
+  });
+
+  it('a popup opened by an agent tab is guarded too', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    await bctl('open', fixture(`/jump.html?to=${encodeURIComponent(outside('/form.html'))}`), ...S);
+    const popup = await openFromTab('/jump.html', outside('/form.html'));
+    await new Promise((r) => setTimeout(r, 1200));
+    const tabs = (
+      JSON.parse((await bctl('tab', ...S, '--json')).stdout) as {
+        data: { tabs: { url: string; controlled: boolean }[] };
+      }
+    ).data.tabs;
+    expect(tabs.some((t) => hostOf(t.url) === 'localhost')).toBe(false);
+    // The popup is an agent tab (opener grant), not an outsider.
+    expect(tabs.filter((t) => t.controlled).length).toBeGreaterThanOrEqual(2);
+    await popup.close().catch(() => undefined);
+  });
+
+  it('pages work normally with no policy, and after the policy is lifted', async () => {
+    await setGuardrails({ allowedDomains: ['127.0.0.1'] });
+    await bctl('open', fixture('/prose.html'), ...S);
+    await setGuardrails({});
+    const r = await bctl('open', redirectTo(outside('/form.html')), ...S);
+    expect(r.code).toBe(0);
+    expect((await bctl('get', 'title', ...S)).stdout).toBe('Fixture Form\n');
+  });
+
+  it('--allowed-domains also covers redirects during that command', async () => {
+    await bctl('open', fixture('/prose.html'), ...S);
+    const r = await errOf(
+      'open',
+      redirectTo(outside('/form.html')),
+      '--allowed-domains',
+      '127.0.0.1',
+      ...S,
+    );
+    expect(r).toMatchObject({ success: false, code: 'domain_blocked' });
   });
 });
