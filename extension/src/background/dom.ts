@@ -125,11 +125,32 @@ async function resolveRef(tabId: number, target: string): Promise<Handle> {
   }
 }
 
-/** Resolve a ref (`@e3`) or CSS selector to an element handle. */
+/** XPath targets start with `/` or `(` (never valid CSS), e.g. `//button[@type='submit']`. */
+export function isXPath(target: string): boolean {
+  return target.startsWith('/') || target.startsWith('(');
+}
+
+/** Expression yielding the first element matching a CSS or XPath target. */
+function queryExpression(target: string): string {
+  const t = JSON.stringify(target);
+  return isXPath(target)
+    ? `document.evaluate(${t}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue`
+    : `document.querySelector(${t})`;
+}
+
+/** Expression yielding how many elements match a CSS or XPath target. */
+export function countExpression(target: string): string {
+  const t = JSON.stringify(target);
+  return isXPath(target)
+    ? `document.evaluate(${t}, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null).snapshotLength`
+    : `document.querySelectorAll(${t}).length`;
+}
+
+/** Resolve a ref (`@e3`), CSS selector or XPath to an element handle. */
 export async function resolve(tabId: number, target: string): Promise<Handle> {
   if (isRef(target)) return resolveRef(tabId, target);
   const r = await cdp.send<EvalResult>(tabId, 'Runtime.evaluate', {
-    expression: `document.querySelector(${JSON.stringify(target)})`,
+    expression: queryExpression(target),
   });
   if (r.exceptionDetails) throw new UserError(`Invalid selector: ${target}`);
   if (!r.result.objectId) throw new UserError(`Element not found: ${target}`);

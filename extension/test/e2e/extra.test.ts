@@ -65,3 +65,44 @@ describe('highlight', () => {
     expect(bad.stderr).toContain('Element not found');
   });
 });
+
+describe('get styles', () => {
+  it('prints a curated set by default, named props, or everything', async () => {
+    await bctl('open', fixture('/styled.html'));
+    const def = (await bctl('get', 'styles', '#box')).stdout;
+    expect(def).toContain('color: rgb(255, 0, 0)');
+    expect(def).toContain('font-size: 20px');
+    expect(def).toContain('background-color: rgb(0, 0, 255)');
+    expect(def).toContain('cursor: pointer');
+    expect(def.split('\n').filter(Boolean).length).toBeLessThan(40);
+
+    const named = await bctl('get', 'styles', '#box', 'width', 'color');
+    expect(named.stdout).toBe('width: 100px\ncolor: rgb(255, 0, 0)\n');
+
+    const all = await bctl('get', 'styles', '#box', '--all');
+    expect(all.stdout.split('\n').length).toBeGreaterThan(300);
+    expect(all.stdout).toContain('font-size: 20px');
+
+    const json = await bctlJson('get', 'styles', '#box', 'height');
+    expect(json).toMatchObject({ success: true, data: { styles: { height: '50px' } } });
+
+    expect((await bctl('get', 'styles', '#box', 'nonsense')).stderr).toContain(
+      'Unknown CSS property: nonsense',
+    );
+  });
+});
+
+describe('XPath selectors', () => {
+  it('work in click, get text, get count and wait', async () => {
+    await bctl('open', fixture('/styled.html'));
+    expect((await bctl('get', 'count', '//li')).stdout.trim()).toBe('3');
+    expect((await bctl('get', 'count', '(//li)[2]')).stdout.trim()).toBe('1');
+    expect((await bctl('get', 'count', '//nothing')).stdout.trim()).toBe('0');
+    expect((await bctl('get', 'text', '//li[2]')).stdout).toContain('two');
+    expect((await bctl('wait', "//button[@type='submit']")).code).toBe(0);
+    expect((await bctl('click', "//button[@type='submit']")).code).toBe(0);
+    expect((await bctl('get', 'text', '#out')).stdout).toContain('clicked');
+    expect((await bctl('get', 'text', '//nothing')).stderr).toContain('Element not found');
+    expect((await bctl('get', 'text', '//[')).stderr).toContain('Invalid selector');
+  });
+});

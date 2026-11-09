@@ -1,7 +1,17 @@
 import { type Command, type Ctx } from '../command';
 import * as cdp from '../cdp';
-import { call, evaluate, type Handle, remoteValue, resolve, resolveWait, UserError } from '../dom';
+import {
+  call,
+  countExpression,
+  evaluate,
+  type Handle,
+  remoteValue,
+  resolve,
+  resolveWait,
+  UserError,
+} from '../dom';
 import { snapshot } from '../snapshot';
+import { computedStyles } from './extra';
 import { session } from '../state';
 import { sleep } from '../tabs';
 
@@ -100,10 +110,11 @@ export const inspectionCommands: Command[] = [
     name: 'get',
     show: Infinity,
     group: 'Reading',
-    usage: 'get <text|html|value|attr|title|url|count|box> [target] [attr-name]',
-    summary: 'Read text, HTML, values, attributes, title, URL, counts or boxes',
+    usage: 'get <text|html|value|attr|title|url|count|box|styles> [target] [attr-name|css-prop…]',
+    summary: 'Read text, HTML, values, attributes, title, URL, counts, boxes or styles',
+    flags: [{ name: 'all', type: 'bool', desc: '`get styles`: every computed property' }],
     async run(ctx, a) {
-      const what = a.need(0, 'text|html|value|attr|title|url|count|box');
+      const what = a.need(0, 'text|html|value|attr|title|url|count|box|styles');
       const id = await ctx.tab();
       const out = (value: unknown) => ({
         text: typeof value === 'string' ? value : JSON.stringify(value),
@@ -116,7 +127,7 @@ export const inspectionCommands: Command[] = [
           return out((await chrome.tabs.get(id)).url ?? '');
         case 'count': {
           const sel = a.need(1, 'selector');
-          const r = await evaluate(id, `document.querySelectorAll(${JSON.stringify(sel)}).length`);
+          const r = await evaluate(id, countExpression(sel));
           return out(r.value);
         }
         case 'text':
@@ -152,6 +163,16 @@ export const inspectionCommands: Command[] = [
                  return { x: r.x, y: r.y, width: r.width, height: r.height }; }`,
             ),
           );
+        }
+        case 'styles': {
+          const h = await element(ctx, a.need(1, 'target'));
+          const styles = await computedStyles(h, a.pos.slice(2), a.has('all'));
+          return {
+            text: Object.entries(styles)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join('\n'),
+            data: { styles },
+          };
         }
         default:
           throw new UserError(`Unknown: get ${what}`);

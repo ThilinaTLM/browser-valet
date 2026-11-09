@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Styled</title>
+    <style>
+      #box {
+        color: rgb(255, 0, 0);
+        font-size: 20px;
+        width: 100px;
+        height: 50px;
+        background: rgb(0, 0, 255);
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="box">hi</div>
+    <ul>
+      <li>one</li>
+      <li>two</li>
+      <li>three</li>
+    </ul>
+    <button type="submit" id="go">Go</button>
+    <p id="out"></p>
+    <script>
+      document.getElementById('go').addEventListener('click', () => (out.textContent = 'clicked'));
+    </script>
+  </body>
+</html>

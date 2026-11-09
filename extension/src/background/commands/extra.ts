@@ -1,8 +1,8 @@
-// Small agent-browser parity commands: mouse, highlight (see automation.md).
+// Small agent-browser parity commands: mouse, highlight, get styles helper (see automation.md).
 
 import * as cdp from '../cdp';
 import { type Command, type Ctx } from '../command';
-import { evaluate, resolve, UserError } from '../dom';
+import { call, evaluate, type Handle, resolve, UserError } from '../dom';
 import { heldModifiers, prime, sendInput } from '../input';
 import { sleep } from '../tabs';
 
@@ -211,5 +211,56 @@ const highlight: Command = {
     return { ...DONE, data: { highlighted: target } };
   },
 };
+
+// ---------------------------------------------------------------------------
+// get styles
+// ---------------------------------------------------------------------------
+
+/** What `get styles` prints without arguments (upstream prints all ~450 properties). */
+export const CURATED_STYLES = [
+  'font-family',
+  'font-size',
+  'font-weight',
+  'line-height',
+  'color',
+  'background-color',
+  'display',
+  'visibility',
+  'opacity',
+  'position',
+  'width',
+  'height',
+  'margin',
+  'padding',
+  'border',
+  'z-index',
+  'cursor',
+  'pointer-events',
+  'overflow',
+];
+
+/** Computed style of an element: curated set, the named properties, or everything (sorted). */
+export async function computedStyles(
+  h: Handle,
+  props: string[],
+  all: boolean,
+): Promise<Record<string, string>> {
+  const names = props.map((p) => p.replace(/:$/, '').toLowerCase());
+  const pairs = await call<[string, string][]>(
+    h,
+    `function (names, all) {
+      const cs = getComputedStyle(this.nodeType === 1 ? this : this.parentElement);
+      const list = all ? [...cs].sort() : names;
+      return list.map((n) => [n, cs.getPropertyValue(n)]);
+    }`,
+    [names.length ? names : CURATED_STYLES, all],
+  );
+  const out: Record<string, string> = {};
+  for (const [n, v] of pairs) {
+    if (v === '' && names.length && !all) throw new UserError(`Unknown CSS property: ${n}`);
+    out[n] = v;
+  }
+  return out;
+}
 
 export const extraCommands: Command[] = [mouse, highlight];
