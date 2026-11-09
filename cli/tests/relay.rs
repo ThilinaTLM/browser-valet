@@ -577,15 +577,20 @@ fn skills_list_get_path_install() {
         .join("references/commands.md")
         .is_file());
 
-    out(&["skills", "install"]);
-    let stub = std::fs::read_to_string(home.join(".agents/skills/bvl/SKILL.md")).unwrap();
-    assert!(stub.contains("name: bvl") && stub.contains("bvl skills get core"));
-    assert!(!home.join(".claude").exists());
-    std::fs::create_dir_all(home.join(".claude")).unwrap();
-    out(&["skills", "install"]);
-    assert!(home.join(".claude/skills/bvl/SKILL.md").is_file());
+    // Default locations: on Windows `dirs::home_dir()` asks the OS for the profile folder and
+    // ignores USERPROFILE, so the home can't be redirected and this would write to the real one.
+    if !cfg!(windows) {
+        out(&["skills", "install"]);
+        let stub = std::fs::read_to_string(home.join(".agents/skills/bvl/SKILL.md")).unwrap();
+        assert!(stub.contains("name: bvl") && stub.contains("bvl skills get core"));
+        assert!(!home.join(".claude").exists());
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        out(&["skills", "install"]);
+        assert!(home.join(".claude/skills/bvl/SKILL.md").is_file());
+    }
     out(&["skills", "install", "--dir", d.join("custom").to_str().unwrap()]);
-    assert!(d.join("custom/bvl/SKILL.md").is_file());
+    let stub = std::fs::read_to_string(d.join("custom/bvl/SKILL.md")).unwrap();
+    assert!(stub.contains("name: bvl") && stub.contains("bvl skills get core"));
     std::fs::remove_dir_all(&d).ok();
 }
 
