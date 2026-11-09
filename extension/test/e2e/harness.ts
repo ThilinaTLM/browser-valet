@@ -36,6 +36,19 @@ export function bctl(...args: string[]): Promise<BctlResult> {
 
 /** Like `bctl` with extra environment variables (e.g. `{ BCTL_SESSION: 'other' }`). */
 export function bctlWith(env: Record<string, string>, ...args: string[]): Promise<BctlResult> {
+  return run(env, undefined, args);
+}
+
+/** `bctl <args>` with `stdin` piped in (for `--stdin` commands). */
+export function bctlStdin(stdin: string, ...args: string[]): Promise<BctlResult> {
+  return run({}, stdin, args);
+}
+
+function run(
+  env: Record<string, string>,
+  stdin: string | undefined,
+  args: string[],
+): Promise<BctlResult> {
   const { bin, env: base, workDir: cwd } = info();
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { env: { ...base, ...env }, cwd });
@@ -44,6 +57,7 @@ export function bctlWith(env: Record<string, string>, ...args: string[]): Promis
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
     child.once('error', reject);
+    child.stdin.end(stdin ?? '');
     child.once('close', (code) => {
       resolve({ code: code ?? -1, stdout, stderr });
     });

@@ -11,6 +11,7 @@ import {
   parseArgs,
   type Result,
 } from './command';
+import { batchCommands, type Outcome, runBatch } from './commands/batch';
 import { extraCommands } from './commands/extra';
 import { emulationCommands } from './commands/emulation';
 import { inspectionCommands } from './commands/inspection';
@@ -31,6 +32,7 @@ const COMMANDS: Command[] = [
   ...extraCommands,
   ...networkCommands,
   ...emulationCommands,
+  ...batchCommands,
 ];
 const GROUPS = ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging'];
 
@@ -179,10 +181,15 @@ export async function execute(
   req: CliRequest,
   signal: AbortSignal,
   progress: (text: string) => void,
+  outcome?: Outcome,
 ): Promise<CliResponse> {
   const json = req.argv.includes('--json');
   const { name, rest } = splitCommand(req.argv);
-  const ok = (text: string, data: unknown, warning?: string | string[]): CliResponse => ({
+  const ok = (text: string, data: unknown, warning?: string | string[]): CliResponse => {
+    if (outcome) outcome.data = data ?? null;
+    return okResponse(text, data, warning);
+  };
+  const okResponse = (text: string, data: unknown, warning?: string | string[]): CliResponse => ({
     exitCode: 0,
     stdout: json
       ? `${JSON.stringify({ success: true, data: data ?? null, error: null })}\n`
@@ -194,6 +201,7 @@ export async function execute(
   let lastError: string | undefined;
   const fail = (error: string, code?: ErrorCode, extra?: Record<string, unknown>): CliResponse => {
     lastError = error;
+    if (outcome) outcome.error = error;
     return {
       exitCode: 1,
       stdout: json ? `${formatJsonError(error, code, extra)}\n` : '',
@@ -210,6 +218,16 @@ export async function execute(
     return fail(`Unknown command: ${name}. Run \`bctl help\`.`, 'unknown_command', {
       type: 'unknown_command',
     });
+  }
+
+  if (cmd.name === 'batch') {
+    try {
+      const a = parseArgs(rest, cmd.flags ?? []);
+      if (a.has('help')) return ok(commandHelp(cmd), null);
+      return await runBatch(a, req, json, signal, progress, execute);
+    } catch (e) {
+      return e instanceof UserError ? fail(withUsage(cmd, e), e.code) : fail(errorMessage(e));
+    }
   }
 
   let ctx: Ctx | undefined;
