@@ -110,11 +110,22 @@ pub fn send(ws: &mut Ws, v: Value) -> Result<()> {
     Ok(ws.send(Message::text(v.to_string()))?)
 }
 
-/// Connect as role `cli`; if the proxy runs a different bctl version, restart it from this binary (once).
+/// Connect as role `cli`; if the proxy runs a different bctl version and is idle, restart it from this binary (once).
 pub fn connect(c: &Config) -> Result<Ws> {
     let (ws, v) = connect_raw(c)?;
     if v == VERSION {
         return Ok(ws);
+    }
+    // Never kill a proxy that is serving requests (possibly for another bctl version): report instead.
+    let mut ws = ws;
+    if send(&mut ws, json!({"t":"status"})).is_ok() {
+        let busy = recv(&mut ws).map_or(0, |s| s["proxy"]["pending"].as_u64().unwrap_or(0));
+        if busy > 0 {
+            bail!(
+                "the running proxy (v{v}) is busy with {busy} request(s), and this bctl is v{VERSION}; not restarting it. \
+                 Wait for them to finish or run `bctl stop`, and use one bctl version at a time"
+            );
+        }
     }
     drop(ws);
     eprintln!("bctl: restarting the proxy (v{v} -> v{VERSION})");

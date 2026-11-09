@@ -32,6 +32,8 @@ struct Ext {
 struct State {
     ext: Option<Ext>,
     pending: HashMap<u64, Pending>,
+    /// `request` calls still running (they must flush their final message before the proxy exits).
+    active: usize,
     next: u64,
     last: Instant,
 }
@@ -57,6 +59,7 @@ pub fn run(secret: String, port: u16, idle: u64) -> Result<()> {
         st: Mutex::new(State {
             ext: None,
             pending: HashMap::new(),
+            active: 0,
             next: 1,
             last: Instant::now(),
         }),
@@ -85,7 +88,15 @@ async fn serve_all(sh: Arc<Shared>) -> Result<()> {
                     if let Err(e) = conn(sh, s).await { log(&format!("connection {addr}: {e}")); }
                 });
             },
-            _ = sh.stop.notified() => { log("shutdown requested"); return Ok(()); }
+            _ = sh.stop.notified() => {
+                log("shutdown requested");
+                // Let in-flight requests write their failure `res` to their CLIs first.
+                for _ in 0..20 {
+                    if sh.st.lock().unwrap().active == 0 { break; }
+                    sleep(Duration::from_millis(50)).await;
+                }
+                return Ok(());
+            }
             _ = tick.tick() => if sh.idle > 0 {
                 let st = sh.st.lock().unwrap();
                 if st.pending.is_empty() && st.last.elapsed() >= Duration::from_secs(sh.idle) {
@@ -282,14 +293,22 @@ async fn cli_conn(sh: &Shared, mut ws: Ws) -> Result<()> {
                 .ext
                 .as_ref()
                 .map_or(Value::Null, |e| e.info.clone());
-            let proxy = json!({"version":VERSION,"pid":std::process::id(),"port":sh.port,"idleTimeoutSecs":sh.idle});
+            let pending = sh.st.lock().unwrap().pending.len();
+            let proxy = json!({"version":VERSION,"pid":std::process::id(),"port":sh.port,"idleTimeoutSecs":sh.idle,"pending":pending});
             let v = json!({"t":"status","proxy":proxy,"ext":ext});
             send(&mut ws, v).await
         }
         Some("shutdown") => {
-            send(&mut ws, json!({"t":"ok"})).await?;
+            // Fail every in-flight request (their CLIs get a `res`) and tell the extension to stop them.
+            {
+                let mut st = sh.st.lock().unwrap();
+                for (id, p) in st.pending.drain() {
+                    p.out.send(err_res("proxy is shutting down")).ok();
+                    p.ext.send(json!({"t":"cancel","id":id}).to_string()).ok();
+                }
+            }
             sh.stop.notify_one();
-            Ok(())
+            send(&mut ws, json!({"t":"ok"})).await
         }
         Some("req") => {
             sh.st.lock().unwrap().last = Instant::now();
@@ -319,6 +338,7 @@ async fn request(sh: &Shared, ws: &mut Ws, req: Value) -> Result<()> {
         let mut st = sh.st.lock().unwrap();
         st.next += 1;
         let id = st.next;
+        st.active += 1;
         st.pending.insert(
             id,
             Pending {
@@ -329,8 +349,9 @@ async fn request(sh: &Shared, ws: &mut Ws, req: Value) -> Result<()> {
         );
         id
     };
+    // Every exit path (return, `?`, dropped future) removes the entry and cancels it in the extension.
+    let _guard = Guard { sh, id };
     if ext.send(json!({"t":"req","id":id,"req":req}).to_string()).is_err() {
-        sh.st.lock().unwrap().pending.remove(&id);
         return send(ws, err_res("browser extension disconnected")).await;
     }
     loop {
@@ -343,12 +364,23 @@ async fn request(sh: &Shared, ws: &mut Ws, req: Value) -> Result<()> {
                 }
                 None => return Ok(()),
             },
-            m = next_json(ws) => if m.is_none() {
-                if let Some(p) = sh.st.lock().unwrap().pending.remove(&id) {
-                    p.ext.send(json!({"t":"cancel","id":id}).to_string()).ok();
-                }
-                return Ok(());
-            },
+            m = next_json(ws) => if m.is_none() { return Ok(()); },
+        }
+    }
+}
+
+/// Ends a request on every path: if it is still pending (not answered, not failed by disconnect/shutdown),
+/// forget it and tell the extension to cancel.
+struct Guard<'a> {
+    sh: &'a Shared,
+    id: u64,
+}
+impl Drop for Guard<'_> {
+    fn drop(&mut self) {
+        let mut st = self.sh.st.lock().unwrap();
+        st.active -= 1;
+        if let Some(p) = st.pending.remove(&self.id) {
+            p.ext.send(json!({"t":"cancel","id":self.id}).to_string()).ok();
         }
     }
 }

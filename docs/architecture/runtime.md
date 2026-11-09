@@ -55,7 +55,11 @@ sequenceDiagram
 - Pending approvals are dropped on handoff, because their CLI waiters are gone. Grants carry over.
 - If an update fails to take effect, `updateTried` stops retries to the same version for 10 minutes.
 
-> **Known debt:** the request lifecycle in the proxy has gaps. If writing to the CLI fails, the pending entry stays and no `cancel` is sent. `shutdown` drops in-flight requests without a `res`. Two CLIs of different versions can restart the proxy back and forth. Do not extend this pattern. Fix: [proposal](../proposals/proxy-request-lifecycle.md).
+Request lifecycle rules (in the proxy):
+
+- Every `req` is owned by a drop guard in `request`. On any exit (final `res`, failed write to the CLI, CLI disconnect, cancelled task) it removes the pending entry, and if the entry was still pending it sends `cancel` to the extension. A request that was already answered or failed is never cancelled twice.
+- `shutdown` fails every pending request with a `res` (exit 1, "proxy is shutting down") and sends `cancel` to the extension, then waits up to 1 s for those replies to be written before exiting.
+- A CLI that sees a different proxy version asks `status` first. If `proxy.pending` is above 0 it does **not** restart the proxy: it exits with an error naming the conflict. Use one bctl version at a time; otherwise two versions would restart each other's proxy in a loop. A proxy without `pending` (older) counts as idle.
 
 ## Gotchas
 

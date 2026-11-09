@@ -232,6 +232,135 @@ fn cli_disconnect_sends_cancel() {
     assert_eq!(recv(&mut e), json!({"t":"cancel","id":id}));
 }
 
+/// Reads the next message with a short timeout; None if nothing arrives.
+fn try_recv(ws: &mut Ws, ms: u64) -> Option<Value> {
+    ws.get_ref().set_read_timeout(Some(Duration::from_millis(ms))).unwrap();
+    let r = loop {
+        match ws.read() {
+            Ok(Message::Text(t)) => break Some(serde_json::from_str(t.as_str()).unwrap()),
+            Ok(_) => {}
+            Err(_) => break None,
+        }
+    };
+    ws.get_ref().set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    r
+}
+
+#[test]
+fn failed_write_to_cli_cancels_once_and_clears_pending() {
+    let p = start(&[]);
+    let mut e = ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    let id = recv(&mut e)["id"].clone();
+    assert_eq!(status(&p)["proxy"]["pending"], 1);
+    // Kill the CLI socket without a close handshake, then make the proxy write to it.
+    c.get_ref().shutdown(std::net::Shutdown::Both).ok();
+    drop(c);
+    for _ in 0..3 {
+        send(&mut e, json!({"t":"event","id":id,"stderr":"x\n"}));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(recv(&mut e), json!({"t":"cancel","id":id}));
+    assert!(try_recv(&mut e, 300).is_none(), "cancel sent twice");
+    assert_eq!(status(&p)["proxy"]["pending"], 0);
+}
+
+#[test]
+fn completed_request_is_not_cancelled() {
+    let p = start(&[]);
+    let mut e = ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    let id = recv(&mut e)["id"].clone();
+    send(&mut e, json!({"t":"res","id":id,"res":{"exitCode":0}}));
+    assert_eq!(recv(&mut c)["t"], "res");
+    drop(c);
+    assert!(try_recv(&mut e, 300).is_none());
+    assert_eq!(status(&p)["proxy"]["pending"], 0);
+}
+
+#[test]
+fn shutdown_fails_pending_requests_and_cancels_in_extension() {
+    let mut p = start(&[]);
+    let mut e = ext(&p);
+    let mut c1 = cli(&p);
+    let mut c2 = cli(&p);
+    send(&mut c1, json!({"t":"req","req":{}}));
+    send(&mut c2, json!({"t":"req","req":{}}));
+    let mut ids = vec![recv(&mut e)["id"].clone(), recv(&mut e)["id"].clone()];
+    let mut s = cli(&p);
+    send(&mut s, json!({"t":"shutdown"}));
+    assert_eq!(recv(&mut s)["t"], "ok");
+    for c in [&mut c1, &mut c2] {
+        let r = recv(c);
+        assert_eq!(r["res"]["exitCode"], 1);
+        assert!(r["res"]["stderr"].as_str().unwrap().contains("shutting down"));
+    }
+    let mut cancelled = vec![];
+    for _ in 0..2 {
+        let m = recv(&mut e);
+        assert_eq!(m["t"], "cancel");
+        cancelled.push(m["id"].clone());
+    }
+    ids.sort_by_key(|v| v.as_u64());
+    cancelled.sort_by_key(|v| v.as_u64());
+    assert_eq!(ids, cancelled);
+    assert!(wait_exit(&mut p, 5));
+}
+
+#[test]
+fn newer_cli_does_not_restart_a_busy_proxy() {
+    // Fake proxy of another version that reports one request in flight; the CLI must not send `shutdown`.
+    let d = tmpdir("busy");
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::fs::write(d.join("config.json"), json!({"secret":SECRET,"port":port}).to_string()).unwrap();
+    let t = std::thread::spawn(move || {
+        let mut seen = vec![];
+        l.set_nonblocking(false).unwrap();
+        // Serve connections until the CLI exits (it connects, asks status, then gives up).
+        let (s, _) = loop {
+            let c = l.accept().unwrap();
+            c.0.set_nonblocking(false).unwrap();
+            if c.0.peek(&mut [0u8; 1]).is_ok_and(|n| n > 0) {
+                break c;
+            }
+        };
+        let mut ws = tungstenite::accept(s).unwrap();
+        send(&mut ws, json!({"t":"challenge","nonce":"aa"}));
+        let a = recv(&mut ws);
+        let nc = a["nonce"].as_str().unwrap();
+        send(
+            &mut ws,
+            json!({"t":"welcome","mac":mac(&format!("bctl1|server|cli|{nc}|aa")),"version":"0.0.0-old"}),
+        );
+        while let Ok(Message::Text(m)) = ws.read() {
+            let v: Value = serde_json::from_str(m.as_str()).unwrap();
+            seen.push(v["t"].as_str().unwrap().to_string());
+            if v["t"] == "status" {
+                send(
+                    &mut ws,
+                    json!({"t":"status","proxy":{"version":"0.0.0-old","pending":1},"ext":null}),
+                );
+            }
+        }
+        seen
+    });
+    let o = Command::new(env!("CARGO_BIN_EXE_bctl"))
+        .arg("tabs")
+        .env("BCTL_CONFIG_DIR", &d)
+        .env("BCTL_PORT", port.to_string())
+        .output()
+        .unwrap();
+    let seen = t.join().unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("busy with 1 request"), "{err}");
+    assert_eq!(seen, ["status"]);
+    std::fs::remove_dir_all(&d).ok();
+}
+
 #[test]
 fn no_extension_errors_after_wait() {
     let p = start(&[]);

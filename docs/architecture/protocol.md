@@ -49,8 +49,8 @@ Handshake:
    On success: `{"t":"welcome","mac":"<HMAC(key, "bctl1|server|" + role + "|" + Nc + "|" + Np)>","version":"<proxy version>"}`
 4. Client verifies the server MAC and closes the connection if it is wrong (protects against
    another process squatting the port while the proxy is down).
-5. If the proxy's `version` differs from the CLI's, the CLI sends `shutdown`, starts a proxy from its
-   own binary and reconnects once, so an upgraded binary never talks to an old proxy.
+5. If the proxy's `version` differs from the CLI's, the CLI sends `status`. With no pending requests it sends `shutdown`, starts a proxy from its
+   own binary and reconnects once, so an upgraded binary never talks to an old proxy. With pending requests it fails with an error instead of restarting.
 
 Any message other than `auth` before authentication → close.
 
@@ -89,8 +89,8 @@ The proxy never updates non-managed extensions; `bctl status` only reports their
 After `welcome`, the CLI sends exactly one message and waits:
 
 - `{"t":"req","req":{...}}` — run a command in the browser.
-- `{"t":"status"}` → proxy replies `{"t":"status","proxy":{"version":"…","pid":123,"port":47823,"idleTimeoutSecs":600},"ext":null | {"browser":"…","extVersion":"…","managed":true}}` (`ext` is the extension's auth `info`)
-- `{"t":"shutdown"}` → proxy replies `{"t":"ok"}` and exits.
+- `{"t":"status"}` → proxy replies `{"t":"status","proxy":{"version":"…","pid":123,"port":47823,"idleTimeoutSecs":600,"pending":0},"ext":null | {"browser":"…","extVersion":"…","managed":true}}` (`ext` is the extension's auth `info`)
+- `{"t":"shutdown"}` → proxy fails all in-flight requests (each CLI gets a `res`, `exitCode` 1, "proxy is shutting down"), sends `cancel` for them to the extension, replies `{"t":"ok"}` and exits. `pending` in `status` is the number of in-flight requests.
 
 `req` object (opaque to the proxy):
 
@@ -114,7 +114,7 @@ Proxy behaviour for `req`:
    - `{"t":"event","id":<id>,"stderr":"text"}` → `{"t":"event","stderr":"text"}` (progress, e.g. "waiting for approval…"; CLI prints to stderr immediately)
    - `{"t":"res","id":<id>,"res":{...}}` → `{"t":"res","res":{...}}` (final)
 4. If the extension disconnects before answering → `res` with `stderr` "browser extension disconnected", `exitCode` 1.
-5. If the CLI disconnects first → send `{"t":"cancel","id":<id>}` to the extension and forget it.
+5. Whenever the request ends without a final `res` from the extension (CLI disconnects, a write to the CLI fails) → send `{"t":"cancel","id":<id>}` to the extension and forget it.
 
 Each `req` counts as activity for the idle timer (default 600 s, `BCTL_IDLE_TIMEOUT` seconds or
 `bctl proxy --idle-timeout <secs>`; `0` disables). The idle timer is not reset while a request is in
