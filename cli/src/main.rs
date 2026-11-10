@@ -1,7 +1,8 @@
 //! bvl: thin CLI + relay proxy for Browser Valet (see ../docs/architecture/protocol.md).
 //!
 //! Env: BVL_PORT (port), BVL_SESSION, BVL_IDLE_TIMEOUT (proxy), BVL_EXT_WAIT_MS (proxy; test hook),
-//! BVL_CONFIG_DIR (replaces `<config_dir>/browser-valet`; used by tests).
+//! BVL_CONFIG_DIR (replaces `<config_dir>/browser-valet`), BVL_DATA_DIR (replaces the data and state dirs;
+//! defaults to BVL_CONFIG_DIR when only that is set, so tests stay isolated).
 mod doctor;
 mod embed;
 mod proxy;
@@ -53,18 +54,37 @@ pub struct Config {
     pub secret: String,
     pub port: u16,
 }
-pub fn dir() -> PathBuf {
-    match std::env::var_os("BVL_CONFIG_DIR") {
-        Some(d) => d.into(),
-        None => dirs::config_dir().unwrap_or_else(|| ".".into()).join("browser-valet"),
-    }
+fn env_dir(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name).filter(|d| !d.is_empty()).map(PathBuf::from)
+}
+fn app_dir(base: Option<PathBuf>) -> PathBuf {
+    base.unwrap_or_else(|| ".".into()).join("browser-valet")
+}
+/// Settings: `config.json` (`dirs::config_dir()`).
+pub fn config_dir() -> PathBuf {
+    env_dir("BVL_CONFIG_DIR").unwrap_or_else(|| app_dir(dirs::config_dir()))
+}
+fn data_override() -> Option<PathBuf> {
+    env_dir("BVL_DATA_DIR").or_else(|| env_dir("BVL_CONFIG_DIR"))
+}
+/// Generated files: the managed extension folder and skills (`dirs::data_local_dir()`: Local, not
+/// Roaming, on Windows, because the browser loads the folder from this machine).
+pub fn data_dir() -> PathBuf {
+    data_override().unwrap_or_else(|| app_dir(dirs::data_local_dir()))
+}
+/// Logs: `proxy.log` (`$XDG_STATE_HOME` on Linux, the data dir elsewhere).
+pub fn state_dir() -> PathBuf {
+    data_override().unwrap_or_else(|| app_dir(dirs::state_dir().or_else(dirs::data_local_dir)))
+}
+pub fn log_path() -> PathBuf {
+    state_dir().join("proxy.log")
 }
 pub fn env_port() -> Option<u16> {
     std::env::var("BVL_PORT").ok()?.parse().ok()
 }
 /// Port precedence: BVL_PORT > config.json > default.
 pub fn load() -> Option<Config> {
-    let v: Value = serde_json::from_slice(&std::fs::read(dir().join("config.json")).ok()?).ok()?;
+    let v: Value = serde_json::from_slice(&std::fs::read(config_dir().join("config.json")).ok()?).ok()?;
     let port = env_port()
         .or(v["port"].as_u64().and_then(|p| p.try_into().ok()))
         .unwrap_or(DEFAULT_PORT);
@@ -74,8 +94,8 @@ pub fn load() -> Option<Config> {
     })
 }
 pub fn save(c: &Config) -> Result<()> {
-    std::fs::create_dir_all(dir())?;
-    let path = dir().join("config.json");
+    std::fs::create_dir_all(config_dir())?;
+    let path = config_dir().join("config.json");
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -182,11 +202,8 @@ pub fn ensure_proxy(c: &Config) -> Result<()> {
     if up() {
         return Ok(());
     }
-    std::fs::create_dir_all(dir())?;
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir().join("proxy.log"))?;
+    std::fs::create_dir_all(state_dir())?;
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path())?;
     let mut cmd = std::process::Command::new(std::env::current_exe()?);
     cmd.arg("proxy")
         .stdin(std::process::Stdio::null())
@@ -203,7 +220,7 @@ pub fn ensure_proxy(c: &Config) -> Result<()> {
             return Ok(());
         }
     }
-    bail!("proxy did not start; see {}", dir().join("proxy.log").display())
+    bail!("proxy did not start; see {}", log_path().display())
 }
 
 /// Ask a running proxy to exit. Returns false if none was reachable / auth failed.
@@ -441,7 +458,7 @@ fn local(args: Vec<String>) -> Result<i32> {
             if let Some(c) = load() {
                 shutdown(&c);
             }
-            let _ = std::fs::remove_file(dir().join("config.json"));
+            let _ = std::fs::remove_file(config_dir().join("config.json"));
             let _ = std::fs::remove_file(embed::ext_dir().join(embed::PAIRING));
             println!("Unpaired.");
             Ok(0)

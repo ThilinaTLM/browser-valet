@@ -54,7 +54,7 @@ flowchart LR
 |---|---|---|---|
 | Auth handshake, Origin rule, pinned extension ID / manifest `key` | High | local attackers, web pages; ID change breaks every install | [security.md](security.md) rules; extend `cli/tests/relay.rs`; user sign-off |
 | Consent and grants (`tabs.ts`, `Ctx.tab()`) | High | acting on tabs the user didn't share | manual test of approve/deny/revoke/update; user sign-off for any relaxation |
-| Persisted files and managed folder path (`config.json`, `pairing.json`, `<config>/extension`) | High | users loaded the folder once by hand; changes strand installs | keep paths and keys; migration if they must change |
+| Persisted files and managed folder path (`config.json`, `pairing.json`, `<data>/extension`) | High | users loaded the folder once by hand; changes strand installs | keep paths and keys; migration if they must change |
 | Wire protocol ([protocol.md](protocol.md)) | Medium | all three parts must agree; mitigated by single-version rule | bump all parts together; update protocol.md and relay tests |
 | Extension state shape (`chrome.storage.session` `state`, `handoff`) | Medium | handoff from the old version is spread over the new defaults | new fields need defaults; check `restoreHandoff` |
 | Command implementations, snapshot format, output text | Low–Medium | agents and skills rely on output shape | update `cli/skills/` in the same change |

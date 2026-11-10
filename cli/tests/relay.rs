@@ -619,6 +619,41 @@ fn setup_writes_folder_and_pairing() {
     std::fs::remove_dir_all(&d).ok();
 }
 
+#[test]
+fn config_and_data_dirs_are_separate() {
+    let d = tmpdir("dirs");
+    let (cfg, data) = (d.join("cfg"), d.join("data"));
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_bvl"))
+            .args(args)
+            .env("BVL_CONFIG_DIR", &cfg)
+            .env("BVL_DATA_DIR", &data)
+            .env("HOME", &d)
+            .env("USERPROFILE", &d)
+            .env_remove("BVL_PORT")
+            .output()
+            .unwrap()
+    };
+    let o = run(&["skills", "path", "core"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(data.join("skills/core/SKILL.md").is_file());
+    assert!(!cfg.join("skills").exists());
+    if embedded() {
+        let o = run(&["setup", "--no-open", "--no-wait"]);
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        assert!(cfg.join("config.json").is_file());
+        assert!(!data.join("config.json").exists());
+        assert!(data.join("extension/manifest.json").is_file());
+        assert!(data.join("extension/pairing.json").is_file());
+        assert!(!cfg.join("extension").exists());
+        assert!(String::from_utf8_lossy(&o.stdout).contains(&data.join("extension").display().to_string()));
+        run(&["unpair"]);
+        assert!(!data.join("extension/pairing.json").exists());
+        assert!(!cfg.join("config.json").exists());
+    }
+    std::fs::remove_dir_all(&d).ok();
+}
+
 // ---- doctor ----
 
 fn doctor(dir: &std::path::Path, port: u16, args: &[&str]) -> (Value, i32) {

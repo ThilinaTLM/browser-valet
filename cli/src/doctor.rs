@@ -1,6 +1,6 @@
 //! `bvl doctor`: CLI-local diagnosis of config, managed folder, proxy, extension and a round trip.
 use crate::embed::{self, EMBEDDED_EXT_VERSION};
-use crate::{addr, connect_raw, dir, ensure_proxy, load, recv, send, shutdown, Config, VERSION};
+use crate::{addr, config_dir, connect_raw, ensure_proxy, load, log_path, recv, send, shutdown, Config, VERSION};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::net::TcpStream;
@@ -62,7 +62,7 @@ struct Opts {
 
 #[cfg_attr(not(unix), allow(unused_variables))]
 fn config(r: &mut Report, o: &Opts) -> Option<Config> {
-    let path = dir().join("config.json");
+    let path = config_dir().join("config.json");
     if !path.is_file() {
         r.add(
             "config",
@@ -226,7 +226,7 @@ fn proxy_and_ext(r: &mut Report, c: &Config, o: &Opts) -> Option<Proxy> {
                 "proxy",
                 St::Fail,
                 format!("could not start: {e:#}"),
-                Some("see proxy.log in the config dir"),
+                Some(&format!("see {}", log_path().display())),
             );
             r.add("extension", St::Skip, "needs a running proxy", None);
             return None;

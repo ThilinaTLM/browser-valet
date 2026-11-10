@@ -18,7 +18,7 @@ All messages are JSON text frames over one WebSocket endpoint: `ws://127.0.0.1:<
 The secret is 32 random bytes, base64url-encoded with no padding. There are two ways to share it:
 
 - **Managed (default):** `bvl setup` generates the secret and writes the bundled extension to
-  `<config_dir>/browser-valet/extension/`, adding `pairing.json` (`{"secret": "...", "port": 47823}`,
+  `<data_dir>/browser-valet/extension/`, adding `pairing.json` (`{"secret": "...", "port": 47823}`,
   mode 0600). The user loads that folder as an unpacked extension. The extension fetches
   `chrome.runtime.getURL("pairing.json")` (`cache: no-store`) at startup and before every connection
   attempt, so re-pairing (`bvl setup`, `bvl pair`) needs no reload. If the file exists, it overrides
@@ -29,6 +29,8 @@ The secret is 32 random bytes, base64url-encoded with no padding. There are two 
 The CLI stores the secret in `<config_dir>/browser-valet/config.json`
 (`{"secret": "...", "port": 47823}`; file mode 0600 on Unix). `config_dir` = `dirs::config_dir()`
 (`~/.config` on Linux, `~/Library/Application Support` on macOS, `%APPDATA%` on Windows).
+`data_dir` = `dirs::data_local_dir()` (`~/.local/share` on Linux, `~/Library/Application Support` on
+macOS, `%LOCALAPPDATA%` on Windows). Full layout and overrides: [runtime.md](runtime.md#persisted-files-cli-side).
 The proxy reads the secret from the same file at startup. The secret is never sent on the wire.
 
 HMAC key = UTF-8 bytes of the secret string. MAC = lowercase hex of HMAC-SHA256.
@@ -165,4 +167,4 @@ folder, restart an idle proxy (never one with pending requests). It never re-pai
 
 If the proxy is not reachable, the CLI starts `bvl proxy` detached (Unix: own process group;
 Windows: `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`), logging to
-`<config_dir>/browser-valet/proxy.log`, then retries for up to 3 s.
+`<state_dir>/browser-valet/proxy.log` (`~/.local/state` on Linux, the data dir elsewhere), then retries for up to 3 s.

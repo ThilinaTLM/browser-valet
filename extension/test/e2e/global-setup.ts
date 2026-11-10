@@ -15,7 +15,7 @@ import type { TestProject } from 'vitest/node';
 export interface E2eInfo {
   /** Path of the bvl binary under test. */
   bin: string;
-  /** Environment for every bvl subprocess (temp BVL_CONFIG_DIR, non-default BVL_PORT). */
+  /** Environment for every bvl subprocess (temp BVL_CONFIG_DIR/BVL_DATA_DIR, non-default BVL_PORT). */
   env: Record<string, string>;
   /** Browser WebSocket endpoint (connect with puppeteer). */
   wsEndpoint: string;
@@ -160,16 +160,18 @@ export default async function setup(project: TestProject): Promise<() => Promise
   }
   if (!existsSync(bin)) throw new Error(`bvl binary not found: ${bin}`);
 
-  // 2. Isolated bvl: temp config dir, non-default port. Never the user's real ones.
+  // 2. Isolated bvl: temp config and data dirs, non-default port. Never the user's real ones.
   const tmp = await mkdtemp(join(tmpdir(), 'bvl-e2e-'));
   const configDir = join(tmp, 'config');
+  const dataDir = join(tmp, 'data');
   const workDir = join(tmp, 'work');
   const profileDir = join(tmp, 'profile');
-  await Promise.all([mkdir(configDir), mkdir(workDir), mkdir(profileDir)]);
+  await Promise.all([mkdir(configDir), mkdir(dataDir), mkdir(workDir), mkdir(profileDir)]);
   const port = await freePort();
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     BVL_CONFIG_DIR: configDir,
+    BVL_DATA_DIR: dataDir,
     BVL_PORT: String(port),
     BVL_IDLE_TIMEOUT: '0',
     BVL_SESSION: 'e2e',
@@ -184,7 +186,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
     env: { ...env, PATH: emptyPath },
     stdio: 'pipe',
   });
-  const managedDir = join(configDir, 'extension');
+  const managedDir = join(dataDir, 'extension');
   if (!existsSync(join(managedDir, 'manifest.json'))) throw new Error('setup wrote no extension');
 
   // 3. Chrome for Testing with the managed folder loaded.
