@@ -102,7 +102,9 @@ describe('XPath selectors', () => {
     expect((await bvl('wait', "//button[@type='submit']")).code).toBe(0);
     expect((await bvl('click', "//button[@type='submit']")).code).toBe(0);
     expect((await bvl('get', 'text', '#out')).stdout).toContain('clicked');
-    expect((await bvl('get', 'text', '//nothing')).stderr).toContain('Element not found');
+    expect((await bvl('get', 'text', '//nothing', '--timeout', '300')).stderr).toContain(
+      'Element not found',
+    );
     expect((await bvl('get', 'text', '//[')).stderr).toContain('Invalid selector');
   });
 });

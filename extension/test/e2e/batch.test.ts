@@ -30,12 +30,12 @@ describe('batch', () => {
 
   it('continues after a failure and exits 1; --bail stops', async () => {
     await bvl('open', fixture('/form.html'));
-    const all = await bvl('batch', 'click #nope', 'get title');
+    const all = await bvl('batch', 'click #nope --timeout 300', 'get title');
     expect(all.code).toBe(1);
     expect(all.stderr).toMatch(/^✗ /);
     expect(all.stdout).toContain('Fixture Form');
 
-    const bail = await bvl('batch', '--bail', 'click #nope', 'get title');
+    const bail = await bvl('batch', '--bail', 'click #nope --timeout 300', 'get title');
     expect(bail.code).toBe(1);
     expect(bail.stdout).not.toContain('Fixture Form');
   });
@@ -52,7 +52,7 @@ describe('batch', () => {
 
   it('--json is a top-level array with upstream keys; --omit-command uses index', async () => {
     await bvl('open', fixture('/form.html'));
-    const r = await bvl('batch', '--json', 'get title', 'click #nope');
+    const r = await bvl('batch', '--json', 'get title', 'click #nope --timeout 300');
     expect(r.code).toBe(1);
     const out = JSON.parse(r.stdout) as Item[];
     expect(out[0]).toMatchObject({
@@ -61,7 +61,11 @@ describe('batch', () => {
       result: { title: 'Fixture Form' },
       error: null,
     });
-    expect(out[1]).toMatchObject({ command: ['click', '#nope'], success: false, result: null });
+    expect(out[1]).toMatchObject({
+      command: ['click', '#nope', '--timeout', '300'],
+      success: false,
+      result: null,
+    });
     expect(out[1]?.error).toMatch(/not found|No element/i);
 
     const o = JSON.parse(

@@ -64,6 +64,8 @@ function run(
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
     child.once('error', reject);
+    // bvl may exit before reading stdin (e.g. on a usage error); that EPIPE is not a failure.
+    child.stdin.on('error', () => undefined);
     child.stdin.end(stdin ?? '');
     child.once('close', (code) => {
       resolve({ code: code ?? -1, stdout, stderr });

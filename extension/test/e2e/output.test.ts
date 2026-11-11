@@ -48,7 +48,7 @@ describe('warnings go to stderr', () => {
 describe('JSON error codes', () => {
   it('maps targeting failures', async () => {
     await bvl('open', fixture('/form.html'));
-    expect(await errOf('click', '#nope')).toMatchObject({ code: 'not_found' });
+    expect(await errOf('click', '#nope', '--timeout', '300')).toMatchObject({ code: 'not_found' });
     expect(await errOf('click', '@e999')).toMatchObject({ code: 'unknown_ref' });
     expect(await errOf('wait', '#never', '--timeout', '600')).toMatchObject({ code: 'timeout' });
   });
