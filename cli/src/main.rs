@@ -150,7 +150,7 @@ pub fn connect(c: &Config) -> Result<Ws> {
     }
     drop(ws);
     eprintln!("bvl: restarting the proxy (v{v} -> v{VERSION})");
-    if !shutdown(c) {
+    if !shutdown(c, Exit::Restart) {
         return Ok(connect_raw(c)?.0);
     }
     for _ in 0..20 {
@@ -223,10 +223,23 @@ pub fn ensure_proxy(c: &Config) -> Result<()> {
     bail!("proxy did not start; see {}", log_path().display())
 }
 
+/// Why the proxy is asked to exit. The extension stays switched on only for `Restart`.
+#[derive(Clone, Copy)]
+pub(crate) enum Exit {
+    /// A new proxy follows at once (version change, re-pairing, `doctor --fix`).
+    Restart,
+    /// The user stopped bvl: the extension switches itself off.
+    Stop,
+}
+
 /// Ask a running proxy to exit. Returns false if none was reachable / auth failed.
-pub(crate) fn shutdown(c: &Config) -> bool {
+pub(crate) fn shutdown(c: &Config, why: Exit) -> bool {
     let Ok((mut ws, _)) = connect_raw(c) else { return false };
-    let ok = send(&mut ws, json!({"t":"shutdown"})).is_ok() && recv(&mut ws).is_ok();
+    let reason = match why {
+        Exit::Restart => "restart",
+        Exit::Stop => "stop",
+    };
+    let ok = send(&mut ws, json!({"t":"shutdown","reason":reason})).is_ok() && recv(&mut ws).is_ok();
     std::thread::sleep(Duration::from_millis(200)); // let it release the port
     ok
 }
@@ -239,7 +252,7 @@ fn paired() -> Config {
 }
 
 const HELP: &str = "bvl local commands:
-  setup [--browser chrome|edge|brave|chromium] [--no-open] [--no-wait]
+  setup [--browser chrome|edge|brave|chromium] [--open] [--no-wait]
                              install the browser extension (load it once) and pair automatically
   skills [list]              list agent skills; `skills get core` prints the usage guide (read it first!)
   skills get <name> [--full] [--ref <ref>]   print a skill (+ all / one reference)
@@ -408,7 +421,9 @@ fn status(json_out: bool) -> Result<i32> {
                 );
             }
         }
-        None => println!("extension: not connected"),
+        None => println!(
+            "extension: not connected (it is probably switched off: ask the user to click the Browser Valet icon and switch it on)"
+        ),
     }
     Ok(0)
 }
@@ -443,7 +458,7 @@ fn local(args: Vec<String>) -> Result<i32> {
             // A running proxy keeps the old secret in memory, so ask it to exit first (authenticated with
             // the OLD config). If that fails (no proxy / old secret already wrong) there is nothing to stop
             // or it can't be stopped from here; it will exit on its idle timeout.
-            let stopped = load().is_some_and(|old| shutdown(&old));
+            let stopped = load().is_some_and(|old| shutdown(&old, Exit::Restart));
             if embed::ext_dir().is_dir() {
                 embed::write_pairing(&secret, port)?;
             }
@@ -456,7 +471,7 @@ fn local(args: Vec<String>) -> Result<i32> {
         }
         Some("unpair") => {
             if let Some(c) = load() {
-                shutdown(&c);
+                shutdown(&c, Exit::Stop);
             }
             let _ = std::fs::remove_file(config_dir().join("config.json"));
             let _ = std::fs::remove_file(embed::ext_dir().join(embed::PAIRING));
@@ -466,7 +481,7 @@ fn local(args: Vec<String>) -> Result<i32> {
         Some("stop") => {
             println!(
                 "{}",
-                if load().is_some_and(|c| shutdown(&c)) {
+                if load().is_some_and(|c| shutdown(&c, Exit::Stop)) {
                     "Proxy stopped."
                 } else {
                     "Proxy not running."

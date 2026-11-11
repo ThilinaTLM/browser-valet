@@ -124,6 +124,8 @@ export function installChromeMock(): ChromeMock {
       openPopup: vi.fn(noop),
       setBadgeText: vi.fn(noop),
       setBadgeBackgroundColor: vi.fn(noop),
+      setIcon: vi.fn(noop),
+      setTitle: vi.fn(noop),
     },
     alarms: { create: vi.fn(noop), onAlarm: new MockEvent() },
     debugger: {

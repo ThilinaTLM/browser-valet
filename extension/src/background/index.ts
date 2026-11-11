@@ -6,6 +6,7 @@ import { connect, disconnect, startKeepAlive } from './connection';
 import { loadState, regenerateSecret, save, state, updateSettings } from './state';
 import { setReady, syncAll } from './navigation-guard';
 import { loadGuardrails, updateGuardrails } from './guardrails';
+import { refreshIcon, revokeAll, setEnabled } from './switch';
 import { decide, grant, refreshBadge, refreshGlobalBadge, revoke } from './tabs';
 
 const ready = loadState().then(async () => {
@@ -14,6 +15,7 @@ const ready = loadState().then(async () => {
   // Re-apply badges (they don't survive browser restarts; state might have).
   for (const id of Object.keys(state.tabs)) await refreshBadge(Number(id));
   await refreshGlobalBadge();
+  await refreshIcon();
   connect();
 });
 
@@ -24,14 +26,6 @@ chrome.runtime.onInstalled.addListener(() => void ready.then(connect));
 void chrome.alarms.create('bvl-keepalive', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(() => void ready.then(connect));
 startKeepAlive();
-
-/** Stop controlling every tab and deny every pending approval. */
-async function revokeAll(): Promise<void> {
-  for (const a of state.approvals) decide(a.id, false);
-  state.approvals = []; // also drops orphans whose waiter died with an earlier service worker
-  await refreshGlobalBadge();
-  for (const [id, m] of Object.entries(state.tabs)) if (m.control) await revoke(Number(id));
-}
 
 async function handle(msg: PopupMessage): Promise<void> {
   await ready;
@@ -51,13 +45,15 @@ async function handle(msg: PopupMessage): Promise<void> {
     case 'revokeAll':
       await revokeAll();
       break;
-    case 'settings':
-      await updateSettings(msg.settings);
+    case 'settings': {
+      const { enabled, ...rest } = msg.settings;
+      if (Object.keys(rest).length) await updateSettings(rest);
       // Turning the extension off ends all agent control; turning it on again starts from scratch.
-      if (msg.settings.enabled === false) await revokeAll();
+      if (enabled !== undefined) await setEnabled(enabled);
       disconnect();
       connect();
       break;
+    }
     case 'guardrails':
       await updateGuardrails(msg.guardrails);
       await syncAll();

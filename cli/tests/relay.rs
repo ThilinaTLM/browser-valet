@@ -307,6 +307,7 @@ fn shutdown_fails_pending_requests_and_cancels_in_extension() {
     ids.sort_by_key(|v| v.as_u64());
     cancelled.sort_by_key(|v| v.as_u64());
     assert_eq!(ids, cancelled);
+    assert_eq!(recv(&mut e), json!({"t":"bye","reason":"stop"}));
     assert!(wait_exit(&mut p, 5));
 }
 
@@ -372,6 +373,7 @@ fn no_extension_errors_after_wait() {
     assert!(t.elapsed() >= Duration::from_millis(350));
     assert_eq!(r["res"]["exitCode"], 1);
     assert!(r["res"]["stderr"].as_str().unwrap().contains("not connected"));
+    assert!(r["res"]["stderr"].as_str().unwrap().contains("switch it on"));
     assert_eq!(r["res"]["code"], "not_connected");
 }
 
@@ -379,6 +381,36 @@ fn no_extension_errors_after_wait() {
 fn idle_timeout_exits() {
     let mut p = start(&["--idle-timeout", "1"]);
     assert!(wait_exit(&mut p, 5));
+}
+
+#[test]
+fn idle_exit_says_bye_to_the_extension() {
+    let mut p = start(&["--idle-timeout", "1"]);
+    let mut e = ext(&p);
+    assert_eq!(recv(&mut e), json!({"t":"bye","reason":"idle"}));
+    assert!(wait_exit(&mut p, 5));
+}
+
+#[test]
+fn shutdown_reason_reaches_the_extension() {
+    for (sent, said) in [
+        (json!("restart"), "restart"),
+        (json!("stop"), "stop"),
+        (Value::Null, "stop"),
+        (json!("bogus"), "stop"),
+    ] {
+        let mut p = start(&[]);
+        let mut e = ext(&p);
+        let mut c = cli(&p);
+        let mut msg = json!({"t":"shutdown"});
+        if !sent.is_null() {
+            msg["reason"] = sent;
+        }
+        send(&mut c, msg);
+        assert_eq!(recv(&mut c)["t"], "ok");
+        assert_eq!(recv(&mut e), json!({"t":"bye","reason":said}));
+        assert!(wait_exit(&mut p, 5));
+    }
 }
 
 #[test]
@@ -597,7 +629,7 @@ fn skills_list_get_path_install() {
 #[test]
 fn setup_writes_folder_and_pairing() {
     let d = tmpdir("setup");
-    let o = run_bvl(&d, &d, &["setup", "--no-open", "--no-wait"]);
+    let o = run_bvl(&d, &d, &["setup", "--no-wait"]);
     if !embedded() {
         assert!(!o.status.success());
         assert!(String::from_utf8_lossy(&o.stderr).contains("doesn't include the extension"));
@@ -610,7 +642,7 @@ fn setup_writes_folder_and_pairing() {
     assert_eq!(pairing, cfg);
     assert!(d.join("extension/manifest.json").is_file());
     // Idempotent: keeps the secret.
-    assert!(run_bvl(&d, &d, &["setup", "--no-open", "--no-wait"]).status.success());
+    assert!(run_bvl(&d, &d, &["setup", "--no-wait"]).status.success());
     let cfg2: Value = serde_json::from_slice(&std::fs::read(d.join("config.json")).unwrap()).unwrap();
     assert_eq!(cfg, cfg2);
     // unpair removes pairing.json
@@ -639,7 +671,7 @@ fn config_and_data_dirs_are_separate() {
     assert!(data.join("skills/core/SKILL.md").is_file());
     assert!(!cfg.join("skills").exists());
     if embedded() {
-        let o = run(&["setup", "--no-open", "--no-wait"]);
+        let o = run(&["setup", "--no-wait"]);
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         assert!(cfg.join("config.json").is_file());
         assert!(!data.join("config.json").exists());

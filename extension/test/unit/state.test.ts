@@ -30,7 +30,7 @@ describe('loadState', () => {
     await s.loadState();
     expect(s.state.nextTid).toBe(1);
     expect(s.settings.secret).toMatch(/^[\w-]{43}$/);
-    expect(s.settings).toMatchObject({ port: 47823, enabled: true });
+    expect(s.settings).toMatchObject({ port: 47823, enabled: false });
     expect(mock.local.data).toMatchObject({ secret: s.settings.secret, paired: false });
   });
 
@@ -51,6 +51,30 @@ describe('loadState', () => {
     await s.loadState();
     expect(s.state.approvals).toEqual([]);
     expect(s.state.tabs[1]?.tid).toBe('t3');
+  });
+
+  it('starts switched off after a browser start, even if it was on', async () => {
+    mock.local.data = { secret: 'abc', enabled: true };
+    await s.loadState();
+    expect(s.settings.enabled).toBe(false);
+    expect(mock.local.data.enabled).toBe(false);
+  });
+
+  it('keeps the switch on across a service-worker restart (session state exists)', async () => {
+    mock.local.data = { secret: 'abc', enabled: true };
+    mock.session.data.state = { nextTid: 2 };
+    await s.loadState();
+    expect(s.settings.enabled).toBe(true);
+  });
+
+  it('keeps the switch on across a self-update (handoff restored)', async () => {
+    mock.local.data = {
+      secret: 'abc',
+      enabled: true,
+      handoff: { state: handedOff(), ts: Date.now() },
+    };
+    await s.loadState();
+    expect(s.settings.enabled).toBe(true);
   });
 
   it('prefers a stored secret and port', async () => {

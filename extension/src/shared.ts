@@ -21,6 +21,9 @@ export interface CliResponse {
 
 export type ConnStatus = 'off' | 'waiting' | 'connected' | 'auth-failed';
 
+/** Why the extension switched itself off (absent: off by default, or by the user). */
+export type OffReason = 'idle' | 'stopped' | 'lost';
+
 export interface Connection {
   status: ConnStatus;
   /** Set once the CLI has successfully connected with the current secret. */
@@ -29,6 +32,8 @@ export interface Connection {
   managed?: boolean;
   /** Effective port (from pairing.json when managed). */
   port?: number;
+  /** Set when the extension switched itself off because bvl went away; cleared on switch-on. */
+  offReason?: OffReason;
 }
 
 export type Control = 'agent' | 'user';
@@ -108,6 +113,7 @@ export interface State {
 export interface Settings {
   secret: string;
   port: number;
+  /** The popup's on/off switch. Off by default and after every browser start. */
   enabled: boolean;
 }
 

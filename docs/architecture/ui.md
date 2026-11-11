@@ -6,29 +6,33 @@ token values. Nothing tests the styling.
 
 ## Rules
 
-- **Default:** use the Nerve theme tokens in `popup.css`, not raw colours or sizes. The tokens are ported from Nerve's ui-kit (`packages/ui-kit/src/styles/theme.css`). A theme supplies only colour inputs, and everything else is derived. *Why:* the popup should match Nerve, and light and dark follow from one set of inputs.
-- **MUST** make no network requests from the popup. Fonts (Outfit 400/500/600, Iosevka 400/500) are copied from `@fontsource` into `dist/fonts` by `build.mjs`. *Why:* this is an extension running in the user's real browser. Offline use and privacy matter.
-- **MUST** keep logic out of the popup. It sends messages to the worker and renders state. *Why:* the popup is often closed, and consent waiters live in the worker.
+- **Default:** use the Nerve theme tokens in `popup.css`, not raw colours or sizes. The tokens are ported from Nerve's ui-kit (`packages/ui-kit/src/styles/theme.css`). A theme supplies only colour inputs, and everything else is derived. _Why:_ the popup should match Nerve, and light and dark follow from one set of inputs.
+- **MUST** make no network requests from the popup. Fonts (Outfit 400/500/600, Iosevka 400/500) are copied from `@fontsource` into `dist/fonts` by `build.mjs`. _Why:_ this is an extension running in the user's real browser. Offline use and privacy matter.
+- **MUST** keep logic out of the popup. It sends messages to the worker and renders state. _Why:_ the popup is often closed, and consent waiters live in the worker.
 - **Default:** light or dark follows `prefers-color-scheme`. There is no in-popup theme switch.
 
 ## Tokens
 
-| Group | Tokens |
-|---|---|
-| Colour inputs (per theme) | `--background`, `--foreground`, `--primary` (ember), `--success`, `--warning`, `--info`, `--destructive`, `--destructive-solid`, `--on-solid` |
-| Derived | `--card`, `--well*`, `--muted`, `--muted-foreground`, `--border`, `--border-subtle`, `--input`, `--ring`, `--focus`, `--hover`, `*-subtle`, `*-strong`, `--primary-foreground` |
-| Derivation knobs | `--step-card`, `--step-well`, `--mix-*` |
-| Geometry / type | `--radius`, `--radius-md`, `--spacing-control(-sm)`, `--text-ui`, `--text-caption`, `--text-title` (+ line heights), `--font-sans`, `--font-mono` |
-| Elevation | `--elevation-strength`, `--elevation-hsl`, `--shadow-sm` |
+| Group                     | Tokens                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Colour inputs (per theme) | `--background`, `--foreground`, `--primary` (ember), `--success`, `--warning`, `--info`, `--destructive`, `--destructive-solid`, `--on-solid`                                  |
+| Derived                   | `--card`, `--well*`, `--muted`, `--muted-foreground`, `--border`, `--border-subtle`, `--input`, `--ring`, `--focus`, `--hover`, `*-subtle`, `*-strong`, `--primary-foreground` |
+| Derivation knobs          | `--step-card`, `--step-well`, `--mix-*`                                                                                                                                        |
+| Geometry / type           | `--radius`, `--radius-md`, `--spacing-control(-sm)`, `--text-ui`, `--text-caption`, `--text-title` (+ line heights), `--font-sans`, `--font-mono`                              |
+| Elevation                 | `--elevation-strength`, `--elevation-hsl`, `--shadow-sm`                                                                                                                       |
 
 To add a colour, add an input for both themes, or derive one from existing inputs in `:root`.
 
 ## Design
 
-- Sections: connection status and the on/off switch; pairing (only for manual pairing); permission requests (Allow/Deny); This tab (share/stop); Agent tabs (Stop / Stop all); Recent activity.
-- **Guardrails** (collapsed `<details>`, hidden in the approval window): default output limit, "always mark page content", allowed domains (textarea, one pattern per line) and, for action confirmation, category checkboxes. One Save button sends a `guardrails` message; the worker validates it (a bad domain pattern is rejected and shown). The popup holds no policy logic ([security.md](security.md#guardrails)).
+- Sections: connection status and the on/off switch; a **Switched off** card while off (with the reason when it switched itself off: bvl idle, stopped, or connection lost); pairing (only for manual pairing); permission requests (Allow/Deny); This tab (share/stop); Agent tabs (Stop / Stop all); Recent activity.
+- **Views:** two icon buttons in the header (shield, gear; hidden in the approval window) switch the main area to the **Guardrails** or **Settings** view; pressing the active button or _Back_ returns to the main view. Permission and confirmation requests still render above either view, so a waiting agent is never hidden. The view is popup-local state, so it resets on reopen. _Why:_ the main view stays short, without scrolling past forms.
+- **Guardrails** view: default output limit, "always mark page content", allowed domains (textarea, one pattern per line) and, for action confirmation, category checkboxes. One Save button sends a `guardrails` message; the worker validates it (a bad domain pattern is rejected and shown). The popup holds no policy logic ([security.md](security.md#guardrails)).
+- **Settings** view: port (read-only when managed by bvl), and for manual pairing the pairing command and _New pairing code_.
+- Re-renders triggered by storage changes skip while an input in a form view has focus, so typing is not lost.
 - An approval with an `action` renders as a **Confirm action** card (category title, site, redacted command, Deny/Allow) instead of the tab-control card; both use the same `allow`/`deny` buttons and message.
 - When a permission request arrives, the worker opens the popup, or a small window if Chrome isn't focused.
+- Toolbar icon: the normal icon while on, the grey `icon-off` (source `static/icons/icon-off.svg`, PNGs rendered with `rsvg-convert -w 16|32`) while off; the title says "Browser Valet: off". See [runtime.md](runtime.md#the-onoff-switch).
 - Badge: `AI` on controlled tabs and `!` while an approval is pending. Its colours are hex literals in `tabs.ts` (`chrome.action` takes no CSS variables). Keep them close to `--primary` / `--warning`.
 
 ## Change risk

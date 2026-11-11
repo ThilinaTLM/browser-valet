@@ -12,17 +12,36 @@ Message formats: [protocol.md](protocol.md).
 - **Default:** new fields in the extension's `State` must have a default in `initial()`. *Why:* stored and handed-off state is spread over `initial()`, so state from an older version lacks the field.
 - **Default:** `State.sessions[s].sites` (hosts the session has visited, for `navigate-new-site`) and `Approval.action` are optional; code treats a missing value as empty/none, so state from an older version still loads.
 - **Default:** the user's guardrail policy (`guardrails` in `chrome.storage.local`: `maxOutput`, `contentBoundaries`, `allowedDomains`, `confirm`) is read by `loadGuardrails` through `sanitize`, so a missing or malformed key falls back to `DEFAULT_GUARDRAILS` (everything off). It is not part of `State`, so it is untouched by handoff and by revoke. *Why:* it is the user's setting, not session state; turning the switch off must not erase it.
-- **Default:** one extension connection at a time; the newest authenticated one replaces the old one.
+- **Default:** one extension connection at a time; the newest authenticated one replaces the old one. The replaced extension sees its connection end without a `bye` and switches itself off.
+
+## The on/off switch
+
+`settings.enabled` (`chrome.storage.local` `enabled`) is the popup's switch. Code: `switch.ts` (`setEnabled`, `revokeAll`, `refreshIcon`), `connection.ts` (`onclose`), `state.ts` (`loadState`).
+
+| Event | Switch |
+|---|---|
+| First install, browser start, extension reloaded or re-enabled in Chrome (no `chrome.storage.session` `state` and no handoff) | forced **off** in `loadState` |
+| Service-worker restart (session `state` exists), self-update reload (handoff restored) | unchanged |
+| Authenticated connection ends after `bye` `idle` / `stop`, or with no `bye` (proxy crashed or was killed, or another extension replaced this one) | **off**, `conn.offReason` = `idle` / `stopped` / `lost` |
+| Connection ends after `bye` `restart` (CLI version restart, `bvl pair`, `doctor --fix`) | unchanged; reconnects |
+| The extension closes the socket itself (`disconnect()`), or is reloading for a self-update | unchanged |
+| Never authenticated (no proxy listening, auth failed) | unchanged; keeps retrying |
+| User flips the switch | as set; switching on clears `offReason` |
+
+- **MUST** go through `setEnabled` for every change: it persists `enabled`, revokes all control when switching off, records `offReason` and updates the toolbar icon and title. *Why:* manual and automatic off must behave the same (see [security.md](security.md#consent-model)).
+- **MUST NOT** switch on from anything but the popup's `settings` message. *Why:* switching on is the user's decision.
+- The toolbar icon is the grey `icons/icon-off-*.png` while off. The manifest's `default_icon` is the off icon, so the icon is right before the worker runs; `refreshIcon` sets the normal one when on.
+- A killed service worker runs no `onclose`, so it stays on and reconnects. The 20 s keep-alive makes this rare.
 
 ## Lifetimes
 
 | Process / store | Lifetime | Survives |
 |---|---|---|
 | CLI | one command | — |
-| Proxy | started detached by the CLI on demand. Exits after `BVL_IDLE_TIMEOUT` (default 600 s, `0` = never) with no requests in flight. Pings don't count as activity. | nothing; it holds no durable state |
+| Proxy | started detached by the CLI on demand. Exits after `BVL_IDLE_TIMEOUT` (default 600 s, `0` = never) with no requests in flight. Pings don't count as activity. Before exiting it sends the extension `bye` (`idle`, or the `shutdown` reason), which switches the extension off unless it is `restart`. | nothing; it holds no durable state |
 | Extension service worker | killed by Chrome when idle. The 20 s keep-alive ping and a 30 s alarm limit this. | `chrome.storage.session` |
 | `chrome.storage.session` `state` (tabs, grants, sessions, refs, iframe sessions, frame scope, approvals, log) | until the extension is reloaded or disabled, or the browser restarts | SW and proxy restarts; self-update (via handoff) |
-| `chrome.storage.local` (`secret`, `port`, `enabled`, `paired`, `handoff`, `updateTried`, `guardrails`) | persistent | everything except uninstall |
+| `chrome.storage.local` (`secret`, `port`, `enabled`, `paired`, `handoff`, `updateTried`, `guardrails`) | persistent | everything except uninstall (`enabled` is reset to off on a fresh start, see [The on/off switch](#the-onoff-switch)) |
 | In memory (debugger attachments, console/error and network buffers, approval waiters, in-flight requests, held modifier keys) | SW lifetime | nothing |
 
 ## Persisted files (CLI side)

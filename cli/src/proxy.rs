@@ -18,6 +18,12 @@ const EXT_ORIGIN: &str = "chrome-extension://fekhggniifjffgnkljlblgfcoolaonbm";
 
 type Ws = WebSocketStream<TcpStream>;
 
+/// Shown to the agent when no extension is connected. The usual cause is the switch being off.
+pub const NOT_CONNECTED: &str =
+    "browser extension is not connected. It is switched off by default, and switches itself off \
+when bvl stops or has been idle, and when the browser restarts. Ask the user to click the Browser Valet icon in their \
+browser and switch it on, then retry. If it was never installed, the user runs `bvl setup` first.";
+
 /// An in-flight request: which ext connection owns it, how to reach that ext, how to reach the CLI.
 struct Pending {
     owner: u64,
@@ -34,6 +40,8 @@ struct State {
     pending: HashMap<u64, Pending>,
     /// `request` calls still running (they must flush their final message before the proxy exits).
     active: usize,
+    /// Extension connection loops still running (they must flush `bye` before the proxy exits).
+    exts: usize,
     next: u64,
     last: Instant,
 }
@@ -60,6 +68,7 @@ pub fn run(secret: String, port: u16, idle: u64) -> Result<()> {
             ext: None,
             pending: HashMap::new(),
             active: 0,
+            exts: 0,
             next: 1,
             last: Instant::now(),
         }),
@@ -90,21 +99,48 @@ async fn serve_all(sh: Arc<Shared>) -> Result<()> {
             },
             _ = sh.stop.notified() => {
                 log("shutdown requested");
-                // Let in-flight requests write their failure `res` to their CLIs first.
-                for _ in 0..20 {
-                    if sh.st.lock().unwrap().active == 0 { break; }
-                    sleep(Duration::from_millis(50)).await;
-                }
+                flush(&sh).await;
                 return Ok(());
             }
             _ = tick.tick() => if sh.idle > 0 {
-                let st = sh.st.lock().unwrap();
-                if st.pending.is_empty() && st.last.elapsed() >= Duration::from_secs(sh.idle) {
+                let idle = {
+                    let mut st = sh.st.lock().unwrap();
+                    let idle = st.pending.is_empty() && st.last.elapsed() >= Duration::from_secs(sh.idle);
+                    if idle {
+                        bye(&mut st, "idle");
+                    }
+                    idle
+                };
+                if idle {
                     log("idle timeout, exiting");
+                    flush(&sh).await;
                     return Ok(());
                 }
             },
         }
+    }
+}
+
+/// Tell the extension why the proxy is going away and close its connection. `restart` keeps the
+/// extension switched on; anything else (or no `bye` at all) switches it off.
+fn bye(st: &mut State, reason: &str) {
+    // Taking the entry drops its sender after the queued `bye`, which ends the connection loop.
+    if let Some(e) = st.ext.take() {
+        e.tx.send(json!({"t":"bye","reason":reason}).to_string()).ok();
+    }
+}
+
+/// Before exiting: let in-flight requests write their failure `res` to their CLIs, and the
+/// extension connection write its `bye` (at most 1 s).
+async fn flush(sh: &Shared) {
+    for _ in 0..20 {
+        {
+            let st = sh.st.lock().unwrap();
+            if st.active == 0 && st.exts == 0 {
+                break;
+            }
+        }
+        sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -227,6 +263,7 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
             tx.send(json!({"t":"update","version":v}).to_string()).ok();
         }
         st.ext = Some(Ext { conn: id, tx, info });
+        st.exts += 1;
         id
     };
     loop {
@@ -243,6 +280,7 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
     }
     ws.close(None).await.ok();
     let mut st = sh.st.lock().unwrap();
+    st.exts -= 1;
     if st.ext.as_ref().is_some_and(|e| e.conn == id) {
         st.ext = None;
     }
@@ -299,6 +337,10 @@ async fn cli_conn(sh: &Shared, mut ws: Ws) -> Result<()> {
             send(&mut ws, v).await
         }
         Some("shutdown") => {
+            let reason = match msg["reason"].as_str() {
+                Some("restart") => "restart",
+                _ => "stop",
+            };
             // Fail every in-flight request (their CLIs get a `res`) and tell the extension to stop them.
             {
                 let mut st = sh.st.lock().unwrap();
@@ -306,6 +348,7 @@ async fn cli_conn(sh: &Shared, mut ws: Ws) -> Result<()> {
                     p.out.send(err_res("proxy is shutting down")).ok();
                     p.ext.send(json!({"t":"cancel","id":id}).to_string()).ok();
                 }
+                bye(&mut st, reason);
             }
             sh.stop.notify_one();
             send(&mut ws, json!({"t":"ok"})).await
@@ -328,7 +371,7 @@ async fn request(sh: &Shared, ws: &mut Ws, req: Value) -> Result<()> {
             break t;
         }
         if start.elapsed() >= sh.ext_wait {
-            return send(ws, err_res("browser extension is not connected. Open Chrome with the Browser Valet extension installed and paired.")).await;
+            return send(ws, err_res(NOT_CONNECTED)).await;
         }
         sleep(Duration::from_millis(50)).await;
     };

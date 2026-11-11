@@ -1,4 +1,5 @@
-//! `bvl setup`: write the managed extension folder, open the browser's extensions page, wait for the connection.
+//! `bvl setup`: write the managed extension folder, print how to load and switch on the extension, wait for
+//! the connection. The browser is only launched with `--open`.
 use crate::embed::{self, EMBEDDED_EXT_VERSION, NO_EXT};
 use crate::{connect, ensure_proxy, load, recv, save, send, Config, DEFAULT_PORT};
 use anyhow::{bail, Result};
@@ -139,9 +140,11 @@ pub fn run(args: &[String]) -> Result<i32> {
     }
 
     let url = format!("{scheme}://extensions");
-    let opened = !args.iter().any(|a| a == "--no-open") && open_browser(&browser, &url);
+    // Opening the browser is opt-in; `--no-open` is still accepted (it was the opt-out before).
+    let opened = args.iter().any(|a| a == "--open") && open_browser(&browser, &url);
     let copied = clipboard(&shown);
-    println!("\nLoad the extension once (it updates itself afterwards):");
+    println!("\nAlready loaded it? Click the Browser Valet icon in the toolbar and switch it on.");
+    println!("\nOtherwise load the extension once (it updates itself afterwards):");
     println!(
         "  1. Open {url}{}",
         if opened {
@@ -156,6 +159,9 @@ pub fn run(args: &[String]) -> Result<i32> {
         "  4. Select this folder: {shown}{}",
         if copied { "  (copied to clipboard)" } else { "" }
     );
+    println!("  5. Click the Browser Valet icon in the toolbar and switch it on (it is off by default)");
+    println!("\nThe extension switches itself off when bvl stops, after bvl has been idle, and when the browser");
+    println!("restarts. Switch it on again whenever you want an agent to use this browser.");
 
     if !args.iter().any(|a| a == "--no-wait") {
         println!("\nWaiting for the extension to connect (Ctrl-C to stop)…");
@@ -182,7 +188,7 @@ pub fn run(args: &[String]) -> Result<i32> {
             }
             std::thread::sleep(Duration::from_secs(1));
         }
-        println!("Timed out waiting for the extension; run `bvl status` after loading it.");
+        println!("Timed out waiting for the extension; run `bvl status` after loading it and switching it on.");
         return Ok(1);
     }
     println!("\nThen run `bvl status` to check. For agents: `bvl skills install`.");

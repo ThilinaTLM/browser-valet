@@ -25,7 +25,7 @@ const initial = (): State => ({
 });
 
 export let state: State = initial();
-export let settings: Settings = { secret: '', port: DEFAULT_PORT, enabled: true };
+export let settings: Settings = { secret: '', port: DEFAULT_PORT, enabled: false };
 
 let saveQueued = false;
 
@@ -94,8 +94,11 @@ export async function refreshPairing(): Promise<void> {
   }
 }
 
-/** Restore state handed over by a self-update reload (chrome.storage.session is wiped by it). */
-async function restoreHandoff(): Promise<void> {
+/**
+ * Restore state handed over by a self-update reload (chrome.storage.session is wiped by it).
+ * Returns whether a handoff was restored.
+ */
+async function restoreHandoff(): Promise<boolean> {
   const { handoff, updateTried } = await chrome.storage.local.get<{
     handoff?: { state?: State; ts?: number };
     updateTried?: { version: string; ts: number };
@@ -103,7 +106,7 @@ async function restoreHandoff(): Promise<void> {
   if (updateTried?.version === chrome.runtime.getManifest().version) {
     await chrome.storage.local.remove('updateTried');
   }
-  if (!handoff) return;
+  if (!handoff) return false;
   await chrome.storage.local.remove('handoff');
   if (
     handoff.state &&
@@ -120,7 +123,9 @@ async function restoreHandoff(): Promise<void> {
       conn: initial().conn,
     };
     handoffGraceUntil = Date.now() + 5000;
+    return true;
   }
+  return false;
 }
 
 export async function loadState(): Promise<void> {
@@ -128,7 +133,10 @@ export async function loadState(): Promise<void> {
   // Approvals are never restored: their waiters lived in the previous service worker, so
   // nothing could answer them (the CLI request that asked has already failed).
   state = { ...initial(), ...stored.state, approvals: [] };
-  await restoreHandoff();
+  const handedOff = await restoreHandoff();
+  // No session state and no handoff: the browser (or the extension) has just started. The switch
+  // always starts off then; a service-worker restart or a self-update keeps it as it was.
+  const fresh = !stored.state && !handedOff;
   const local = await chrome.storage.local.get<Partial<Settings & { paired: boolean }>>([
     'secret',
     'port',
@@ -138,8 +146,9 @@ export async function loadState(): Promise<void> {
   settings = {
     secret: local.secret ?? '',
     port: local.port ?? DEFAULT_PORT,
-    enabled: local.enabled ?? true,
+    enabled: !fresh && local.enabled === true,
   };
+  if (fresh && local.enabled !== false) await chrome.storage.local.set({ enabled: false });
   if (!settings.secret) {
     settings.secret = randomSecret();
     await chrome.storage.local.set({ secret: settings.secret, paired: false });
