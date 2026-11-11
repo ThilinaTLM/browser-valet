@@ -173,3 +173,109 @@ jobs:
         env:
           CI: true
           E2E_SKIP_BUILD: 1
+
+  # scripts/install.sh and install.ps1 against the latest published release, plus a mirror with
+  # a wrong checksum that must be refused.
+  installers:
+    name: Installers (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, label: Linux }
+          - { os: macos-latest, label: macOS }
+          - { os: windows-latest, label: Windows }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts
+
+      - name: Lint install.sh
+        if: runner.os == 'Linux'
+        run: shellcheck scripts/install.sh
+
+      - name: install.sh (latest, piped, then upgrade over itself)
+        if: runner.os != 'Windows'
+        run: |
+          dir="$RUNNER_TEMP/bin"
+          sh scripts/install.sh < /dev/null   # default ~/.local/bin
+          ~/.local/bin/bvl version
+          cat scripts/install.sh | BVL_INSTALL_DIR="$dir" sh
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          BVL_VERSION="$tag" BVL_INSTALL_DIR="$dir" sh scripts/install.sh
+          "$dir/bvl" version | grep -F "bvl ${tag#v}"
+
+      - name: install.sh refuses a bad checksum
+        if: runner.os != 'Windows'
+        run: |
+          m="$RUNNER_TEMP/mirror/latest/download"; mkdir -p "$m"
+          gh release download --repo "$GITHUB_REPOSITORY" --dir "$m" --pattern 'bvl-*.tar.gz'
+          for f in "$m"/bvl-*; do echo "0000  ${f##*/}"; done > "$m/SHA256SUMS"
+          if BVL_BASE_URL="file://$RUNNER_TEMP/mirror" BVL_INSTALL_DIR="$RUNNER_TEMP/bad" sh scripts/install.sh; then
+            echo "::error::installed despite a checksum mismatch"; exit 1
+          fi
+          test ! -e "$RUNNER_TEMP/bad/bvl"
+
+      - name: install.ps1 (Windows PowerShell 5.1, via iex)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:BVL_INSTALL_DIR = "$env:RUNNER_TEMP\bvl51"
+          $env:BVL_NO_MODIFY_PATH = '1'
+          Get-Content scripts\install.ps1 -Raw | Invoke-Expression
+          & "$env:BVL_INSTALL_DIR\bvl.exe" version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: install.ps1 (PowerShell 7, PATH, upgrade while bvl.exe runs)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:BVL_INSTALL_DIR = "$env:RUNNER_TEMP\bvl7"
+          & .\scripts\install.ps1
+          $exe = "$env:BVL_INSTALL_DIR\bvl.exe"
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -notcontains $env:BVL_INSTALL_DIR) { throw 'install dir not added to the user PATH' }
+          # A running bvl.exe must not block the upgrade (it is renamed aside, not overwritten).
+          # The proxy needs a config (throwaway secret) to stay up.
+          $env:BVL_CONFIG_DIR = "$env:RUNNER_TEMP\bvlcfg"
+          New-Item -ItemType Directory -Force $env:BVL_CONFIG_DIR | Out-Null
+          '{"secret":"ci-throwaway-secret-0123456789abcdef","port":47999}' | Set-Content "$env:BVL_CONFIG_DIR\config.json"
+          $p = Start-Process -FilePath $exe -ArgumentList 'proxy' -PassThru -WindowStyle Hidden
+          try {
+            Start-Sleep -Seconds 1
+            if ($p.HasExited) { throw "bvl proxy exited early ($($p.ExitCode))" }
+            $tag = gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName
+            $env:BVL_VERSION = $tag
+            & .\scripts\install.ps1
+            $v = & $exe version
+            if ($v -ne "bvl $($tag.TrimStart('v'))") { throw "unexpected version: $v" }
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: install.ps1 refuses a bad checksum
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $m = "$env:RUNNER_TEMP\mirror\latest\download"
+          New-Item -ItemType Directory -Force $m | Out-Null
+          gh release download --repo $env:GITHUB_REPOSITORY --dir $m --pattern 'bvl-*.zip'
+          Get-ChildItem $m -Filter 'bvl-*' | ForEach-Object { "0000  $($_.Name)" } | Set-Content "$m\SHA256SUMS"
+          $srv = Start-Process python -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', "$env:RUNNER_TEMP\mirror" -PassThru -WindowStyle Hidden
+          try {
+            Start-Sleep -Seconds 2
+            $env:BVL_BASE_URL = 'http://127.0.0.1:8765'
+            $env:BVL_INSTALL_DIR = "$env:RUNNER_TEMP\bad"
+            $env:BVL_NO_MODIFY_PATH = '1'
+            $failed = $false
+            try { & .\scripts\install.ps1 } catch { $failed = $true; Write-Host "refused: $_" }
+            if (-not $failed) { throw 'installed despite a checksum mismatch' }
+            if (Test-Path "$env:BVL_INSTALL_DIR\bvl.exe") { throw 'bvl.exe was written' }
+          } finally {
+            Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
+          }

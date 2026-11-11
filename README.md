@@ -39,6 +39,34 @@ You only need the `bvl` binary. Prebuilt binaries for every
 | macOS Intel / Apple Silicon | `bvl-x86_64-apple-darwin.tar.gz` / `bvl-aarch64-apple-darwin.tar.gz` |
 | Windows x86_64 | `bvl-x86_64-pc-windows-msvc.zip` |
 
+**Linux / macOS:**
+
+```sh
+curl -fsSL https://github.com/ThilinaTLM/browser-valet/releases/latest/download/install.sh | sh
+```
+
+**Windows** (PowerShell):
+
+```powershell
+irm https://github.com/ThilinaTLM/browser-valet/releases/latest/download/install.ps1 | iex
+```
+
+The script picks the build for your OS and CPU, checks it against the release's `SHA256SUMS`, and
+installs `bvl` to `~/.local/bin` (Linux/macOS; it tells you if that is not on your `PATH`) or
+`%LOCALAPPDATA%\Programs\bvl` (Windows; added to your user `PATH`, so open a new terminal).
+Run it again to upgrade. Environment variables:
+
+| Variable | Effect |
+|---|---|
+| `BVL_VERSION` | install a specific release, e.g. `v0.2.0` or a pre-release `v0.2.0-rc.1` (default: latest stable) |
+| `BVL_INSTALL_DIR` | install somewhere else |
+| `BVL_NO_MODIFY_PATH=1` | Windows: don't touch the user `PATH` |
+
+For example, `curl -fsSL …/install.sh | BVL_VERSION=v0.2.0 sh`, or `$env:BVL_VERSION='v0.2.0'`
+before `irm … | iex`. Windows on ARM gets the x86_64 build (runs under emulation).
+
+<details><summary>Manual install (without the script)</summary>
+
 **Linux / macOS** (pick the target from the table; `~/.local/bin` must be on your `PATH`):
 
 ```sh
@@ -60,9 +88,12 @@ Expand-Archive "$env:TEMP\bvl.zip" -DestinationPath $dir -Force
 bvl version
 ```
 
-Each release has a `SHA256SUMS` file for verifying downloads. For a specific version, replace
-`latest/download` with `download/vX.Y.Z`. The binaries are not code-signed: if macOS blocks a copy
-downloaded with a browser, run `xattr -d com.apple.quarantine bvl`. To build from source instead,
+Verify downloads with the release's `SHA256SUMS`. For a specific version, replace
+`latest/download` with `download/vX.Y.Z`.
+</details>
+
+The binaries are not code-signed: if macOS blocks a copy downloaded with a browser (the install
+script is not affected), run `xattr -d com.apple.quarantine bvl`. To build from source instead,
 build the extension and run `cargo install --path cli` (see [Development](#development)).
 
 Then:
