@@ -237,8 +237,10 @@ export async function resolveWait(
     try {
       return await resolve(tabId, target);
     } catch (e) {
-      // Refs are snapshot-bound: no point waiting for them to appear.
-      if (isRef(target) || Date.now() > deadline || signal.aborted) throw e;
+      // Refs are snapshot-bound: no point waiting for them to appear. An invalid selector never
+      // becomes valid either.
+      const badArgs = e instanceof UserError && e.code === 'bad_args';
+      if (isRef(target) || badArgs || Date.now() > deadline || signal.aborted) throw e;
     }
     await new Promise((r) => setTimeout(r, 100));
   }

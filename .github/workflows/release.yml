@@ -115,12 +115,22 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts
+
       - name: Download packages
         uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: out
           merge-multiple: true
+
+      # Shipped as release assets so `releases/latest/download/install.sh` always matches the
+      # binaries next to it.
+      - name: Add installer scripts
+        run: cp scripts/install.sh scripts/install.ps1 out/
 
       - name: Write checksums
         working-directory: out

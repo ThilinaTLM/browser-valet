@@ -23,8 +23,9 @@ describe('on/off switch', () => {
     expect(view.status).toBe('Off');
     expect(view.text).toContain('bvl was stopped');
 
-    // A new proxy starts, but the extension stays off.
-    const status = await bvl('status');
+    // A new proxy starts, but the extension stays off. The proxy reads BVL_EXT_WAIT_MS when it
+    // starts, so set it on the command that starts it (otherwise `get title` waits the full 10 s).
+    const status = await bvlWith({ BVL_EXT_WAIT_MS: '1500' }, 'status');
     expect(status.stdout).toContain('extension: not connected');
     expect(status.stdout).toContain('switch it on');
     const cmd = await bvlWith({ BVL_EXT_WAIT_MS: '1500' }, 'get', 'title');
