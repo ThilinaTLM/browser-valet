@@ -1,4 +1,5 @@
-// Popup UI: connection status + pairing, consent requests, tab sharing, and recent activity.
+// Popup UI: connection status + pairing, consent requests, tab sharing, and recent activity,
+// plus Guardrails and Settings as separate views opened from the header.
 // Renders from chrome.storage (written by the background worker); actions are messages to it.
 
 import {
@@ -6,6 +7,7 @@ import {
   type ConfirmCategory,
   type ConnStatus,
   type Guardrails,
+  type OffReason,
   type PopupMessage,
   type Settings,
   type State,
@@ -22,6 +24,12 @@ const statusEl = byId('status');
 const enabledEl = byId('enabled') as HTMLInputElement;
 const isWindow = new URLSearchParams(location.search).has('window');
 if (isWindow) document.body.classList.add('window');
+
+const OFF_TEXT: Record<OffReason, string> = {
+  idle: 'bvl was idle for a while, so the extension switched itself off.',
+  stopped: 'bvl was stopped, so the extension switched itself off.',
+  lost: 'The connection to bvl was lost, so the extension switched itself off.',
+};
 
 const STATUS_TEXT: Record<ConnStatus, string> = {
   connected: 'Connected',
@@ -58,7 +66,10 @@ function tabRow(t: chrome.tabs.Tab | undefined, tid: string, sub: string, action
     </div>${actions}</div>`;
 }
 
-let guardrailsOpen = false;
+// Which view the popup shows: the main dashboard, or one of the header's form views.
+type View = 'main' | 'guardrails' | 'settings';
+let view: View = 'main';
+const viewButtons = [...document.querySelectorAll<HTMLButtonElement>('#views [data-view]')];
 
 const CONFIRM_LABEL: Record<ConfirmCategory, string> = {
   eval: 'eval (JavaScript in a page)',
@@ -83,7 +94,8 @@ async function render(): Promise<void> {
     ...stored.guardrails,
   };
   // Do not rebuild the page under a field the user is typing in.
-  if (document.activeElement?.closest('#guardrails')) return;
+  if (document.activeElement?.matches('.form input, .form textarea')) return;
+  for (const b of viewButtons) b.setAttribute('aria-pressed', String(b.dataset.view === view));
   if (!state) {
     app.innerHTML = '<p class="muted">Starting…</p>';
     return;
@@ -95,7 +107,7 @@ async function render(): Promise<void> {
   statusEl.textContent =
     status === 'waiting' && !state.conn.paired ? 'Not paired' : STATUS_TEXT[status];
   statusEl.className = `pill ${status}`;
-  enabledEl.checked = settings.enabled !== false;
+  enabledEl.checked = settings.enabled === true;
 
   const parts: string[] = [];
 
@@ -136,7 +148,48 @@ async function render(): Promise<void> {
   const pairBox = `<div class="code"><span>${esc(pairCmd)}</span>
     <button data-action="copy" data-text="${esc(pairCmd)}">Copy</button></div>`;
   const managed = state.conn.managed === true;
-  if (managed) {
+
+  // Form views (header buttons). Consent requests above still show, so an agent is never stuck.
+  if (view !== 'main' && !isWindow) {
+    const back = '<button class="link" data-action="view" data-view="main">Back</button>';
+    if (view === 'guardrails') {
+      parts.push(`<section class="card form" id="guardrails"><h2>Guardrails ${back}</h2>
+      <label class="field"><span>Allowed domains for agent navigation (one per line; empty = any)</span>
+        <textarea id="g-domains" rows="3" spellcheck="false" placeholder="example.com&#10;*.example.com&#10;localhost:3000">${esc(policy.allowedDomains.join('\n'))}</textarea></label>
+      <label class="check"><input id="g-boundaries" type="checkbox"${policy.contentBoundaries ? ' checked' : ''} />
+        Always mark page content in output</label>
+      <label class="field"><span>Default output limit (characters, 0 = none)</span>
+        <input id="g-max" type="number" min="0" step="1000" value="${policy.maxOutput}" /></label>
+      <p class="small muted">Ask me before the agent runs:</p>
+      ${CONFIRM_CATEGORIES.map(
+        (c) =>
+          `<label class="check"><input type="checkbox" data-confirm="${c}"${policy.confirm.includes(c) ? ' checked' : ''} /> ${esc(CONFIRM_LABEL[c])}</label>`,
+      ).join('')}
+      <div class="actions"><button class="primary" data-action="guardrails">Save</button></div>
+    </section>`);
+    } else {
+      parts.push(`<section class="card form" id="settings"><h2>Settings ${back}</h2>
+      <div class="row"><span class="grow">Port</span>
+        <input id="port" type="number" min="1" max="65535" value="${managed ? (state.conn.port ?? 47823) : (settings.port ?? 47823)}"${managed ? ' disabled' : ''} />
+        <button data-action="port"${managed ? ' disabled' : ''}>Save</button></div>
+      ${
+        managed
+          ? '<p class="small muted" style="margin-top:8px">The port comes from bvl (re-run <code>bvl setup</code> to change it).</p>'
+          : `<p class="small muted" style="margin-top:8px">Pairing command:</p>${pairBox}
+      <div class="actions"><button class="danger" data-action="repair">New pairing code</button></div>`
+      }
+    </section>`);
+    }
+    app.innerHTML = parts.join('');
+    return;
+  }
+
+  if (status === 'off') {
+    const why = state.conn.offReason ? `${OFF_TEXT[state.conn.offReason]} ` : '';
+    parts.push(`<section class="card off"><h2>Switched off</h2>
+      <p class="small">${why}Agents cannot reach this browser while it is off.</p>
+      <p class="small muted">Use the switch at the top right when you want an agent to use this browser.</p></section>`);
+  } else if (managed) {
     if (status === 'auth-failed') {
       parts.push(`<section class="card alert"><h2>Pairing mismatch</h2>
         <p>The pairing file is out of date. Run this in a terminal:</p>
@@ -149,7 +202,7 @@ async function render(): Promise<void> {
   } else if (status === 'auth-failed') {
     parts.push(`<section class="card alert"><h2>Pairing mismatch</h2>
       <p>The CLI is using a different pairing code. Run this in a terminal:</p>${pairBox}</section>`);
-  } else if (!state.conn.paired && status !== 'off') {
+  } else if (!state.conn.paired) {
     parts.push(`<section class="card"><h2>Connect the CLI</h2><ol>
       <li>Easiest: install via <code>bvl setup</code>, which pairs automatically.</li>
       <li>Or pair manually. Run in a terminal:${pairBox}</li>
@@ -211,39 +264,6 @@ async function render(): Promise<void> {
     );
   }
 
-  // 6. Guardrails: the user's policy for agents (enforced by the worker).
-  if (!isWindow) {
-    parts.push(`<details id="guardrails"${guardrailsOpen ? ' open' : ''}><summary>Guardrails</summary>
-      <label class="field"><span>Allowed domains for agent navigation (one per line; empty = any)</span>
-        <textarea id="g-domains" rows="3" spellcheck="false" placeholder="example.com&#10;*.example.com&#10;localhost:3000">${esc(policy.allowedDomains.join('\n'))}</textarea></label>
-      <label class="check"><input id="g-boundaries" type="checkbox"${policy.contentBoundaries ? ' checked' : ''} />
-        Always mark page content in output</label>
-      <label class="field"><span>Default output limit (characters, 0 = none)</span>
-        <input id="g-max" type="number" min="0" step="1000" value="${policy.maxOutput}" /></label>
-      <p class="small muted">Ask me before the agent runs:</p>
-      ${CONFIRM_CATEGORIES.map(
-        (c) =>
-          `<label class="check"><input type="checkbox" data-confirm="${c}"${policy.confirm.includes(c) ? ' checked' : ''} /> ${esc(CONFIRM_LABEL[c])}</label>`,
-      ).join('')}
-      <div class="actions"><button class="primary" data-action="guardrails">Save</button></div>
-    </details>`);
-  }
-
-  // 7. Settings.
-  if (!isWindow) {
-    parts.push(`<details><summary>Settings</summary>
-      <div class="row"><span class="grow">Port</span>
-        <input id="port" type="number" min="1" max="65535" value="${managed ? (state.conn.port ?? 47823) : (settings.port ?? 47823)}"${managed ? ' disabled' : ''} />
-        <button data-action="port"${managed ? ' disabled' : ''}>Save</button></div>
-      ${
-        managed
-          ? '<p class="small muted" style="margin-top:8px">The port comes from bvl (re-run <code>bvl setup</code> to change it).</p>'
-          : `<p class="small muted" style="margin-top:8px">Pairing command:</p>${pairBox}
-      <div class="actions"><button class="danger" data-action="repair">New pairing code</button></div>`
-      }
-    </details>`);
-  }
-
   app.innerHTML = parts.join('');
   if (isWindow && state.approvals.length === 0) window.close();
 }
@@ -300,6 +320,9 @@ app.addEventListener('click', (ev) => {
       });
       break;
     }
+    case 'view':
+      setView((el.dataset.view as View | undefined) ?? 'main');
+      break;
     case 'repair':
       if (confirm('Generate a new pairing code? The CLI must be paired again.')) {
         void send({ type: 'repair' });
@@ -308,15 +331,18 @@ app.addEventListener('click', (ev) => {
   }
 });
 
-app.addEventListener(
-  'toggle',
-  (ev) => {
-    if ((ev.target as HTMLElement).id === 'guardrails') {
-      guardrailsOpen = (ev.target as HTMLDetailsElement).open;
-    }
-  },
-  true,
-);
+function setView(next: View): void {
+  view = next;
+  void render();
+}
+
+// Header buttons toggle their view; pressing the active one returns to the main view.
+for (const b of viewButtons) {
+  b.addEventListener('click', () => {
+    const next = b.dataset.view as View;
+    setView(view === next ? 'main' : next);
+  });
+}
 
 enabledEl.addEventListener('change', () => {
   void send({ type: 'settings', settings: { enabled: enabledEl.checked } });

@@ -1,12 +1,20 @@
 // WebSocket client to the local `bvl` proxy (see docs/architecture/protocol.md), with mutual HMAC authentication.
+// When an authenticated connection ends for any reason other than an announced proxy restart, the
+// extension switches itself off (see runtime.md, "The on/off switch").
 
-import type { CliRequest, ConnStatus } from '../shared';
+import type { CliRequest, ConnStatus, OffReason } from '../shared';
 import { execute } from './dispatch';
 import { log, refreshPairing, save, setPaired, settings, state } from './state';
+import { setEnabled } from './switch';
 
 const VERSION = chrome.runtime.getManifest().version;
 const RETRY_MS = 1000;
 const UPDATE_RETRY_MS = 10 * 60_000;
+const OFF_LOG: Record<OffReason, string> = {
+  idle: 'bvl was idle',
+  stopped: 'bvl was stopped',
+  lost: 'connection to bvl lost',
+};
 
 let ws: WebSocket | undefined;
 let connecting = false;
@@ -118,6 +126,8 @@ function open(): void {
   let challenge = '';
   let authed = false;
   let rejected = false;
+  /** The proxy's `bye` reason, if it said goodbye before closing. */
+  let bye: string | undefined;
 
   const send = (msg: unknown) => {
     if (sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(msg));
@@ -181,13 +191,32 @@ function open(): void {
       case 'cancel':
         inflight.get(Number(msg.id))?.abort();
         break;
+      case 'bye':
+        if (authed) bye = String(msg.reason);
+        break;
     }
   };
 
   sock.onclose = () => {
+    // `disconnect()` clears `ws` before closing: then the extension itself ended the connection.
+    const ours = ws !== sock;
     if (ws === sock) ws = undefined;
     for (const c of inflight.values()) c.abort();
     inflight.clear();
+    // bvl went away (idle exit, `bvl stop`, crash): switch off until the user switches on again.
+    // Only an announced restart (new version, re-pairing) and our own self-update reload keep it on.
+    if (authed && !ours && !updating && bye !== 'restart' && settings.enabled) {
+      const reason: OffReason = bye === 'idle' ? 'idle' : bye === 'stop' ? 'stopped' : 'lost';
+      log({
+        ts: Date.now(),
+        session: 'bvl',
+        command: `switched off: ${OFF_LOG[reason]}`,
+        ok: true,
+      });
+      setStatus('off');
+      void setEnabled(false, reason);
+      return;
+    }
     if (!settings.enabled) {
       setStatus('off');
       return;

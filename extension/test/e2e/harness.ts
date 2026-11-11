@@ -245,6 +245,48 @@ export async function restartExtensionWorker(): Promise<void> {
   }
 }
 
+/** Wait until `bvl status` reports a connected extension (or `false`: reports none). */
+export async function waitForExtension(connected = true, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const r = await bvl('status');
+    const none = r.stdout.includes('extension: not connected');
+    if (connected ? /extension: \S/.test(r.stdout) && !none : none) return;
+    if (Date.now() > deadline) throw new Error(`extension state not reached:\n${r.stdout}`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+}
+
+/** Flip the popup's on/off switch (a `settings` message, as the popup sends). */
+export async function setSwitch(enabled: boolean): Promise<void> {
+  const page = await browser().newPage();
+  try {
+    await page.goto(`${info().extensionOrigin}/popup.html`);
+    await page.evaluate(
+      (on: boolean) => chrome.runtime.sendMessage({ type: 'settings', settings: { enabled: on } }),
+      enabled,
+    );
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
+/** What the popup shows: the switch, the status pill and the main area's text. */
+export async function popupView(): Promise<{ checked: boolean; status: string; text: string }> {
+  const page = await browser().newPage();
+  try {
+    await page.goto(`${info().extensionOrigin}/popup.html`);
+    await page.waitForFunction(() => document.getElementById('status')?.textContent !== '');
+    return await page.evaluate(() => ({
+      checked: (document.getElementById('enabled') as HTMLInputElement).checked,
+      status: document.getElementById('status')?.textContent ?? '',
+      text: document.getElementById('app')?.textContent ?? '',
+    }));
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
 /**
  * Set the user's guardrail policy the way the popup does (a `guardrails` message to the worker).
  * Pass `{}` to reset to the defaults. Always reset in `afterEach`/`afterAll`: the policy is

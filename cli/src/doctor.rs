@@ -1,6 +1,6 @@
 //! `bvl doctor`: CLI-local diagnosis of config, managed folder, proxy, extension and a round trip.
 use crate::embed::{self, EMBEDDED_EXT_VERSION};
-use crate::{addr, config_dir, connect_raw, ensure_proxy, load, log_path, recv, send, shutdown, Config, VERSION};
+use crate::{addr, config_dir, connect_raw, ensure_proxy, load, log_path, recv, send, shutdown, Config, Exit, VERSION};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::net::TcpStream;
@@ -251,7 +251,7 @@ fn proxy_and_ext(r: &mut Report, c: &Config, o: &Opts) -> Option<Proxy> {
     };
     if p.version == VERSION {
         r.add("proxy", St::Pass, format!("v{} on port {}", p.version, c.port), None);
-    } else if o.fix && p.pending == 0 && shutdown(c) && ensure_proxy(c).is_ok() {
+    } else if o.fix && p.pending == 0 && shutdown(c, Exit::Restart) && ensure_proxy(c).is_ok() {
         match probe(c) {
             Ok(n) => {
                 r.add(
@@ -309,7 +309,7 @@ fn extension(r: &mut Report, p: &Proxy) {
             "extension",
             St::Fail,
             "not connected to the proxy",
-            Some("open the browser with the Browser Valet extension enabled; if it was never installed or paired, run `bvl setup`; check the popup for errors"),
+            Some("the extension is off by default and switches itself off when bvl stops or idles: click the Browser Valet icon and switch it on; if it was never installed, run `bvl setup`"),
         );
         return;
     };
@@ -404,7 +404,7 @@ fn trip(r: &mut Report, c: &Config, o: &Opts, p: Option<Proxy>) {
         ),
         Err(e) => {
             let idle = probe(c).is_ok_and(|n| n.pending == 0);
-            if o.fix && idle && shutdown(c) && ensure_proxy(c).is_ok() {
+            if o.fix && idle && shutdown(c, Exit::Restart) && ensure_proxy(c).is_ok() {
                 // The extension reconnects to the new proxy on its own; give it a moment, then retry once.
                 std::thread::sleep(Duration::from_secs(2));
                 if let Ok(d) = round_trip(c) {

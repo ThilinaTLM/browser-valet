@@ -182,7 +182,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
   // empty PATH so the test never touches the developer's clipboard.
   const emptyPath = join(tmp, 'empty-path');
   await mkdir(emptyPath);
-  execFileSync(bin, ['setup', '--no-open', '--no-wait'], {
+  execFileSync(bin, ['setup', '--no-wait'], {
     env: { ...env, PATH: emptyPath },
     stdio: 'pipe',
   });
@@ -224,7 +224,18 @@ export default async function setup(project: TestProject): Promise<() => Promise
     );
     const extensionOrigin = /^chrome-extension:\/\/[^/]+/.exec(sw.url())?.[0] ?? '';
 
-    // 4. Start the proxy (any bvl command does) and wait for the extension to connect.
+    // 4. The extension starts switched off: switch it on the way the popup does.
+    const popup = await browser.newPage();
+    try {
+      await popup.goto(`${extensionOrigin}/popup.html`);
+      await popup.evaluate(() =>
+        chrome.runtime.sendMessage({ type: 'settings', settings: { enabled: true } }),
+      );
+    } finally {
+      await popup.close().catch(() => undefined);
+    }
+
+    // 5. Start the proxy (any bvl command does) and wait for the extension to connect.
     const deadline = Date.now() + 60_000;
     for (;;) {
       let out = '';

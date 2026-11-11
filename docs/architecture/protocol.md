@@ -66,6 +66,12 @@ Any message other than `auth` before authentication → close.
   (`managed` = `pairing.json` was found, so the extension runs from the folder `bvl` manages).
 - The extension sends `{"t":"ping"}` every ~20 s to keep its service worker alive. The proxy ignores pings
   (they do **not** count as activity for the idle timer).
+- Before it exits, the proxy sends the extension `{"t":"bye","reason":"idle"|"stop"|"restart"}` and
+  closes the connection: `idle` on idle expiry, otherwise the `shutdown` reason. It waits up to 1 s
+  for this to be written. The extension acts on `bye` only after `welcome`. Any authenticated
+  connection that ends without `bye` `restart` switches the extension off (see
+  [runtime.md](runtime.md#the-onoff-switch)), so `bye` is best effort: a crashed proxy sends none
+  and the extension still switches off.
 
 ### Updates
 
@@ -94,7 +100,7 @@ After `welcome`, the CLI sends exactly one message and waits:
 
 - `{"t":"req","req":{...}}` — run a command in the browser.
 - `{"t":"status"}` → proxy replies `{"t":"status","proxy":{"version":"…","pid":123,"port":47823,"idleTimeoutSecs":600,"pending":0},"ext":null | {"browser":"…","extVersion":"…","managed":true}}` (`ext` is the extension's auth `info`)
-- `{"t":"shutdown"}` → proxy fails all in-flight requests (each CLI gets a `res`, `exitCode` 1, "proxy is shutting down"), sends `cancel` for them to the extension, replies `{"t":"ok"}` and exits. `pending` in `status` is the number of in-flight requests.
+- `{"t":"shutdown","reason":"restart"|"stop"}` (`reason` optional; missing or unknown = `stop`) → proxy fails all in-flight requests (each CLI gets a `res`, `exitCode` 1, "proxy is shutting down"), sends `cancel` for them to the extension, then `bye` with the reason, replies `{"t":"ok"}` and exits. The CLI sends `restart` when a new proxy follows at once (version restart, `pair`, `doctor --fix`) and `stop` for `bvl stop` and `unpair`. `pending` in `status` is the number of in-flight requests.
 
 `req` object (opaque to the proxy):
 
@@ -112,7 +118,8 @@ After `welcome`, the CLI sends exactly one message and waits:
 
 Proxy behaviour for `req`:
 1. If no extension is connected, wait up to 10 s for one; if none, reply with a `res` whose
-   `stderr` explains that the browser extension is not connected, `exitCode` 1.
+   `stderr` explains that the browser extension is not connected, that it is probably switched off,
+   and that the agent should ask the user to switch it on in the popup (`exitCode` 1).
 2. Assign a unique numeric `id`, forward `{"t":"req","id":<id>,"req":{...}}` to the extension.
 3. Forward extension messages with that id back to the CLI **without the id**:
    - `{"t":"event","id":<id>,"stderr":"text"}` → `{"t":"event","stderr":"text"}` (progress, e.g. "waiting for approval…"; CLI prints to stderr immediately)
@@ -148,7 +155,7 @@ The CLI creates parent directories for `files[].path` as needed.
 
 ## CLI-local commands
 
-Handled by the CLI itself (never forwarded): `setup [--browser B] [--no-open] [--no-wait]`,
+Handled by the CLI itself (never forwarded): `setup [--browser B] [--open] [--no-wait]`,
 `skills [list | get <name> [--full] [--ref R] | path [name] | install [--dir D]]`,
 `pair <secret> [--port N]`, `unpair`, `status`, `doctor [--json] [--quick] [--fix]`, `proxy [--idle-timeout S] [--port N]`
 (foreground relay), `stop`, `version`/`--version`.

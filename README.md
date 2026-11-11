@@ -24,7 +24,8 @@ flowchart LR
 - **Consent first.** Agent-opened tabs are the agent's. Any other tab needs your approval in a
   popup; you can revoke control at any time (popup, or close Chrome's "debugging" bar).
   `open <url>` never navigates away from a tab you shared; it opens an agent tab instead.
-  Turning the extension off (popup switch) ends all control and clears every grant.
+  The extension is off until you switch it on, and switches itself off when `bvl` stops or goes
+  idle. Switching it off ends all control and clears every grant.
 - **One binary.** `bvl` contains the extension and the agent skills, always version-matched.
 
 ## Install
@@ -70,9 +71,11 @@ Then:
 bvl setup
 ```
 
-`setup` writes the bundled extension to `<config dir>/extension`, opens `chrome://extensions`, and
-copies the folder path to the clipboard. In the browser, do this once: turn on **Developer mode**,
-click **Load unpacked**, and pick that folder. `setup` waits until the extension connects:
+`setup` writes the bundled extension to `<data dir>/extension`, copies the folder path to the
+clipboard and prints what to do (it does not open the browser; `--open` does). In the browser, do
+this once: open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick
+that folder. Then click the Browser Valet toolbar icon and **switch it on**. `setup` waits until the
+extension connects:
 
 ```
 ✓ Connected: Google Chrome 142 (extension v0.1.0)
@@ -80,6 +83,13 @@ click **Load unpacked**, and pick that folder. `setup` waits until the extension
 
 There is no pairing step. `setup` puts a `pairing.json` with the shared secret in the extension
 folder, and the extension reads it from there.
+
+**The on/off switch.** The extension is off by default, so no agent can reach your browser until
+you switch it on in the popup. It switches itself off again when `bvl` goes away: after `bvl stop`,
+after the background `bvl` process exits because it was idle (10 minutes by default,
+`BVL_IDLE_TIMEOUT`), if that process dies, and when the browser restarts. Switching off (by hand or
+automatically) ends control of every tab. While it is off the toolbar icon is grey, and agents are
+told to ask you to switch it on.
 
 **Updates.** After you update `bvl`, the next connection notices that the extension is a
 different version. The proxy rewrites the folder, and the extension reloads itself after any
@@ -186,6 +196,7 @@ extension folder to load.
 cd extension && pnpm install && pnpm build   # build first: the CLI embeds extension/dist
 cd cli && cargo test                         # relay + client integration tests
 cargo install --path cli                     # bvl with the extension and skills built in
+scripts/install-local.sh                     # or: build extension + release bvl, copy to ~/.local/bin
 cd extension && pnpm check                   # typecheck, eslint, prettier
 pnpm watch                                   # rebuild on change, then reload the extension
 ```

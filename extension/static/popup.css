@@ -317,6 +317,29 @@ button.link:hover {
   background: var(--hover);
 }
 
+/* Header view switcher: ghost icon buttons. */
+#views {
+  display: flex;
+  gap: 2px;
+}
+body.window #views {
+  display: none;
+}
+button.icon {
+  width: var(--spacing-control);
+  padding: 0;
+  background: none;
+  color: var(--muted-foreground);
+}
+button.icon:hover {
+  background: var(--hover);
+  color: var(--foreground);
+}
+button.icon[aria-pressed='true'] {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -428,24 +451,6 @@ ol li::marker {
 }
 .bad {
   color: var(--destructive);
-}
-details {
-  padding: 0 2px;
-}
-details summary {
-  cursor: pointer;
-  color: var(--muted-foreground);
-  border-radius: var(--radius-md);
-  outline: none;
-}
-details summary:hover {
-  color: var(--foreground);
-}
-details summary:focus-visible {
-  box-shadow: 0 0 0 3px var(--focus);
-}
-details[open] summary {
-  margin-bottom: 8px;
 }
 input[type='number'] {
   width: 90px;
