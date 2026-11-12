@@ -6,7 +6,6 @@ on:
     paths-ignore: &docs-only
       - "docs/**"
       - "README.md"
-      - "SKILL.md" # root stub only; cli/skills/** is embedded and still triggers CI
       - "LICENSE"
       - "NOTICE"
   pull_request:
