@@ -35,6 +35,7 @@ flowchart LR
 | `cli/src/proxy.rs` (proxy) | auth, Origin check, relaying req/event/res/cancel by id, idle exit, triggering managed updates | durable state, knowledge of command semantics |
 | `cli/src/embed.rs`, `setup.rs`, `build.rs` | embedded extension + skills, managed folder, `setup`/`skills` | anything the extension must decide at runtime |
 | `cli/skills/` | agent guide sources (`bvl skills get`) | version-specific facts not matching the binary |
+| `skills/bvl/SKILL.md` | public stub: repo-root skill discovery and what `bvl skills install` writes | usage details (they belong in `cli/skills/core/`, versioned with the binary) |
 | `extension/src/background/` | sessions, tabs, grants, refs, parsing, help, output formatting, CDP, consent, activity log | assumptions that the proxy keeps state |
 | `extension/src/popup/`, `static/` | consent UI, status, pairing, Nerve theme | logic the worker needs (popup may be closed) |
 

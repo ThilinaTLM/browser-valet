@@ -140,19 +140,8 @@ fn materialize(only: Option<&str>) -> Result<PathBuf> {
     })
 }
 
-const STUB: &str = "---
-name: bvl
-description: Drive the user's real, logged-in Chrome with the `bvl` CLI (Browser Valet). Use when a task needs the user's actual browser session (logins, cookies, open tabs) rather than a fresh test browser.
-allowed-tools: Bash(bvl:*)
----
-
-# bvl
-
-Controls the user's real Chrome through the Browser Valet extension.
-
-Before using it, run `bvl skills get core` and follow that guide (it is versioned with the
-installed `bvl`). Full command reference: `bvl skills get core --ref commands`.
-";
+/// The small skill `bvl skills install` writes; also the repo's public skill (`skills/bvl/`).
+const STUB: &str = include_str!("../../skills/bvl/SKILL.md");
 
 pub fn skills(args: &[String]) -> Result<i32> {
     let rest: Vec<&String> = args.iter().skip(1).collect();

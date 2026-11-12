@@ -235,8 +235,8 @@ pnpm watch                                   # rebuild on change, then reload th
 - If `extension/dist` is missing, `cli` still builds, but `bvl setup` reports that this build has no
   extension.
 - The build fails if the extension's version differs from the CLI's.
-- Skill sources live in `cli/skills/`. The root `SKILL.md` is a stub that points to
-  `bvl skills get core`.
+- Skill sources live in `cli/skills/`. `skills/bvl/SKILL.md` is the small stub that points to
+  `bvl skills get core`; `bvl skills install` writes this same file (it is embedded too).
 - The manifest `key` pins the extension ID to `fekhggniifjffgnkljlblgfcoolaonbm`, and the proxy only
   accepts that origin. Chrome rejects a second unpacked copy with the same ID, so for development
   remove the `bvl setup` copy and load `extension/dist` instead (or the other way round).
