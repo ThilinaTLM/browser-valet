@@ -240,9 +240,9 @@ pnpm watch                                   # rebuild on change, then reload th
 - The manifest `key` pins the extension ID to `fekhggniifjffgnkljlblgfcoolaonbm`, and the proxy only
   accepts that origin. Chrome rejects a second unpacked copy with the same ID, so for development
   remove the `bvl setup` copy and load `extension/dist` instead (or the other way round).
-- Releasing: bump the version in `cli/Cargo.toml`, `extension/package.json` and
-  `extension/static/manifest.json`, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The
-  release workflow runs CI, builds `bvl` for Linux, macOS and Windows, and publishes a GitHub release.
+- Releasing: `scripts/create-tag.sh X.Y.Z` (on a clean, up-to-date `main`) bumps the version in
+  `cli/Cargo.toml`, `cli/Cargo.lock`, `extension/package.json` and `extension/static/manifest.json`,
+  commits, tags `vX.Y.Z` and pushes the commit and tag together. The release workflow runs CI, builds `bvl` for Linux, macOS and Windows, and publishes a GitHub release.
 - The matching private key (`extension/key.pem`, gitignored) is only needed to pack a `.crx` or to
   keep the same ID on a first Web Store upload.
 
