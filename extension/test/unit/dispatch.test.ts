@@ -97,6 +97,29 @@ describe('help generation', () => {
     expect((await run('help', 'zzz')).stdout).toContain('Core loop:');
   });
 
+  it('suggests the closest command for a typo', async () => {
+    const r = await run('clik', '@e1');
+    expect(r.stderr).toBe('✗ Unknown command: clik. Did you mean `click`? Run `bvl help`.\n');
+    const j = JSON.parse((await run('snpashot', '--json')).stdout) as Record<string, unknown>;
+    expect(j).toMatchObject({ code: 'unknown_command', suggestion: 'snapshot' });
+    expect((await run('zzz')).stderr).not.toContain('Did you mean');
+  });
+
+  it('suggests a flag for a mistyped one', async () => {
+    const r = await run('snapshot', '--ful');
+    expect(r.stderr).toContain('Unknown flag: --ful. Did you mean --full?');
+  });
+
+  it('read-only and failing commands do not create a session', async () => {
+    const r = await execute(
+      { ...req('snapshot'), session: 'fresh' },
+      new AbortController().signal,
+      () => undefined,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(stateMod.state.sessions.fresh).toBeUndefined();
+  });
+
   it('fails on an unknown command (plain and --json)', async () => {
     const plain = await run('zzz');
     expect(plain).toMatchObject({ exitCode: 1, stdout: '' });

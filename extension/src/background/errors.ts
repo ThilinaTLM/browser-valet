@@ -11,6 +11,7 @@ export type ErrorCode =
   | 'disabled'
   | 'covered'
   | 'timeout'
+  | 'navigation_failed'
   | 'dialog_open'
   | 'no_tab'
   | 'tab_gone'

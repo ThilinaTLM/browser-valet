@@ -26,7 +26,7 @@ import { computedStyles } from './extra';
 import {
   baselineKey,
   computeDelta,
-  formatDelta,
+  formatDeltaText,
   formatUnchanged,
   getBaseline,
   nextRevision,
@@ -158,7 +158,11 @@ export const inspectionCommands: Command[] = [
       if (result?.kind === 'unchanged') {
         return { text: formatUnchanged(result), data: { origin: t.url, snapshot: result } };
       }
-      if (result) return { text: formatDelta(result), data: { origin: t.url, snapshot: result } };
+      if (result)
+        return {
+          text: formatDeltaText(result, base?.lines ?? []),
+          data: { origin: t.url, snapshot: result },
+        };
       return {
         text: snap.text,
         data: {
@@ -188,7 +192,12 @@ export const inspectionCommands: Command[] = [
       const id = await ctx.tab();
       const origin = async () => (await chrome.tabs.get(id)).url ?? null;
       const out = async (value: unknown, data?: Record<string, unknown>) => ({
-        text: typeof value === 'string' ? value : JSON.stringify(value),
+        text:
+          typeof value === 'string'
+            ? value === '' && ['text', 'html', 'value', 'attr', 'title'].includes(what)
+              ? '(empty)'
+              : value
+            : JSON.stringify(value),
         data: data ?? { [what]: value, origin: await origin() },
       });
       switch (what) {

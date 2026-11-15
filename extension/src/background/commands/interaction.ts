@@ -3,6 +3,7 @@ import * as cdp from '../cdp';
 import {
   call,
   clickPoint,
+  evaluate,
   evaluateHandle,
   fromBackend,
   type Handle,
@@ -10,7 +11,9 @@ import {
   UserError,
 } from '../dom';
 import * as input from '../input';
+import { mainFrame } from '../refs';
 import { settle } from '../tabs';
+import { FILL_FORMATS, fillProblem, SPECIAL_INPUT_TYPES } from './fill-rules';
 import { openInNewTab } from './navigation';
 
 const pt = ({ x, y }: { x: number; y: number }) => ({ x, y });
@@ -24,15 +27,60 @@ async function element(ctx: Ctx, target: string): Promise<Handle> {
   return resolveWait(await ctx.tab(), target, ctx.timeout, ctx.signal);
 }
 
+/** Add a warning to a result (kept alongside any it already has). */
+function warn(r: Result, ...w: (string | undefined)[]): Result {
+  const all = [...(r.warning === undefined ? [] : [r.warning].flat()), ...w].filter(
+    (x): x is string => x !== undefined,
+  );
+  return all.length ? { ...r, warning: all } : r;
+}
+
+/** Merge extra fields into a result's `--json` data. */
+const withData = (r: Result, data: Record<string, unknown>): Result => ({
+  ...r,
+  data: { ...(typeof r.data === 'object' && r.data !== null ? r.data : {}), ...data },
+});
+
+/** Warning for a CSS/XPath target that matched several elements (the first was used). */
+function multi(h: Handle, target: string): string | undefined {
+  return h.matches !== undefined && h.matches > 1
+    ? `${String(h.matches)} elements match "${target}"; used the first. Use a @ref or a more specific selector.`
+    : undefined;
+}
+
+/** Run `act` on a tab and report a navigation it caused (`✓ Done → url "title"`, `navigated`). */
+async function observeNav(tabId: number, act: () => Promise<Result | undefined>): Promise<Result> {
+  const before = await mainFrame(tabId);
+  const r = (await act()) ?? DONE;
+  await settle(tabId);
+  const after = await mainFrame(tabId);
+  if (!before || !after || (before.loaderId === after.loaderId && before.url === after.url)) {
+    return r;
+  }
+  let title = '';
+  try {
+    title = (await chrome.tabs.get(tabId)).title ?? '';
+  } catch {
+    // tab closed
+  }
+  title = title.trim();
+  const newDoc = before.loaderId !== after.loaderId;
+  const text =
+    `${r.text ?? '✓ Done'} → ${after.url}${title ? ` "${title}"` : ' (no title)'}` +
+    (newDoc ? ' (refs reset: snapshot again)' : '');
+  return withData({ ...r, text }, { navigated: { url: after.url, title } });
+}
+
 // ---------------------------------------------------------------------------
 // Actions on a resolved element (shared by direct commands and `find`)
 // ---------------------------------------------------------------------------
 
 async function clickEl(h: Handle, count = 1, button: input.Button = 'left'): Promise<Result> {
   const { x, y, sessionId } = await clickPoint(h);
-  await input.click(h.tabId, x, y, { count, button, ...(sessionId ? { sessionId } : {}) });
-  await settle(h.tabId);
-  return DONE;
+  return observeNav(h.tabId, async () => {
+    await input.click(h.tabId, x, y, { count, button, ...(sessionId ? { sessionId } : {}) });
+    return DONE;
+  });
 }
 
 async function focusEl(h: Handle): Promise<void> {
@@ -54,11 +102,30 @@ async function fillEl(h: Handle, text: string): Promise<Result> {
   await cdp
     .send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }, h.sessionId)
     .catch(() => 0);
-  await call(
+  // Date/time-like inputs ignore inserted text: their value is set through the native setter.
+  const prep = await call<{ field: boolean; type: string; special: boolean }>(
     h,
-    `function () {
+    `function (text, special, formats) {
+      const types = new Set(special);
+      const inner = (this.getAttribute && this.getAttribute('pseudo')) || '';
+      const host = this.getRootNode && this.getRootNode().host;
+      const outer = host && host.tagName === 'INPUT' ? host : null;
+      if (outer || inner.startsWith('-webkit-datetime-edit')) {
+        const t = outer ? outer.type : 'date';
+        const hint = formats[t];
+        throw new Error('Element is a part of an <input type=' + t + '>; fill the <input type=' + t + '> itself' + (hint ? ' ("' + hint + '")' : ''));
+      }
       if (this.disabled || this.readOnly) throw new Error('Element is not editable');
+      const field = this.tagName === 'INPUT' || this.tagName === 'TEXTAREA';
+      const type = this.tagName === 'INPUT' ? this.type : this.tagName === 'TEXTAREA' ? 'textarea' : '';
       this.focus();
+      if (field && types.has(type)) {
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        set.call(this, text);
+        this.dispatchEvent(new Event('input', { bubbles: true }));
+        this.dispatchEvent(new Event('change', { bubbles: true }));
+        return { field, type, special: true };
+      }
       if (typeof this.select === 'function') this.select();
       else if (this.isContentEditable) {
         const r = document.createRange();
@@ -67,11 +134,19 @@ async function fillEl(h: Handle, text: string): Promise<Result> {
         s.removeAllRanges();
         s.addRange(r);
       } else throw new Error('Element is not an input, textarea or contenteditable');
+      return { field, type, special: false };
     }`,
+    [text, [...SPECIAL_INPUT_TYPES], FILL_FORMATS],
   );
-  if (text) await input.insertText(h.tabId, text);
-  else await input.press(h.tabId, 'Delete');
-  return DONE;
+  if (!prep.special) {
+    if (text) await input.insertText(h.tabId, text);
+    else await input.press(h.tabId, 'Delete');
+  }
+  if (!prep.field) return DONE;
+  const value = await call<string>(h, 'function () { return this.value; }');
+  const problem = fillProblem(prep.type, text, value);
+  if (problem?.fail) throw new UserError(problem.message);
+  return problem ? warn(DONE, problem.message) : DONE;
 }
 
 async function typeEl(h: Handle, text: string): Promise<Result> {
@@ -98,6 +173,10 @@ async function setChecked(h: Handle, want: boolean): Promise<Result> {
 }
 
 async function selectEl(h: Handle, values: string[]): Promise<Result> {
+  return observeNav(h.tabId, () => selectNow(h, values));
+}
+
+async function selectNow(h: Handle, values: string[]): Promise<Result> {
   const picked = await call<string[]>(
     h,
     `function (values) {
@@ -156,41 +235,55 @@ function matcher(value: string, exact: boolean): (s: string) => boolean {
 
 const asString = (v: unknown) => (typeof v === 'string' ? v : '');
 
-async function byAx(
-  tabId: number,
-  pred: (role: string, name: string) => boolean,
-): Promise<Handle | null> {
+async function byAx(tabId: number, pred: (role: string, name: string) => boolean): Promise<Found> {
   await cdp.send(tabId, 'Accessibility.enable');
   const { nodes } = await cdp.send<{ nodes: AXNode[] }>(tabId, 'Accessibility.getFullAXTree');
-  const hit = nodes.find(
+  const hits = nodes.filter(
     (n) =>
       !n.ignored &&
       n.backendDOMNodeId !== undefined &&
       pred(asString(n.role?.value), asString(n.name?.value)),
   );
-  return hit?.backendDOMNodeId !== undefined ? fromBackend(tabId, hit.backendDOMNodeId) : null;
+  const first = hits[0]?.backendDOMNodeId;
+  return {
+    h: first !== undefined ? await fromBackend(tabId, first) : null,
+    matches: hits.length,
+  };
+}
+
+/** A located element (or none) and how many elements the locator matched. */
+interface Found {
+  h: Handle | null;
+  matches: number;
+}
+
+/** Evaluate `expr` (an element) and `count` (a number) and return both. */
+async function found(tabId: number, expr: string, count: string): Promise<Found> {
+  const h = await evaluateHandle(tabId, expr);
+  if (!h) return { h, matches: 0 };
+  const n = await evaluate(tabId, count).then(
+    (r) => (typeof r.value === 'number' ? r.value : 1),
+    () => 1,
+  );
+  return { h, matches: n };
 }
 
 async function byAttr(tabId: number, attr: string, value: string, exact: boolean) {
-  return evaluateHandle(
-    tabId,
-    `(() => {
+  const all = `(() => {
       const norm = (s) => s.replace(/\\s+/g, ' ').trim();
       const want = norm(${JSON.stringify(value)});
       const exact = ${String(exact)};
-      return [...document.querySelectorAll('[${attr}]')].find((el) => {
+      return [...document.querySelectorAll('[${attr}]')].filter((el) => {
         const v = norm(el.getAttribute('${attr}'));
         return exact ? v === want : v.toLowerCase().includes(want.toLowerCase());
-      }) ?? null;
-    })()`,
-  );
+      });
+    })()`;
+  return found(tabId, `${all}[0] ?? null`, `${all}.length`);
 }
 
 async function byText(tabId: number, value: string, exact: boolean) {
-  // The deepest visible element whose text matches.
-  return evaluateHandle(
-    tabId,
-    `(() => {
+  // The deepest visible element whose text matches; elements that only contain a match count once.
+  const all = `(() => {
       const norm = (s) => s.replace(/\\s+/g, ' ').trim();
       const want = norm(${JSON.stringify(value)});
       const exact = ${String(exact)};
@@ -198,14 +291,19 @@ async function byText(tabId: number, value: string, exact: boolean) {
         const t = norm(el.innerText ?? '');
         return exact ? t === want : t.toLowerCase().includes(want.toLowerCase());
       };
+      const hits = [...document.body.querySelectorAll('*')].filter(
+        (el) => el.checkVisibility?.() && match(el),
+      );
+      const leaves = hits.filter((el) => !hits.some((o) => o !== el && el.contains(o)));
+      return { hits, leaves };
+    })()`;
+  const best = `(() => {
+      const { hits } = ${all};
       let best = null;
-      for (const el of document.body.querySelectorAll('*')) {
-        if (!el.checkVisibility?.() || !match(el)) continue;
-        if (!best || best.contains(el)) best = el;
-      }
+      for (const el of hits) if (!best || best.contains(el)) best = el;
       return best;
-    })()`,
-  );
+    })()`;
+  return found(tabId, best, `${all}.leaves.length`);
 }
 
 const FIND_HELP =
@@ -213,64 +311,83 @@ const FIND_HELP =
   '     find <first|last> <selector> <action> [value] | find nth <n> <selector> <action> [value]\n' +
   '     actions: click dblclick hover focus fill type check uncheck select text';
 
-async function locate(ctx: Ctx, a: Args): Promise<{ h: Handle; rest: string[] }> {
+async function locate(ctx: Ctx, a: Args): Promise<{ h: Handle; rest: string[]; warning?: string }> {
   const tabId = await ctx.tab();
   const [kind, value, ...rest] = a.pos;
   if (!kind || value === undefined) throw new UserError(`Usage: ${FIND_HELP}`, 'bad_args');
   const exact = a.has('exact');
   const name = a.str('name');
-  let h: Handle | null;
+  let f: Found;
   let rest2 = rest;
+  let chosen = false; // first/last/nth: the agent picked among several on purpose
   switch (kind) {
     case 'role': {
       const nameOk = name === undefined ? () => true : matcher(name, exact);
-      h = await byAx(tabId, (role, n) => role === value && nameOk(n));
+      f = await byAx(tabId, (role, n) => role === value && nameOk(n));
       break;
     }
     case 'label': {
       const ok = matcher(value, exact);
-      h = await byAx(tabId, (role, n) => FORM_ROLES.has(role) && ok(n));
+      f = await byAx(tabId, (role, n) => FORM_ROLES.has(role) && ok(n));
       break;
     }
     case 'text':
-      h = await byText(tabId, value, exact);
+      f = await byText(tabId, value, exact);
       break;
     case 'placeholder':
     case 'alt':
     case 'title':
-      h = await byAttr(tabId, kind, value, exact);
+      f = await byAttr(tabId, kind, value, exact);
       break;
     case 'testid':
-      h = await byAttr(tabId, 'data-testid', value, true);
+      f = await byAttr(tabId, 'data-testid', value, true);
       break;
     case 'first':
     case 'last': {
       const all = `document.querySelectorAll(${JSON.stringify(value)})`;
-      h = await evaluateHandle(
-        tabId,
-        kind === 'first' ? `${all}[0] ?? null` : `[...${all}].at(-1) ?? null`,
-      );
+      f = {
+        h: await evaluateHandle(
+          tabId,
+          kind === 'first' ? `${all}[0] ?? null` : `[...${all}].at(-1) ?? null`,
+        ),
+        matches: 1,
+      };
+      chosen = true;
       break;
     }
     case 'nth': {
       const selector = rest[0];
       if (!selector) throw new UserError(`Usage: ${FIND_HELP}`, 'bad_args');
       rest2 = rest.slice(1);
-      h = await evaluateHandle(
-        tabId,
-        `document.querySelectorAll(${JSON.stringify(selector)})[${Number(value)}] ?? null`,
-      );
+      f = {
+        h: await evaluateHandle(
+          tabId,
+          `document.querySelectorAll(${JSON.stringify(selector)})[${Number(value)}] ?? null`,
+        ),
+        matches: 1,
+      };
+      chosen = true;
       break;
     }
     default:
       throw new UserError(`Unknown locator "${kind}". Usage: ${FIND_HELP}`, 'bad_args');
   }
+  const h = f.h;
   if (!h) {
     const desc = kind === 'role' && name ? `role ${value} named "${name}"` : `${kind} "${value}"`;
     throw new UserError(`No element found by ${desc}`, 'not_found');
   }
   ctx.tabId = tabId;
-  return { h, rest: rest2 };
+  const many = !chosen && f.matches > 1;
+  return {
+    h,
+    rest: rest2,
+    ...(many
+      ? {
+          warning: `${String(f.matches)} elements match ${kind} "${value}"; used the first. Use \`find nth <n> <selector>\`, --exact${kind === 'role' ? ' or --name' : ''}, or a @ref.`,
+        }
+      : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +425,7 @@ export const interactionCommands: Command[] = [
         return openInNewTab(ctx, href);
       }
       const r = await clickEl(h, 1, a.has('right') ? 'right' : 'left');
-      return { ...r, data: { clicked: target(a) } };
+      return warn(withData(r, { clicked: target(a) }), multi(h, target(a)));
     },
   },
   {
@@ -318,8 +435,9 @@ export const interactionCommands: Command[] = [
     usage: 'dblclick <target>',
     summary: 'Double-click an element',
     async run(ctx, a) {
-      await clickEl(await element(ctx, target(a)), 2);
-      return done({ clicked: target(a) });
+      const h = await element(ctx, target(a));
+      const r = await clickEl(h, 2);
+      return warn(withData(r, { clicked: target(a) }), multi(h, target(a)));
     },
   },
   {
@@ -328,8 +446,9 @@ export const interactionCommands: Command[] = [
     usage: 'focus <target>',
     summary: 'Focus an element',
     async run(ctx, a) {
-      await focusEl(await element(ctx, target(a)));
-      return done({ focused: target(a) });
+      const h = await element(ctx, target(a));
+      await focusEl(h);
+      return warn(done({ focused: target(a) }), multi(h, target(a)));
     },
   },
   {
@@ -338,8 +457,9 @@ export const interactionCommands: Command[] = [
     usage: 'hover <target>',
     summary: 'Move the mouse over an element',
     async run(ctx, a) {
-      await hoverEl(await element(ctx, target(a)));
-      return done({ hovered: target(a) });
+      const h = await element(ctx, target(a));
+      await hoverEl(h);
+      return warn(done({ hovered: target(a) }), multi(h, target(a)));
     },
   },
   {
@@ -351,8 +471,10 @@ export const interactionCommands: Command[] = [
     usage: 'fill <target> <text>',
     summary: 'Clear an input and fill it with text',
     async run(ctx, a) {
-      await fillEl(await element(ctx, target(a)), a.need(1, 'text'));
-      return done({ filled: target(a) });
+      const text = a.need(1, 'text');
+      const h = await element(ctx, target(a));
+      const r = await fillEl(h, text);
+      return warn(withData(r, { filled: target(a) }), multi(h, target(a)));
     },
   },
   {
@@ -362,8 +484,9 @@ export const interactionCommands: Command[] = [
     summary: 'Type text into an element without clearing it (real key events)',
     async run(ctx, a) {
       const text = a.need(1, 'text');
-      await typeEl(await element(ctx, target(a)), text);
-      return done({ typed: text });
+      const h = await element(ctx, target(a));
+      await typeEl(h, text);
+      return warn(done({ typed: text }), multi(h, target(a)));
     },
   },
   {
@@ -378,9 +501,11 @@ export const interactionCommands: Command[] = [
     async run(ctx, a) {
       const id = await ctx.tab();
       const key = a.need(0, 'key');
-      await input.press(id, key);
-      await settle(id);
-      return done({ pressed: key });
+      const r = await observeNav(id, async () => {
+        await input.press(id, key);
+        return DONE;
+      });
+      return withData(r, { pressed: key });
     },
   },
   {
@@ -434,8 +559,9 @@ export const interactionCommands: Command[] = [
     usage: 'check <target>',
     summary: 'Check a checkbox / radio / switch',
     async run(ctx, a) {
-      await setChecked(await element(ctx, target(a)), true);
-      return done({ checked: target(a) });
+      const h = await element(ctx, target(a));
+      await setChecked(h, true);
+      return warn(done({ checked: target(a) }), multi(h, target(a)));
     },
   },
   {
@@ -445,8 +571,9 @@ export const interactionCommands: Command[] = [
     usage: 'uncheck <target>',
     summary: 'Uncheck a checkbox / switch',
     async run(ctx, a) {
-      await setChecked(await element(ctx, target(a)), false);
-      return done({ unchecked: target(a) });
+      const h = await element(ctx, target(a));
+      await setChecked(h, false);
+      return warn(done({ unchecked: target(a) }), multi(h, target(a)));
     },
   },
   {
@@ -456,7 +583,8 @@ export const interactionCommands: Command[] = [
     summary: 'Choose <select> option(s) by value or visible label',
     async run(ctx, a) {
       a.need(1, 'value');
-      return selectEl(await element(ctx, target(a)), a.pos.slice(1));
+      const h = await element(ctx, target(a));
+      return warn(await selectEl(h, a.pos.slice(1)), multi(h, target(a)));
     },
   },
   {
@@ -499,7 +627,7 @@ export const interactionCommands: Command[] = [
     async run(ctx, a) {
       const h = await element(ctx, target(a));
       await cdp.send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }, h.sessionId);
-      return done({ scrolled: target(a) });
+      return warn(done({ scrolled: target(a) }), multi(h, target(a)));
     },
   },
   {
@@ -536,7 +664,7 @@ export const interactionCommands: Command[] = [
         { objectId: h.objectId, files },
         h.sessionId,
       );
-      return { text: '✓ Done', data: { files } };
+      return warn({ text: '✓ Done', data: { files } }, multi(h, target(a)));
     },
   },
   {
@@ -567,40 +695,41 @@ export const interactionCommands: Command[] = [
       { name: 'exact', type: 'bool', desc: 'Exact (not substring) text matching' },
     ],
     async run(ctx, a) {
-      const { h, rest } = await locate(ctx, a);
+      const { h, rest, warning } = await locate(ctx, a);
       const [action = '', value] = rest;
-      const needValue = () => {
-        if (value === undefined) throw new UserError(`${action} needs a value`, 'bad_args');
-        return value;
-      };
-      switch (action) {
-        case 'click':
-          return clickEl(h);
-        case 'dblclick':
-          return clickEl(h, 2);
-        case 'hover':
-          return hoverEl(h);
-        case 'focus':
-          await focusEl(h);
-          return DONE;
-        case 'fill':
-          return fillEl(h, needValue());
-        case 'type':
-          return typeEl(h, needValue());
-        case 'check':
-          return setChecked(h, true);
-        case 'uncheck':
-          return setChecked(h, false);
-        case 'select':
-          return selectEl(h, [needValue()]);
-        case 'text':
-          return textOf(h);
-        default:
-          throw new UserError(
-            `Unknown or missing action "${action}". Usage: ${FIND_HELP}`,
-            'bad_args',
-          );
-      }
+      return warn(await act(h, action, value), warning);
     },
   },
 ];
+
+async function act(h: Handle, action: string, value: string | undefined): Promise<Result> {
+  const needValue = () => {
+    if (value === undefined) throw new UserError(`${action} needs a value`, 'bad_args');
+    return value;
+  };
+  switch (action) {
+    case 'click':
+      return clickEl(h);
+    case 'dblclick':
+      return clickEl(h, 2);
+    case 'hover':
+      return hoverEl(h);
+    case 'focus':
+      await focusEl(h);
+      return DONE;
+    case 'fill':
+      return fillEl(h, needValue());
+    case 'type':
+      return typeEl(h, needValue());
+    case 'check':
+      return setChecked(h, true);
+    case 'uncheck':
+      return setChecked(h, false);
+    case 'select':
+      return selectEl(h, [needValue()]);
+    case 'text':
+      return textOf(h);
+    default:
+      throw new UserError(`Unknown or missing action "${action}". Usage: ${FIND_HELP}`, 'bad_args');
+  }
+}

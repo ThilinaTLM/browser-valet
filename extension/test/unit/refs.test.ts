@@ -64,3 +64,29 @@ describe('Page.frameNavigated', () => {
     expect(s.state.refDocs[5]).toBe('L9');
   });
 });
+
+describe('refFate and missing refs', () => {
+  it('tells previous-page, removed and never-issued refs apart', () => {
+    s.state.sessions.a = { nextRef: 13 };
+    s.state.sessions.b = { nextRef: 4 };
+    refs.clearRefs(5, 'L2'); // a new document starts: refs below 13 belong to earlier ones
+    expect(refs.refFate(5, 'e12')).toBe('previous_page');
+    s.state.refs[5] = { e13: { backendNodeId: 1, role: 'link', name: 'x' } };
+    s.state.sessions.a = { nextRef: 15 };
+    expect(refs.refFate(5, 'e14')).toBe('removed');
+    expect(refs.refFate(5, 'e15')).toBe('unknown');
+    expect(refs.refFate(5, 'e999')).toBe('unknown');
+  });
+
+  it('resolve reports stale_ref for a ref of an earlier page, unknown_ref for an unissued one', async () => {
+    loader('L1');
+    s.state.sessions.a = { nextRef: 13 };
+    const dom = await import('../../src/background/dom');
+    await refs.syncDocument(5);
+    await expect(dom.resolve(5, '@e12')).rejects.toMatchObject({
+      code: 'stale_ref',
+      message: expect.stringContaining('from a previous page') as string,
+    });
+    await expect(dom.resolve(5, '@e40')).rejects.toMatchObject({ code: 'unknown_ref' });
+  });
+});

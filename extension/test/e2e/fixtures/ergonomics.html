@@ -1,0 +1,16 @@
+<!doctype html>
+<title>Ergonomics</title>
+<h1>Ergonomics</h1>
+<label>Alarm <input id="alarm" type="time" /></label>
+<label>Day <input id="day" type="date" /></label>
+<label>Plain <input id="plain" type="text" /></label>
+<ul>
+  <li><a class="item" href="#one">One</a></li>
+  <li><a class="item" href="#two">Two</a></li>
+  <li><a class="item" href="#three">Three</a></li>
+</ul>
+<a id="go" href="other.html">Go elsewhere</a>
+<select id="pick" onchange="if (this.value === 'away') location.href = 'other.html';">
+  <option value="stay">Stay</option>
+  <option value="away">Away</option>
+</select>

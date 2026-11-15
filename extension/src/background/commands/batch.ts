@@ -9,6 +9,10 @@ export interface Outcome {
   data?: unknown;
   boundary?: unknown;
   error?: string;
+  /** Stable error code of a failure, when it has one. */
+  code?: string;
+  /** The command as the activity log shows it (redacted); absent if it was not recognised. */
+  described?: string;
 }
 
 export type Execute = (
@@ -62,18 +66,25 @@ export interface Item {
   success: boolean;
   result: unknown;
   error: string | null;
+  /** Stable error code of a failed item, when it has one. */
+  code?: string;
   /** `--content-boundaries`: the nonce and origin of this item's markers (JSON mode). */
   _boundary?: unknown;
 }
 
-/** Upstream's `--json` shape: a top-level array; `--omit-command` swaps `command` for `index`. */
+/**
+ * Upstream's `--json` shape: a top-level array; `index` is always present (bvl's addition),
+ * `--omit-command` drops `command`; failed items carry `code` when the error has one.
+ */
 export function formatBatchJson(items: Item[], omitCommand: boolean): string {
   return JSON.stringify(
     items.map((it, index) => ({
-      ...(omitCommand ? { index } : { command: it.command }),
+      index,
+      ...(omitCommand ? {} : { command: it.command }),
       success: it.success,
       result: it.result,
       error: it.error,
+      ...(it.code ? { code: it.code } : {}),
       ...(it._boundary ? { _boundary: it._boundary } : {}),
     })),
   );
@@ -81,7 +92,39 @@ export function formatBatchJson(items: Item[], omitCommand: boolean): string {
 
 /** Text output: each item's stdout one after another, separated by a blank line. */
 export function formatBatchText(stdouts: string[]): string {
-  return stdouts.join('\n');
+  return stdouts.filter((s) => s !== '').join('\n');
+}
+
+/** Name an item for stderr: the redacted description, else just the command word (never args). */
+export function stepLabel(described: string | undefined, command: string[]): string {
+  return described ?? command.find((t) => !t.startsWith('-')) ?? '';
+}
+
+/** Put `[n/total] label` after the `✗`/`⚠` of every stderr line that starts with one. */
+export function prefixStderr(stderr: string, n: number, total: number, label: string): string {
+  const tag = `[${n}/${total}]${label ? ` ${label}` : ''}`;
+  return stderr
+    .split('\n')
+    .map((l) => {
+      if (l.startsWith('✗ ')) return `✗ ${tag}: ${l.slice(2)}`;
+      if (l.startsWith('⚠ ')) return `⚠ ${tag}: ${l.slice(2)}`;
+      return l;
+    })
+    .join('\n');
+}
+
+/** `batch: 2 of 3 steps succeeded; failed: 2 (click); skipped: 1`, or '' when all went well. */
+export function batchSummary(
+  total: number,
+  failed: { n: number; name: string }[],
+  skipped: number,
+): string {
+  if (failed.length === 0 && skipped === 0) return '';
+  const ok = total - skipped - failed.length;
+  const parts = [`batch: ${ok} of ${total} steps succeeded`];
+  if (failed.length) parts.push(`failed: ${failed.map((f) => `${f.n} (${f.name})`).join(', ')}`);
+  if (skipped) parts.push(`skipped: ${skipped}`);
+  return `${parts.join('; ')}\n`;
 }
 
 /** Why an item may not run inside a batch, or undefined. */
@@ -119,7 +162,7 @@ export const batchCommands: Command[] = [
     usage: 'batch [--bail] [--omit-command] ["<cmd>" …] [--stdin]',
     summary: 'Run several commands in one call',
     details:
-      'Each quoted argument (or each line of stdin) is one command, split like a shell would (quotes and backslashes, no expansion). Items run in order through the normal path, so consent, dialogs, errors and the activity log work as for single calls. --max-output, --content-boundaries, --allowed-domains and --confirm-actions on the batch apply to every item (output is truncated and wrapped per item; an item cannot repeat --allowed-domains or --confirm-actions). --session, --timeout (per item) and --json apply to every item; --session on an item is rejected. A confirm/prompt dialog ends the batch. Exit code 1 if any item failed. --json prints a top-level array of {command, success, result, error}; --omit-command replaces command with index. Not allowed inside a batch: batch, --stdin (eval -b still works).',
+      'Each quoted argument (or each line of stdin) is one command, split like a shell would (quotes and backslashes, no expansion). Items run in order through the normal path, so consent, dialogs, errors and the activity log work as for single calls. --max-output, --content-boundaries, --allowed-domains and --confirm-actions on the batch apply to every item (output is truncated and wrapped per item; an item cannot repeat --allowed-domains or --confirm-actions). --session, --timeout (per item) and --json apply to every item; --session on an item is rejected. A confirm/prompt dialog ends the batch. Exit code 1 if any item failed. --json prints a top-level array of {index, command, success, result, error, code?}; --omit-command drops command. In text mode, errors and warnings on stderr are prefixed with [step/total] and the command, and a summary line names the failed and skipped steps. Not allowed inside a batch: batch, --stdin (eval -b still works).',
     examples: [
       'bvl batch "fill @e1 user@example.com" "fill @e2 hunter2" "click @e3" "wait --url **/home"',
       'bvl batch --bail "open https://example.com" "snapshot -i"',
@@ -175,6 +218,7 @@ export async function runBatch(
   const stdouts: string[] = [];
   const stderrs: string[] = [];
   const files: NonNullable<CliResponse['files']> = [];
+  const failures: { n: number; name: string }[] = [];
   let failed = false;
 
   for (const line of lines) {
@@ -195,6 +239,7 @@ export async function runBatch(
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       outcome.error = error;
+      if (e instanceof UserError && e.code) outcome.code = e.code;
       res = { exitCode: 1, stdout: '', stderr: `✗ ${error}\n` };
     }
     const success = res.exitCode === 0;
@@ -203,10 +248,13 @@ export async function runBatch(
       success,
       result: success ? (outcome.data ?? null) : null,
       error: success ? null : (outcome.error ?? 'Failed'),
+      ...(!success && outcome.code ? { code: outcome.code } : {}),
       ...(outcome.boundary ? { _boundary: outcome.boundary } : {}),
     });
     stdouts.push(json ? '' : res.stdout);
-    stderrs.push(res.stderr);
+    const label = stepLabel(outcome.described, command);
+    stderrs.push(prefixStderr(res.stderr, items.length, lines.length, label));
+    if (!success) failures.push({ n: items.length, name: label.split(' ')[0] ?? '' });
     files.push(...(res.files ?? []));
     if (!success) failed = true;
     if (success && isDialog(outcome.data)) break; // a dialog blocks the page: the batch ends
@@ -218,7 +266,9 @@ export async function runBatch(
     stdout: json
       ? `${formatBatchJson(items, args.has('omit-command'))}\n`
       : formatBatchText(stdouts),
-    stderr: stderrs.join(''),
+    stderr:
+      stderrs.join('') +
+      (json ? '' : batchSummary(lines.length, failures, lines.length - items.length)),
     ...(files.length ? { files } : {}),
   };
 }

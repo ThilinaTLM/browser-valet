@@ -45,7 +45,7 @@ describe('stable refs', () => {
     await bvl('open', fixture('/other.html'));
     const stale = await bvl('click', `@${inc}`);
     expect(stale.code).toBe(1);
-    expect(stale.stderr).toContain(`Unknown ref: ${inc}`);
+    expect(stale.stderr).toContain(`Ref @${inc} is from a previous page`);
 
     const after = (await bvl('snapshot', '-i')).stdout;
     expect(num(refOf(after, /button "Do nothing"/))).toBeGreaterThan(highest);
@@ -56,7 +56,7 @@ describe('stable refs', () => {
     const snap = (await bvl('snapshot', '-i')).stdout;
     const inc = refOf(snap, /button "Increment"/);
     await bvl('reload');
-    expect((await bvl('click', `@${inc}`)).stderr).toContain('Unknown ref');
+    expect((await bvl('click', `@${inc}`)).stderr).toContain('from a previous page');
     const again = (await bvl('snapshot', '-i')).stdout;
     expect(num(refOf(again, /button "Increment"/))).toBeGreaterThan(num(inc));
   });
@@ -152,24 +152,16 @@ describe('snapshot --delta', () => {
       'eval',
       `document.querySelectorAll('#list button')[10].insertAdjacentHTML('afterend','<button>Added</button>')`,
     );
-    const d = JSON.parse((await delta()).stdout) as {
-      kind: string;
-      baseRevision: number;
-      revision: number;
-      changes: { op: string; ref: string; node?: { name: string; role: string } }[];
-      treeChange: { startLine: number; deleteCount: number; lines: string[] };
-    };
-    expect(d.kind).toBe('delta');
-    expect(d.revision).toBe(d.baseRevision + 1);
-    expect(d.changes).toHaveLength(1);
-    expect(d.changes[0]).toMatchObject({ op: 'add', node: { name: 'Added', role: 'button' } });
-    expect(d.treeChange.deleteCount).toBe(0);
-    expect(d.treeChange.lines).toEqual([`- button "Added" [ref=${d.changes[0]?.ref.slice(1)}]`]);
-    expect(d.treeChange.startLine).toBeGreaterThan(10);
+    const d = (await delta()).stdout.trimEnd().split('\n');
+    expect(d[0]).toMatch(/^delta \(revision \d+ → \d+, insert at line \d+\)$/);
+    expect(d).toHaveLength(2);
+    expect(d[1]).toMatch(/^\+ - button "Added" \[ref=e\d+\]$/);
+    expect(d.join('\n')).not.toContain('treeChange');
 
     await bvl('eval', `document.querySelectorAll('#list button')[3].remove()`);
-    const rm = JSON.parse((await delta()).stdout) as { changes: { op: string }[] };
-    expect(rm.changes).toMatchObject([{ op: 'remove' }]);
+    const rm = (await delta()).stdout.trimEnd().split('\n');
+    expect(rm[0]).toMatch(/^delta \(revision \d+ → \d+, line \d+\)$/);
+    expect(rm[1]).toMatch(/^- - button "Row 3" \[ref=e\d+\]$/);
   });
 
   it('--json shapes: unchanged and delta carry origin and a snapshot object', async () => {
@@ -217,6 +209,19 @@ describe('snapshot --delta', () => {
     const after = (await delta()).stdout;
     expect(after).toContain('button "Do nothing"');
     expect(after).not.toContain('"kind"');
+  });
+
+  it('nameless links get a derived name or an href attribute; noisy names are cleaned', async () => {
+    await openList();
+    await bvl(
+      'eval',
+      `document.body.insertAdjacentHTML('beforeend', '<div id="nm"><a id="v" href="/vote?id=1&how=up"></a><a id="im" href="/x"><img alt="Upvote" src="data:,"></a><button aria-label="Show time Show time"></button></div>')`,
+    );
+    const out = (await bvl('snapshot', '-i')).stdout;
+    expect(out).toMatch(/link \[href=\/vote\?id=1&how=up, ref=e\d+\]/);
+    expect(out).toMatch(/link "Upvote" \[ref=e\d+\]/);
+    expect(out).toContain('button "Show time"');
+    expect(out).not.toContain('Show time Show time');
   });
 
   it('plain snapshots do not disturb the baseline', async () => {

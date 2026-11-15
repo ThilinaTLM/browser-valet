@@ -4,7 +4,7 @@
 import { UserError } from './errors';
 import * as cdp from './cdp';
 import { evalInFrame, scopeLoc } from './frames';
-import { syncDocument } from './refs';
+import { refFate, syncDocument } from './refs';
 import { state } from './state';
 
 export interface Handle {
@@ -12,6 +12,8 @@ export interface Handle {
   objectId: string;
   /** Child session (out-of-process iframe) the object lives in; undefined = the tab's session. */
   sessionId?: string;
+  /** How many elements the CSS/XPath target matched (the handle is the first). Absent for refs. */
+  matches?: number;
 }
 
 interface RemoteObject {
@@ -138,15 +140,32 @@ export async function evaluateHandle(tabId: number, expression: string): Promise
   return r.result.objectId ? { tabId, objectId: r.result.objectId } : null;
 }
 
+/** The error for a ref that is not in the tab's table, by why it is missing. */
+function missingRef(tabId: number, ref: string): UserError {
+  switch (refFate(tabId, ref)) {
+    case 'previous_page':
+      return new UserError(
+        `Ref @${ref} is from a previous page (the tab navigated since that snapshot). Run \`bvl snapshot\` to get fresh refs.`,
+        'stale_ref',
+      );
+    case 'removed':
+      return new UserError(
+        `@${ref} is no longer on the page (it was removed or replaced). Run \`bvl snapshot\` to get fresh refs.`,
+        'stale_ref',
+      );
+    default:
+      return new UserError(
+        `Unknown ref: ${ref}. Run \`bvl snapshot\` to get fresh refs.`,
+        'unknown_ref',
+      );
+  }
+}
+
 async function resolveRef(tabId: number, target: string): Promise<Handle> {
   const ref = REF.exec(target)?.[1] ?? target;
   await syncDocument(tabId); // refs of an earlier document are gone
   const info = state.refs[tabId]?.[ref];
-  if (!info)
-    throw new UserError(
-      `Unknown ref: ${ref}. Run \`bvl snapshot\` to get fresh refs.`,
-      'unknown_ref',
-    );
+  if (!info) throw missingRef(tabId, ref);
   // A node in an out-of-process iframe is reached through that iframe's session. The session id
   // stored with the ref may be from before a navigation or worker restart: go by the frame.
   let sessionId: string | undefined;
@@ -218,11 +237,24 @@ export async function resolve(tabId: number, target: string): Promise<Handle> {
       });
   if (r.exceptionDetails) throw new UserError(`Invalid selector: ${target}`, 'bad_args');
   if (!r.result.objectId) throw new UserError(`Element not found: ${target}`, 'not_found');
-  return {
+  const handle: Handle = {
     tabId,
     objectId: r.result.objectId,
     ...(loc?.sessionId ? { sessionId: loc.sessionId } : {}),
   };
+  // How many elements matched, so actions can warn that they used the first of several.
+  try {
+    const c = loc
+      ? await evalInFrame(tabId, loc, countExpression(target), { byValue: true, gesture: false })
+      : await cdp.send<EvalResult>(tabId, 'Runtime.evaluate', {
+          expression: countExpression(target),
+          returnByValue: true,
+        });
+    if (typeof c.result.value === 'number') handle.matches = c.result.value;
+  } catch {
+    // the count is advisory
+  }
+  return handle;
 }
 
 /** Like resolve(), but polls until the element exists (bounded by timeoutMs). */

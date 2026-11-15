@@ -101,6 +101,11 @@ export interface State {
   refs: Record<number, Record<string, RefInfo>>;
   /** Loader id of the main-frame document the tab's refs belong to. */
   refDocs: Record<number, string>;
+  /**
+   * Per tab: the refs counter when the current document started. A ref numbered below it that is
+   * not in `refs` belongs to an earlier document. Absent in state saved by older versions.
+   */
+  refDocStart?: Record<number, number>;
   /** Out-of-process iframe sessions per controlled tab (valid while the debugger stays attached). */
   childSessions: Record<number, ChildSession[]>;
   /** Frame the `frame` command scoped the tab to (absent: main frame). */

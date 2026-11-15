@@ -40,6 +40,14 @@ describe('batch', () => {
     expect(bail.stdout).not.toContain('Fixture Form');
   });
 
+  it('labels failed steps on stderr and summarises', async () => {
+    await bvl('open', fixture('/form.html'));
+    const r = await bvl('batch', 'get title', 'click #nope --timeout 300', 'get url');
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/^✗ \[2\/3\] click #nope: /m);
+    expect(r.stderr).toContain('batch: 2 of 3 steps succeeded; failed: 2 (click)');
+  });
+
   it('--stdin reads one command per line', async () => {
     const r = await bvlStdin(
       `open ${fixture('/form.html')}\n\nfill #name 'Grace Hopper'\nget text #echo\n`,
@@ -98,7 +106,7 @@ describe('batch', () => {
       success: true,
       result: { dialog: { type: 'confirm', message: 'Really?' } },
     });
-    expect(r.stderr).toContain('⚠ A JavaScript confirm dialog');
+    expect(r.stderr).toContain('⚠ [1/2] click #ask: A JavaScript confirm dialog');
     expect((await bvl('dialog', 'dismiss')).code).toBe(0);
   });
 

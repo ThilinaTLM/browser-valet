@@ -34,9 +34,11 @@ network request <id>
 `mouse` is for canvases, maps and sliders; on a background tab `mouse wheel` scrolls by script. Global flags: `--json`, `--session <name>`,
 `--timeout <ms>` (default 25000), `--max-output <chars>`, `--content-boundaries`, `--allowed-domains <list>`, `--confirm-actions <list>`. `bvl <command> --help` shows details and examples.
 
-`batch` runs the items in order (quotes and backslashes like a shell, nothing expanded). Text output is each item's output; failures
-go to stderr and the exit code is 1 if any failed (`--bail` stops at the first). `--json` prints a top-level array of
-`{command, success, result, error}` (`--omit-command`: `index` instead of `command`). A confirm/prompt dialog ends the batch.
+`batch` runs the items in order (quotes and backslashes like a shell, nothing expanded). Text output is each item's output
+(empty outputs are skipped); errors and warnings go to stderr labelled with the step, e.g. `✗ [2/3] click @e9: Unknown ref…`,
+followed by a summary `batch: 2 of 3 steps succeeded; failed: 2 (click); skipped: 1`. The exit code is 1 if any failed
+(`--bail` stops at the first). `--json` prints a top-level array of `{index, command, success, result, error, code?}`
+(`--omit-command` drops `command`). A confirm/prompt dialog ends the batch.
 Not allowed inside a batch: `batch`, `--session`, `--stdin`; `--timeout` applies per item.
 
 `--json` output: `{success, data, error}`, plus `code` on failures (list in SKILL.md). `data` follows agent-browser:
@@ -44,4 +46,7 @@ actions echo their target (`click` → `{clicked:"@e3"}`, `fill` → `{filled}`,
 `origin`, `get attr|value` → `{value}`, `get count` → `{count,selector}`, `console` → `{messages:[{type,text,args}]}`,
 `errors` → `{errors:[{text,line,column,url}]}`, `dialog status` → `{hasDialog,type,message,defaultPrompt}`,
 `tab` → `{tabs:[{tabId,label,title,url,active,controlled,pending,…}]}`, `wait --url` → `{url}`, `wait --text` → `{text}`.
+`click`, `dblclick`, `press`, `select` (and `find … click`) add `navigated:{url,title}` when they changed the page.
+`open`/`back`/`forward`/`reload`/`tab new` add `loaded:false` when `--timeout` hit before the load event and `status` (HTTP) when known.
+`unknown_command` errors add `suggestion` when a command name is close.
 
