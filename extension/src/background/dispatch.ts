@@ -9,6 +9,7 @@ import {
   GLOBAL_FLAGS,
   logArgs,
   parseArgs,
+  suggest,
   type Result,
 } from './command';
 import { batchCommands, type Outcome, runBatch } from './commands/batch';
@@ -30,7 +31,7 @@ import {
   parseConfirmList,
   parseDomainList,
 } from './guardrails';
-import { log, meta, session as sessionState } from './state';
+import { log, meta, peekSession, pruneSession } from './state';
 
 const DEFAULT_TIMEOUT = 25_000;
 
@@ -233,7 +234,10 @@ export async function execute(
   let lastError: string | undefined;
   const fail = (error: string, code?: ErrorCode, extra?: Record<string, unknown>): CliResponse => {
     lastError = error;
-    if (outcome) outcome.error = error;
+    if (outcome) {
+      outcome.error = error;
+      if (code) outcome.code = code;
+    }
     return {
       exitCode: 1,
       stdout: json ? `${formatJsonError(error, code, extra)}\n` : '',
@@ -247,9 +251,15 @@ export async function execute(
   }
   const cmd = lookup(name);
   if (!cmd) {
-    return fail(`Unknown command: ${name}. Run \`bvl help\`.`, 'unknown_command', {
-      type: 'unknown_command',
-    });
+    const near = suggest(
+      name,
+      COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]),
+    );
+    return fail(
+      `Unknown command: ${name}.${near ? ` Did you mean \`${near}\`?` : ''} Run \`bvl help\`.`,
+      'unknown_command',
+      { type: 'unknown_command', ...(near ? { suggestion: near } : {}) },
+    );
   }
 
   if (cmd.name === 'batch') {
@@ -282,14 +292,14 @@ export async function execute(
       raw = await raceDialog(ctx, cmd.run(ctx, args));
     } catch (e) {
       // A navigation the policy refused mid-flight usually surfaces as a generic load failure.
-      const refused = takeBlocked(ctx.tabId ?? sessionState(ctx.session).tab);
+      const refused = takeBlocked(ctx.tabId ?? peekSession(ctx.session)?.tab);
       if (refused.length && navigates)
         throw new UserError(blockedMessage(refused), 'domain_blocked');
       throw e;
     } finally {
       release();
     }
-    const refused = takeBlocked(ctx.tabId ?? sessionState(ctx.session).tab); // navigations the page started and the policy refused
+    const refused = takeBlocked(ctx.tabId ?? peekSession(ctx.session)?.tab); // navigations the page started and the policy refused
     if (refused.length && navigates) throw new UserError(blockedMessage(refused), 'domain_blocked');
     if (refused.length)
       raw = { ...raw, warning: [raw?.warning ?? [], blockedMessage(refused)].flat() };
@@ -317,5 +327,7 @@ export async function execute(
     ok: response.exitCode === 0,
     error: lastError,
   });
+  if (outcome) outcome.described = describe(cmd, req, args);
+  pruneSession(ctx?.session ?? req.session);
   return response;
 }

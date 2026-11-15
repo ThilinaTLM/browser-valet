@@ -68,17 +68,24 @@ bvl snapshot -i                 # interactive elements with refs
 bvl fill @e1 "user@example.com"
 bvl click @e3
 bvl wait --url "**/dashboard"
-bvl snapshot -i                 # after navigation old refs fail (Unknown ref): snapshot again
+bvl snapshot -i                 # after navigation old refs fail (stale_ref): snapshot again
 ```
+
+Actions say when they navigated: `✓ Done → https://app.example.com/home "Home" (refs reset: snapshot again)`
+(`--json`: `navigated: {url, title}`), so you need no `get url` after a click. Plain `✓ Done` means the URL did not change.
 
 Refs are stable: while the page stays the same document, re-snapshotting (also with or without
 `-i`) gives the same element the same `@eN`, and new elements get new numbers. A navigation or
 reload invalidates all refs; new refs keep counting upwards, so an old ref never points at a
-different element.
+different element. Using one fails with `stale_ref` ("from a previous page" or "no longer on the page");
+`unknown_ref` means the ref was never issued (typo).
 
 Long task on a big page? Use `bvl snapshot -i --delta`: the first call prints the tree, later
-calls print `unchanged (revision N)` or a small JSON `delta` (`treeChange` = lines to splice at
-`startLine`, `changes` = refs added/removed/renamed). The tree comes back in full after a URL
+calls print `unchanged (revision N)` or a small diff: a header `delta (revision 4 → 5, lines 8-11)`
+(or `line N`, or `insert at line N` = before baseline line N), then the removed baseline lines prefixed
+`- ` and the new lines prefixed `+ ` (so a removed tree line reads `- - button "X" [ref=e9]`). Replace
+those baseline lines with the `+` lines. Separate edits come as `delta (…, N changes)` with one
+`@ line N` / `@ lines S-E` / `@ insert at line N` header per hunk (all numbers are baseline lines). `--json` keeps the structured `{changes, treeChange}` form. The tree comes back in full after a URL
 change or when the delta would be larger. `--full` forces the tree and resets the baseline. Each
 combination of flags (`-i`, `-c`, `-s`…) has its own baseline.
 
@@ -86,6 +93,8 @@ Elements that act like buttons but have no interactive role (`<div onclick>`, `c
 spans, `tabindex`) get a ref too, marked `clickable [cursor:pointer, onclick]` (or
 `focusable [tabindex]`). In `-i` their text is the name. Listeners added with `addEventListener`
 are not detected; use `find text` or a CSS selector for those.
+A link or button with no accessible name takes one from an inner image `alt`, svg `<title>` or `title`;
+a nameless link without any shows its target instead: `link [href=/vote?id=1&how=up, ref=e11]`.
 
 Iframes (also cross-origin ones such as payment or SSO widgets) are inlined in the snapshot under
 their `Iframe` line, and their refs work with `click`, `fill`, etc. like any other. To use CSS
@@ -110,6 +119,16 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
 
 ## Tips
 
+- CSS/XPath targets and `find` act on the **first** match. When several match you get
+  `⚠ 30 elements match ".item a"; used the first…` on stderr: use a ref, a narrower selector or `find nth`.
+- `fill` checks the value afterwards. Date/time/color/range inputs are set directly (use their value format:
+  `time` `HH:MM`, `date` `YYYY-MM-DD`, `datetime-local` `YYYY-MM-DDTHH:MM`, `color` `#rrggbb`); if the field stays
+  empty the command fails (`fill did not stick: …`; for plain fields the page may have reset it while loading: retry),
+  if the page reformatted it you get a warning.
+- `open` waits at most `--timeout` ms. If the page committed but is still loading you get
+  `⚠ Page still loading after N ms…` (exit 0, `--json` `loaded:false`); if nothing arrived it fails with `timeout`.
+  An HTTP error page loads with `⚠ HTTP 404 from <url>` (`--json` `status`).
+- In text mode an empty `get` result prints `(empty)`; `get attr` of a missing attribute prints `null`.
 - Prefer `wait --text`, `wait --url`, `wait <t>` over fixed `wait <ms>`. `wait --url` prints the URL it
   matched and `wait --text` the text (`--json`: `{url}` / `{text}`), so you often need no `get url` after it.
 - `--max-output <chars>` (any command) cuts each output text to that size and appends
@@ -138,7 +157,8 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
   recording just started, `tab` not-shared hint); stdout is only the result.
 - With `--json`, failures are `{success:false, data:null, error, code}` on stdout (exit 1). Branch on `code`:
   `unknown_command`, `bad_args` (the message ends with `Usage: bvl …`), `unknown_ref`/`stale_ref` (re-snapshot),
-  `not_found`, `not_visible`, `disabled`, `covered`, `timeout`, `dialog_open` (`dialog accept|dismiss`),
+  `not_found`, `not_visible`, `disabled`, `covered`, `timeout`, `navigation_failed` (DNS/network error or empty
+  HTTP error response; check the URL), `dialog_open` (`dialog accept|dismiss`),
   `no_tab` (`open` a page), `tab_gone`, `not_shared`/`revoked` (ask again with `tab <id>`), `denied` (the user
   said no: do not retry), `domain_blocked` (site not allowed: do not retry), `not_connected` (extension/proxy down: `bvl doctor`), `not_paired` (`bvl setup`).
   Page and Chrome errors (such as a JS exception in `eval`) have no `code`.
@@ -147,6 +167,8 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
   Alerts are accepted automatically.
 - Known sequences cost one call as `bvl batch "fill @e1 a@b.c" "fill @e2 pw" "click @e3" "wait --url **/home"`
   (`--bail` stops at the first failure; snapshot first, batch only steps whose refs you already know).
+  Errors name their step (`✗ [3/4] click @e3: …`) and a `batch: …` summary line follows.
+- A mistyped command or flag gets a hint: ``Unknown command: clik. Did you mean `click`?``.
 - For scripts with quotes, use `eval --stdin` with a quoted heredoc.
 - `network requests [--filter --type --method --status 4xx --clear]` / `network request <id>` show what the
   page sent and received (read-only). Recording starts at the first `network` command on a tab, so

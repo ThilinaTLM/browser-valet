@@ -60,17 +60,48 @@ describe('formatting', () => {
   const items = [
     { command: ['get', 'url'], success: true, result: { url: 'x' }, error: null },
     { command: ['click', '#n'], success: false, result: null, error: 'nope' },
+  ] as [
+    import('../../src/background/commands/batch').Item,
+    import('../../src/background/commands/batch').Item,
   ];
   it('JSON is a top-level array with upstream keys', () => {
-    expect(JSON.parse(batch.formatBatchJson(items, false))).toEqual(items);
+    expect(JSON.parse(batch.formatBatchJson(items, false))).toEqual(
+      items.map((it, index) => ({ index, ...it })),
+    );
     expect(JSON.parse(batch.formatBatchJson(items, true))).toEqual([
       { index: 0, success: true, result: { url: 'x' }, error: null },
       { index: 1, success: false, result: null, error: 'nope' },
     ]);
   });
-  it('text joins item outputs like upstream (blank line between)', () => {
-    expect(batch.formatBatchText(['\n', 'about:blank\n', '', '\n'])).toBe(
-      '\n\nabout:blank\n\n\n\n',
+  it('JSON items carry the code of a failure', () => {
+    const out = JSON.parse(
+      batch.formatBatchJson([{ ...items[1], code: 'no_tab' }, items[0]], false),
+    ) as Record<string, unknown>[];
+    expect(out[0]).toMatchObject({ index: 0, code: 'no_tab' });
+    expect(out[1]).not.toHaveProperty('code');
+  });
+  it('text joins item outputs like upstream (blank line between), skipping empty ones', () => {
+    expect(batch.formatBatchText(['\n', 'about:blank\n', '', '\n'])).toBe('\n\nabout:blank\n\n\n');
+  });
+  it('prefixes stderr lines with the step', () => {
+    expect(batch.prefixStderr('✗ Unknown ref: @e9\n', 2, 3, 'click @e9')).toBe(
+      '✗ [2/3] click @e9: Unknown ref: @e9\n',
+    );
+    expect(batch.prefixStderr('⚠ careful\n✗ bad\nUsage: x\n', 1, 2, 'fill')).toBe(
+      '⚠ [1/2] fill: careful\n✗ [1/2] fill: bad\nUsage: x\n',
+    );
+  });
+  it('labels steps without leaking arguments', () => {
+    expect(batch.stepLabel('fill @e1 •••', ['fill', '@e1', 'secret'])).toBe('fill @e1 •••');
+    expect(batch.stepLabel(undefined, ['--json', 'clik', 'secret'])).toBe('clik');
+  });
+  it('summarises failures and skipped steps', () => {
+    expect(batch.batchSummary(3, [], 0)).toBe('');
+    expect(batch.batchSummary(3, [{ n: 2, name: 'click' }], 0)).toBe(
+      'batch: 2 of 3 steps succeeded; failed: 2 (click)\n',
+    );
+    expect(batch.batchSummary(4, [{ n: 2, name: 'click' }], 2)).toBe(
+      'batch: 1 of 4 steps succeeded; failed: 2 (click); skipped: 2\n',
     );
   });
 });
@@ -111,7 +142,10 @@ describe('batch through execute', () => {
   it('continues after a failure, reports it on stderr and exits 1', async () => {
     const r = await run(['batch', 'help click', 'frobnicate', 'help eval']);
     expect(r.exitCode).toBe(1);
-    expect(r.stderr).toBe('✗ Unknown command: frobnicate. Run `bvl help`.\n');
+    expect(r.stderr).toBe(
+      '✗ [2/3] frobnicate: Unknown command: frobnicate. Run `bvl help`.\n' +
+        'batch: 2 of 3 steps succeeded; failed: 2 (frobnicate)\n',
+    );
     expect(r.stdout).toContain('Usage: bvl eval');
   });
 
@@ -119,6 +153,24 @@ describe('batch through execute', () => {
     const r = await run(['batch', '--bail', 'help click', 'frobnicate', 'help eval']);
     expect(r.exitCode).toBe(1);
     expect(r.stdout).not.toContain('Usage: bvl eval');
+    expect(r.stderr).toContain('batch: 1 of 3 steps succeeded; failed: 2 (frobnicate); skipped: 1');
+  });
+
+  it('labels a failed step with its redacted command and never echoes typed text', async () => {
+    const r = await run(['batch', 'get title', 'fill #x "secret words"', 'click @e9999']);
+    expect(r.stderr).toMatch(/^✗ \[2\/3\] fill #x •••: /m);
+    expect(r.stderr).toMatch(/^✗ \[3\/3\] click @e9999: /m);
+    expect(r.stderr).not.toContain('secret words');
+    expect(r.stderr).toContain(
+      'batch: 0 of 3 steps succeeded; failed: 1 (get), 2 (fill), 3 (click)',
+    );
+  });
+
+  it('suggests a command for a typo, in text and JSON items', async () => {
+    const r = await run(['batch', '--json', 'clik @e1']);
+    const out = JSON.parse(r.stdout) as { error: string; code: string }[];
+    expect(out[0]?.error).toContain('Did you mean `click`?');
+    expect(out[0]?.code).toBe('unknown_command');
   });
 
   it('--json is a top-level array; --omit-command uses index', async () => {
@@ -136,6 +188,7 @@ describe('batch through execute', () => {
       (await run(['batch', '--json', '--omit-command', 'help'])).stdout,
     );
     expect(o).toEqual([{ index: 0, success: true, result: null, error: null }]);
+    expect(out[1]).toMatchObject({ index: 1, code: 'unknown_command' });
   });
 
   it('--stdin reads one command per line, skipping blanks', async () => {

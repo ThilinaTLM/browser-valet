@@ -349,7 +349,16 @@ const sessionCmd: Command = {
   async run(ctx, a) {
     const what = a.pos[0] ?? 'info';
     if (what === 'list') {
-      const names = [...new Set([ctx.session, ...Object.keys(state.sessions)])].sort();
+      // Only sessions that hold something: a tab, or tabs they opened; plus the current one.
+      const names = [
+        ...new Set([
+          ctx.session,
+          ...Object.entries(state.sessions)
+            .filter(([, s]) => s.tab !== undefined)
+            .map(([n]) => n),
+          ...Object.values(state.tabs).flatMap((m) => (m.owner ? [m.owner] : [])),
+        ]),
+      ].sort();
       const sessions = names.map((name) => {
         const tabId = state.sessions[name]?.tab;
         const m = tabId === undefined ? undefined : state.tabs[tabId];

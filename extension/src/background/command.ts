@@ -3,7 +3,7 @@
 import type { CliRequest, ConfirmCategory } from '../shared';
 import * as cdp from './cdp';
 import { UserError } from './errors';
-import { meta, session as sessionState } from './state';
+import { meta, peekSession, session as sessionState } from './state';
 import { isControlled } from './tabs';
 
 export interface Flag {
@@ -130,6 +130,51 @@ export function logArgs(cmd: Command, a: Args, req: CliRequest): string[] {
   return out;
 }
 
+/** Optimal-string-alignment distance (Damerau-Levenshtein, adjacent transposition counts 1). */
+export function editDistance(a: string, b: string): number {
+  const at = (row: number[], i: number): number => row[i] ?? 0;
+  let prev2: number[] = [];
+  let prev: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur: number[] = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(at(prev, j) + 1, at(cur, j - 1) + 1, at(prev, j - 1) + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        v = Math.min(v, at(prev2, j - 2) + 1);
+      }
+      cur[j] = v;
+    }
+    prev2 = prev;
+    prev = cur;
+  }
+  return at(prev, b.length);
+}
+
+/**
+ * The closest candidate to a mistyped `input`: a prefix match (input of 2+ chars), else the
+ * smallest edit distance ≤ 2 (≤ 1 for inputs shorter than 4 chars). Ties go to the first.
+ */
+export function suggest(input: string, candidates: readonly string[]): string | undefined {
+  const x = input.toLowerCase();
+  if (!x) return undefined;
+  if (x.length >= 2) {
+    const p = candidates.find((c) => c.startsWith(x) && c !== x);
+    if (p) return p;
+  }
+  const max = x.length < 4 ? 1 : 2;
+  let best: string | undefined;
+  let bestD = max + 1;
+  for (const c of candidates) {
+    const dist = editDistance(x, c);
+    if (dist < bestD) {
+      best = c;
+      bestD = dist;
+    }
+  }
+  return best;
+}
+
 export function parseArgs(argv: string[], flags: Flag[]): Args {
   const all = [...flags, ...GLOBAL_FLAGS];
   const pos: string[] = [];
@@ -165,7 +210,16 @@ export function parseArgs(argv: string[], flags: Flag[]): Args {
       if (!name) throw new UserError(`Unknown flag: ${tok}`, 'bad_args');
     }
     const spec = all.find((f) => f.name === name);
-    if (!spec) throw new UserError(`Unknown flag: --${name}`, 'bad_args');
+    if (!spec) {
+      const near = suggest(
+        name,
+        all.map((f) => f.name),
+      );
+      throw new UserError(
+        `Unknown flag: --${name}${near ? `. Did you mean --${near}?` : ''}`,
+        'bad_args',
+      );
+    }
     if (spec.type === 'bool') {
       out.set(name, true);
     } else {
@@ -203,7 +257,7 @@ export class Ctx {
 
   /** The session's current tab. Fails if there is none, it was revoked, or a dialog blocks it. */
   async tab(): Promise<number> {
-    const id = sessionState(this.session).tab;
+    const id = peekSession(this.session)?.tab;
     if (id === undefined) {
       throw new UserError(
         'No tab yet. Run `bvl open <url>` to open one, or `bvl tab` to list tabs.',

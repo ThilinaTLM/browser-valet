@@ -204,6 +204,7 @@ export function forgetTab(tabId: number): void {
   delete state.tabs[tabId];
   delete state.refs[tabId];
   delete state.refDocs[tabId];
+  delete state.refDocStart?.[tabId];
   delete state.childSessions[tabId];
   delete state.frames[tabId];
   forgetBaselines(tabId);
@@ -214,6 +215,20 @@ export function forgetTab(tabId: number): void {
 
 export function session(name: string): State['sessions'][string] {
   return (state.sessions[name] ??= {});
+}
+
+/** The session's state if it exists; unlike `session`, never creates one (for reads). */
+export function peekSession(name: string): State['sessions'][string] | undefined {
+  return state.sessions[name];
+}
+
+/** Drop a session entry that holds nothing (reads and failed commands must leave no trace). */
+export function pruneSession(name: string): void {
+  const s = state.sessions[name];
+  if (s && s.tab === undefined && s.nextRef === undefined && !s.sites?.length) {
+    delete state.sessions[name];
+    save();
+  }
 }
 
 export function log(entry: LogEntry): void {

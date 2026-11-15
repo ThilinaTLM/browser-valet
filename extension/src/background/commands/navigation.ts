@@ -3,6 +3,14 @@ import * as cdp from '../cdp';
 import { evaluate, UserError } from '../dom';
 import { guardNavigation } from '../guardrails';
 import { assertLanded, hasBlocked } from '../navigation-guard';
+import {
+  navData,
+  navFailure,
+  navTimeout,
+  navWarnings,
+  titleLine,
+  type NavInfo,
+} from '../nav-outcome';
 import { findTab, meta, save, session, state } from '../state';
 import { grant, isControlled, requestControl, revoke, sleep, waitForLoad } from '../tabs';
 
@@ -12,7 +20,14 @@ function normalizeUrl(url: string): string {
   return `https://${url}`;
 }
 
-async function pageResult(tabId: number): Promise<Result> {
+/** What a navigation command reports about how the load went. */
+interface NavReport {
+  info: NavInfo;
+  url: string;
+  timeout: number;
+}
+
+async function pageResult(tabId: number, nav?: NavReport): Promise<Result> {
   const t = await chrome.tabs.get(tabId);
   let { title = '', url = t.pendingUrl ?? '' } = t;
   // The tabs API can lag behind CDP load events; ask the page itself when we can.
@@ -24,10 +39,25 @@ async function pageResult(tabId: number): Promise<Result> {
     if (v) ({ title, url } = v);
   }
   const m = meta(tabId);
+  const warnings = nav ? navWarnings(nav.info, nav.url || url, nav.timeout) : [];
   return {
-    text: `✓ ${title}\n  ${url}`,
-    data: { tabId: m.tid, label: m.label, title, url },
+    text: `${titleLine(title)}\n  ${url}`,
+    data: { tabId: m.tid, label: m.label, title, url, ...(nav ? navData(nav.info) : {}) },
+    ...(warnings.length ? { warning: warnings } : {}),
   };
+}
+
+/** HTTP status of the tab's main document (0/undefined when unknown); never waits long. */
+async function docStatus(tabId: number): Promise<number | undefined> {
+  if (!cdp.isAttached(tabId)) return undefined;
+  const probe = evaluate(
+    tabId,
+    "(performance.getEntriesByType('navigation')[0] || {}).responseStatus || 0",
+  ).then(
+    (r) => (typeof r.value === 'number' && r.value > 0 ? r.value : undefined),
+    () => undefined,
+  );
+  return Promise.race([probe, sleep(500).then(() => undefined)]);
 }
 
 /** Wait for the main frame's load event (resolves false on timeout). */
@@ -58,24 +88,35 @@ function loadEvent(
 }
 
 /** Poll the tabs API until the tab has finished loading something other than about:blank. */
-async function tabLoaded(tabId: number, timeoutMs: number): Promise<void> {
+async function tabLoaded(tabId: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (hasBlocked(tabId)) return; // the navigation guard refused the page and blanked the tab
+    if (hasBlocked(tabId)) return true; // the navigation guard refused the page and blanked the tab
     const t = await chrome.tabs.get(tabId);
-    if (t.status === 'complete' && !t.pendingUrl && t.url !== 'about:blank') return;
+    if (t.status === 'complete' && !t.pendingUrl && t.url !== 'about:blank') return true;
     await sleep(100);
   }
+  return false;
+}
+
+/** Has the tab committed anything beyond the blank page it started on? */
+async function committed(tabId: number): Promise<boolean> {
+  const t = await chrome.tabs.get(tabId).catch(() => undefined);
+  return !!t?.url && t.url !== 'about:blank' && !t.url.startsWith('chrome-error:');
 }
 
 /** Navigate with the tabs API, resolving once the tab has started and finished loading. */
-async function navigateViaTabs(tabId: number, url: string, timeoutMs: number): Promise<void> {
+async function navigateViaTabs(tabId: number, url: string, timeoutMs: number): Promise<boolean> {
   let sawLoading = false;
+  let complete = false;
   const done = new Promise<void>((resolve) => {
     const listener = (id: number, info: chrome.tabs.OnUpdatedInfo) => {
       if (id !== tabId) return;
       if (info.status === 'loading') sawLoading = true;
-      if (info.status === 'complete' && sawLoading) finish();
+      if (info.status === 'complete' && sawLoading) {
+        complete = true;
+        finish();
+      }
     };
     const timer = setTimeout(finish, timeoutMs);
     function finish() {
@@ -87,42 +128,71 @@ async function navigateViaTabs(tabId: number, url: string, timeoutMs: number): P
   });
   await chrome.tabs.update(tabId, { url });
   await done;
+  return complete;
 }
 
-async function navigate(ctx: Ctx, tabId: number, url: string): Promise<void> {
+/**
+ * Navigate and wait at most `ctx.timeout` ms in total. Page.navigate itself blocks until the
+ * response commits, so it is raced against the deadline: if nothing committed in time the
+ * command fails with `timeout`; if the page committed but is still loading, it succeeds with
+ * `loaded: false`.
+ */
+async function navigate(ctx: Ctx, tabId: number, url: string): Promise<NavInfo> {
   if (/^(chrome|edge|brave|about:(?!blank))/i.test(url)) {
     // Browser pages can't be debugged; navigate without waiting.
     await chrome.tabs.update(tabId, { url });
-    return;
+    return { loaded: true };
   }
+  const deadline = Date.now() + ctx.timeout;
   // Page.navigate gives precise load tracking and network error text. Chrome sometimes swaps
   // the tab's renderer process when it starts, which detaches the debugger and drops the
   // navigation ("target_closed"): retry once on a fresh attach, then fall back to the tabs API.
   for (let attempt = 0; attempt < 2; attempt++) {
-    const load = loadEvent(tabId, ctx.timeout);
-    let r: { loaderId?: string; errorText?: string };
+    const load = loadEvent(tabId, Math.max(0, deadline - Date.now()));
+    let r: { loaderId?: string; errorText?: string } | undefined;
+    const sent = cdp.send<{ loaderId?: string; errorText?: string }>(tabId, 'Page.navigate', {
+      url,
+    });
     try {
-      r = await cdp.send(tabId, 'Page.navigate', { url });
+      r = await Promise.race([
+        sent,
+        sleep(Math.max(0, deadline - Date.now())).then(() => undefined),
+      ]);
     } catch (e) {
       load.cancel();
       if (!/detached|not attached/i.test(String(e))) throw e;
       await sleep(100);
       continue;
     }
+    if (!r) {
+      // No response committed in time (slow server). Stop the pending load and report it.
+      load.cancel();
+      sent.catch(() => undefined);
+      await cdp.send(tabId, 'Page.stopLoading').catch(() => undefined);
+      throw navTimeout(url, ctx.timeout);
+    }
     if (r.errorText) {
       load.cancel();
-      throw new UserError(`Navigation to ${url} failed: ${r.errorText}`);
+      // Only an HTTP error response commits a document whose status is this navigation's; for
+      // other failures (DNS, ERR_ABORTED…) the probe would read the previous page's status.
+      const status =
+        r.errorText === 'net::ERR_HTTP_RESPONSE_CODE_FAILURE' ? await docStatus(tabId) : undefined;
+      throw navFailure(url, r.errorText, status);
     }
-    if (!r.loaderId)
+    if (!r.loaderId) {
       load.cancel(); // same-document navigation (e.g. #hash): nothing to wait for
-    else await load.promise;
-    return;
+      return { loaded: true };
+    }
+    const loaded = await load.promise;
+    return { loaded, status: await docStatus(tabId) };
   }
-  await navigateViaTabs(tabId, url, ctx.timeout);
+  const loaded = await navigateViaTabs(tabId, url, Math.max(0, deadline - Date.now()));
+  if (!loaded && !(await committed(tabId))) throw navTimeout(url, ctx.timeout);
+  return { loaded, status: await docStatus(tabId) };
 }
 
 /** Move through session history via CDP (the tabs API loses track after process swaps). */
-async function goHistory(ctx: Ctx, tabId: number, delta: number): Promise<void> {
+async function goHistory(ctx: Ctx, tabId: number, delta: number): Promise<NavInfo> {
   const { currentIndex, entries } = await cdp.send<{
     currentIndex: number;
     entries: { id: number; url: string }[];
@@ -139,13 +209,14 @@ async function goHistory(ctx: Ctx, tabId: number, delta: number): Promise<void> 
       '({ url: location.href, ready: document.readyState })',
     ).catch(() => undefined);
     const v = page?.value as { url: string; ready: string } | undefined;
-    if (v?.url === entry.url && v.ready === 'complete') return;
+    if (v?.url === entry.url && v.ready === 'complete') return { loaded: true };
     await sleep(100);
   }
+  return { loaded: false };
 }
 
 /** Open a new agent-owned tab in the background (doesn't steal the user's focus). */
-async function newTab(ctx: Ctx, url?: string): Promise<number> {
+async function newTab(ctx: Ctx, url?: string): Promise<{ id: number; info: NavInfo }> {
   const win = await chrome.windows
     .getLastFocused({ windowTypes: ['normal'] })
     .catch(() => undefined);
@@ -160,18 +231,21 @@ async function newTab(ctx: Ctx, url?: string): Promise<number> {
   if (tab.id === undefined) throw new Error('Failed to create a tab');
   await grant(tab.id, 'agent', ctx.session);
   ctx.setTab(tab.id);
+  let info: NavInfo = { loaded: true };
   if (url) {
-    await tabLoaded(tab.id, ctx.timeout);
+    const loaded = await tabLoaded(tab.id, ctx.timeout);
+    if (!loaded && !(await committed(tab.id))) throw navTimeout(normalizeUrl(url), ctx.timeout);
     await assertLanded(ctx, tab.id);
+    info = { loaded, status: await docStatus(tab.id) };
   }
-  return tab.id;
+  return { id: tab.id, info };
 }
 
 /** Used by `click --new-tab`. */
 export async function openInNewTab(ctx: Ctx, url: string): Promise<Result> {
-  const id = await newTab(ctx, url);
+  const { id, info } = await newTab(ctx, url);
   save();
-  return pageResult(id);
+  return pageResult(id, { info, url: normalizeUrl(url), timeout: ctx.timeout });
 }
 
 function currentTab(ctx: Ctx): number | undefined {
@@ -221,14 +295,16 @@ export const navigationCommands: Command[] = [
       let id = currentTab(ctx);
       // A tab the user shared is theirs: don't navigate it somewhere else, open our own instead.
       const shared = id !== undefined && state.tabs[id]?.control === 'user';
-      if (id === undefined || (shared && url)) id = await newTab(ctx, url);
+      let info: NavInfo | undefined;
+      if (id === undefined || (shared && url)) ({ id, info } = await newTab(ctx, url));
       else if (url) {
         await guardNavigation(ctx, normalizeUrl(url));
-        await navigate(ctx, id, normalizeUrl(url));
+        info = await navigate(ctx, id, normalizeUrl(url));
       }
       ctx.setTab(id);
       save();
-      return pageResult(id);
+      const target = url ? normalizeUrl(url) : '';
+      return pageResult(id, info && { info, url: target, timeout: ctx.timeout });
     },
   },
   {
@@ -238,8 +314,8 @@ export const navigationCommands: Command[] = [
     summary: 'Go back',
     async run(ctx) {
       const id = await ctx.tab();
-      await goHistory(ctx, id, -1);
-      return pageResult(id);
+      const info = await goHistory(ctx, id, -1);
+      return pageResult(id, { info, url: '', timeout: ctx.timeout });
     },
   },
   {
@@ -249,8 +325,8 @@ export const navigationCommands: Command[] = [
     summary: 'Go forward',
     async run(ctx) {
       const id = await ctx.tab();
-      await goHistory(ctx, id, 1);
-      return pageResult(id);
+      const info = await goHistory(ctx, id, 1);
+      return pageResult(id, { info, url: '', timeout: ctx.timeout });
     },
   },
   {
@@ -262,8 +338,9 @@ export const navigationCommands: Command[] = [
       const id = await ctx.tab();
       const load = loadEvent(id, ctx.timeout);
       await cdp.send(id, 'Page.reload');
-      await load.promise;
-      return pageResult(id);
+      const loaded = await load.promise;
+      const info: NavInfo = { loaded, status: loaded ? await docStatus(id) : undefined };
+      return pageResult(id, { info, url: '', timeout: ctx.timeout });
     },
   },
   {
@@ -356,11 +433,15 @@ export const navigationCommands: Command[] = [
       }
 
       if (sub === 'new') {
-        const id = await newTab(ctx, a.pos[1]);
+        const { id, info } = await newTab(ctx, a.pos[1]);
         const label = a.str('label');
         if (label) setLabel(id, label);
         save();
-        return pageResult(id);
+        return pageResult(id, {
+          info,
+          url: a.pos[1] ? normalizeUrl(a.pos[1]) : '',
+          timeout: ctx.timeout,
+        });
       }
 
       if (sub === 'close') {

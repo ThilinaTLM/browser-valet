@@ -7,6 +7,8 @@ import {
   diffRefs,
   forgetBaselines,
   formatDelta,
+  formatDeltaText,
+  spliceHunks,
   formatUnchanged,
   getBaseline,
   nextRevision,
@@ -147,10 +149,8 @@ describe('computeDelta', () => {
   });
 
   it('sends the full tree when the delta is not smaller than the tree', () => {
-    const small = many(3);
-    expect(
-      computeDelta(base(small), next([...small, '- button "N" [ref=e50]']), 5),
-    ).toBeUndefined();
+    const small = ['- button "A" [ref=e1]'];
+    expect(computeDelta(base(small), next(['- button "B" [ref=e2]']), 5)).toBeUndefined();
   });
 });
 
@@ -182,5 +182,50 @@ describe('baselines', () => {
     forgetBaselines(1);
     expect(getBaseline(baselineKey(12, 'a'))).toBeDefined();
     forgetBaselines(12);
+  });
+});
+
+describe('formatDeltaText', () => {
+  const d = (startLine: number, deleteCount: number, lines: string[]) => ({
+    baseRevision: 4,
+    changes: [],
+    kind: 'delta' as const,
+    revision: 5,
+    treeChange: { deleteCount, lines, startLine },
+  });
+  const baseLines = ['- a', '  - b [ref=e1]', '    - c', '- d'];
+
+  it('prints removed and added lines with indentation kept', () => {
+    expect(formatDeltaText(d(1, 2, ['  - x [ref=e9]']), baseLines)).toBe(
+      'delta (revision 4 → 5, lines 2-3)\n-   - b [ref=e1]\n-     - c\n+   - x [ref=e9]',
+    );
+  });
+
+  it('describes a single line, a pure insertion and a pure removal', () => {
+    expect(formatDeltaText(d(0, 1, ['- z']), baseLines).split('\n')[0]).toContain(', line 1)');
+    expect(formatDeltaText(d(3, 0, ['- z']), baseLines)).toBe(
+      'delta (revision 4 → 5, insert at line 4)\n+ - z',
+    );
+    expect(formatDeltaText(d(3, 1, []), baseLines)).toBe('delta (revision 4 → 5, line 4)\n- - d');
+  });
+
+  it('splits separate edits into hunks and skips the unchanged lines between them', () => {
+    const base = ['- s: a', '- l1', '- l2', '- l3', '- end'];
+    const next = ['- s: ab', '- l1', '- l2', '- l3', '- end', '- new'];
+    const splice = diffLines(base, next);
+    expect(splice).toBeDefined();
+    if (!splice) return;
+    expect(spliceHunks(base, splice)).toEqual([
+      { start: 0, deleteCount: 1, lines: ['- s: ab'] },
+      { start: 5, deleteCount: 0, lines: ['- new'] },
+    ]);
+    expect(formatDeltaText(d(splice.startLine, splice.deleteCount, splice.lines), base)).toBe(
+      'delta (revision 4 → 5, 2 changes)\n@ line 1\n- - s: a\n+ - s: ab\n@ insert at line 6\n+ - new',
+    );
+  });
+
+  it('is shorter than the old JSON form for a small change', () => {
+    const t = d(1, 1, ['  - x [ref=e9]']);
+    expect(formatDeltaText(t, baseLines).length).toBeLessThan(formatDelta(t).length);
   });
 });

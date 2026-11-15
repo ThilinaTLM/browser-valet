@@ -76,3 +76,18 @@ describe('parseArgs', () => {
     }
   });
 });
+
+describe('suggest', () => {
+  it('finds typos by edit distance and prefix', async () => {
+    const { suggest, editDistance } = await import('../../src/background/command');
+    expect(editDistance('clik', 'click')).toBe(1);
+    expect(editDistance('ab', 'ba')).toBe(1);
+    const names = ['click', 'snapshot', 'screenshot', 'scroll', 'tab'];
+    expect(suggest('clik', names)).toBe('click');
+    expect(suggest('snpashot', names)).toBe('snapshot');
+    expect(suggest('snap', names)).toBe('snapshot');
+    expect(suggest('zzzzzz', names)).toBeUndefined();
+    expect(suggest('xyz', names)).toBeUndefined();
+    expect(suggest('click', names)).toBe('click');
+  });
+});

@@ -6,6 +6,14 @@ import * as cdp from './cdp';
 import { type ClickableInfo, clickableScript, clickableSuffix } from './clickable';
 import { resolve, UserError } from './dom';
 import { hostedFrameId, scopeLoc } from './frames';
+import {
+  dedupeName,
+  isLayoutRole,
+  mapRole,
+  type NamelessInfo,
+  namelessScript,
+  shortHref,
+} from './snapshot-names';
 import { nodeKey, type NodeKey, RefTable } from './ref-table';
 import { syncDocument } from './refs';
 import { save, session, state } from './state';
@@ -219,6 +227,64 @@ async function clickables(tabId: number, withText: boolean): Promise<Map<number,
   return found;
 }
 
+/**
+ * Fallback names for links and buttons the accessibility tree leaves nameless, by backend node
+ * id. Best effort, like `clickables`.
+ */
+async function nameless(tabId: number): Promise<Map<number, NamelessInfo>> {
+  const found = new Map<number, NamelessInfo>();
+  const group = 'bvl-nameless';
+  try {
+    const holder = await cdp.send<{ result: { objectId?: string }; exceptionDetails?: unknown }>(
+      tabId,
+      'Runtime.evaluate',
+      { expression: namelessScript(), objectGroup: group },
+    );
+    const objectId = holder.result.objectId;
+    if (!objectId || holder.exceptionDetails) return found;
+    const [infoRes, elsRes] = await Promise.all([
+      cdp.send<{ result: { value?: [string, string][] } }>(tabId, 'Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: 'function () { return this.info; }',
+        returnByValue: true,
+      }),
+      cdp.send<{ result: { objectId?: string } }>(tabId, 'Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: 'function () { return this.els; }',
+      }),
+    ]);
+    const info = infoRes.result.value ?? [];
+    const elsId = elsRes.result.objectId;
+    if (!elsId || info.length === 0) return found;
+    const { result: props } = await cdp.send<{
+      result: { name: string; value?: { objectId?: string } }[];
+    }>(tabId, 'Runtime.getProperties', { objectId: elsId, ownProperties: true });
+    const items = props.filter((p) => /^\d+$/.test(p.name) && p.value?.objectId);
+    const nodes = await Promise.all(
+      items.map((p) =>
+        cdp
+          .send<{ node: { backendNodeId: number } }>(tabId, 'DOM.describeNode', {
+            objectId: p.value?.objectId,
+          })
+          .then((r) => r.node.backendNodeId)
+          .catch(() => undefined),
+      ),
+    );
+    items.forEach((p, i) => {
+      const id = nodes[i];
+      const entry = info[Number(p.name)];
+      if (id !== undefined && entry) found.set(id, { name: entry[0], href: entry[1] });
+    });
+  } catch {
+    // keep what we have
+  } finally {
+    await cdp
+      .send(tabId, 'Runtime.releaseObjectGroup', { objectGroup: group })
+      .catch(() => undefined);
+  }
+  return found;
+}
+
 export async function snapshot(
   tabId: number,
   opts: SnapshotOptions,
@@ -257,6 +323,20 @@ export async function snapshot(
   const clickable = scopedFrame
     ? new Map<number, ClickableInfo>()
     : await clickables(tabId, opts.interactive);
+  // One lookup for all nameless links/buttons, only when the tree has any.
+  const needNames =
+    !scopedFrame &&
+    [...main.byId.values()].some(
+      (n) =>
+        !n.ignored &&
+        n.backendDOMNodeId !== undefined &&
+        !str(n.name).trim() &&
+        ['link', 'button'].includes(str(n.role)),
+    );
+  const namelessInfo = needNames ? await nameless(tabId) : new Map<number, NamelessInfo>();
+  const pageUrl = needNames
+    ? ((await chrome.tabs.get(tabId).catch(() => undefined))?.url ?? '')
+    : '';
 
   let start: { node: AXNode; tree: Tree } | undefined = main.root && {
     node: main.root,
@@ -289,8 +369,15 @@ export async function snapshot(
     parentName: string,
     inField: boolean,
   ): Promise<Out[]> {
-    const role = str(node.role);
-    let name = str(node.name).replace(/\s+/g, ' ').trim();
+    const rawRole = str(node.role);
+    const role = mapRole(rawRole);
+    let name = dedupeName(str(node.name).replace(/\s+/g, ' ').trim());
+    let derivedHref = '';
+    if (!name && (role === 'link' || role === 'button') && node.backendDOMNodeId !== undefined) {
+      const fb = !tree.frameId ? namelessInfo.get(node.backendDOMNodeId) : undefined;
+      if (fb?.name) name = fb.name;
+      else if (fb?.href && !opts.urls) derivedHref = shortHref(fb.href, pageUrl);
+    }
     const isText = role === 'StaticText';
     const focusable = prop(node, 'focusable') === true;
     // Looks clickable but has no interactive role (natively interactive nodes need no hint).
@@ -304,7 +391,7 @@ export async function snapshot(
       (focusable && !isText && role !== 'RootWebArea');
     if (hint && !name && opts.interactive) name = hint.text;
 
-    let show = !node.ignored && !SKIP.has(role) && role !== 'RootWebArea';
+    let show = !node.ignored && !SKIP.has(role) && role !== 'RootWebArea' && !isLayoutRole(rawRole);
     if (show && FLATTEN_UNNAMED.has(role) && !name && !hint) show = false;
     if (show && isText && (!name || name === parentName || inField)) show = false;
     // Iframes stay in -i: `frame @ref` needs them.
@@ -328,6 +415,7 @@ export async function snapshot(
         const url = prop(node, 'url');
         if (typeof url === 'string') attrs.push(`url=${url}`);
       }
+      if (derivedHref) attrs.push(`href=${derivedHref}`);
       const refable = interactive || (NAMED_REF_ROLES.has(role) && name);
       if (node.backendDOMNodeId !== undefined && refable) {
         const ref = table.assign(

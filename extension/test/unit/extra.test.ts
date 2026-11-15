@@ -98,20 +98,21 @@ describe('highlight', () => {
 describe('session', () => {
   it('list shows sessions with their tab, owned tabs and last activity', async () => {
     giveTab('alpha', 5, 't1', 'alpha');
-    stateMod.session('beta'); // no tab
+    stateMod.session('beta'); // empty: not listed
+    stateMod.session('gamma').tab = 5; // has a tab
     stateMod.log({ ts: Date.now() - 5000, session: 'alpha', command: 'open', ok: true });
     const r = await run('alpha', 'session', 'list');
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('Active sessions:');
     expect(r.stdout).toMatch(/→ alpha {2}tab t1 {2}owns t1 {2}last \d+s ago/);
-    expect(r.stdout).toMatch(/ {2}beta {2}tab -/);
+    expect(r.stdout).not.toContain('beta');
 
     const j = JSON.parse((await run('alpha', 'session', 'list', '--json')).stdout) as {
       data: { sessions: { name: string; current: boolean; tab: string | null }[] };
     };
     expect(j.data.sessions.map((s) => [s.name, s.current, s.tab])).toEqual([
       ['alpha', true, 't1'],
-      ['beta', false, null],
+      ['gamma', false, 't1'],
     ]);
   });
 

@@ -267,7 +267,7 @@ describe('action confirmation', () => {
     const denied = bvl('upload', '#f', 'note.txt', ...S, '--json');
     await approveNextConsent('deny');
     expect(jsonOf((await denied).stdout)).toMatchObject({ success: false, code: 'denied' });
-    expect((await bvl('get', 'text', '#name', ...S)).stdout.trim()).toBe('');
+    expect((await bvl('get', 'text', '#name', ...S)).stdout.trim()).toBe('(empty)');
     const allowed = bvl('upload', '#f', 'note.txt', ...S);
     await approveNextConsent('allow');
     expect((await allowed).code).toBe(0);
