@@ -7,7 +7,15 @@ import { loadState, regenerateSecret, save, state, updateSettings } from './stat
 import { setReady, syncAll } from './navigation-guard';
 import { loadGuardrails, updateGuardrails } from './guardrails';
 import { refreshIcon, revokeAll, setEnabled } from './switch';
-import { decide, grant, refreshBadge, refreshGlobalBadge, revoke } from './tabs';
+import {
+  decide,
+  focusTab,
+  grant,
+  isControlled,
+  refreshBadge,
+  refreshGlobalBadge,
+  revoke,
+} from './tabs';
 
 const ready = loadState().then(async () => {
   await loadGuardrails();
@@ -41,6 +49,9 @@ async function handle(msg: PopupMessage): Promise<void> {
       break;
     case 'revoke':
       await revoke(msg.tabId);
+      break;
+    case 'focus':
+      if (isControlled(msg.tabId)) await focusTab(msg.tabId);
       break;
     case 'revokeAll':
       await revokeAll();

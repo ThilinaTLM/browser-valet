@@ -152,6 +152,7 @@ export type PopupMessage =
   | { type: 'decide'; id: string; allow: boolean }
   | { type: 'share'; tabId: number }
   | { type: 'revoke'; tabId: number }
+  | { type: 'focus'; tabId: number }
   | { type: 'revokeAll' }
   | { type: 'settings'; settings: Partial<Settings> }
   | { type: 'guardrails'; guardrails: Partial<Guardrails> }

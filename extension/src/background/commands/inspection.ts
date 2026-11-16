@@ -212,6 +212,9 @@ export const inspectionCommands: Command[] = [
         case 'count': {
           const sel = a.need(1, 'selector');
           const r = await evaluateScoped(id, countExpression(sel));
+          if (typeof r.value !== 'number') {
+            throw new UserError(`Could not count ${sel}: the page returned no number`);
+          }
           return out(r.value, { count: r.value, selector: sel });
         }
         case 'text':

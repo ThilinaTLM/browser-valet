@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Trusted Types</title>
+    <meta http-equiv="Content-Security-Policy" content="require-trusted-types-for 'script'" />
+    <script>
+      // Like LinkedIn: a default policy that drops elements it doesn't know.
+      trustedTypes.createPolicy('default', {
+        createHTML: (s) => s.replace(/<\/?x-[a-z-]+[^>]*>/g, ''),
+      });
+    </script>
+  </head>
+  <body>
+    <main>
+      <h1>Strict page</h1>
+      <p>Content behind Trusted Types.</p>
+      <ul>
+        <li>One</li>
+        <li>Two</li>
+      </ul>
+    </main>
+  </body>
+</html>

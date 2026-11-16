@@ -55,6 +55,7 @@ bvl --session task-42 open https://example.com
 - `bvl tab t3` asks the user (a prompt appears in their browser) and waits up to 2 minutes.
   In a shared tab, `open <url>` opens a new agent tab rather than navigating the user's page.
   If they deny, respect it — don't ask again for the same tab unless they tell you to.
+- Hand-off: your tabs are in the background, often in other windows, so the user can't find `t2`. Before asking them to take over (login, CAPTCHA, 2FA), run `bvl tab show [tN|label]` (default: the current tab). It focuses that tab and its window, only for tabs you control, and changes nothing else. Don't use it otherwise: it pulls the user's focus.
 - The user can revoke control at any time; you'll get an error saying so. Don't work around it.
 
 ## Core loop
@@ -121,6 +122,11 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
 
 - CSS/XPath targets and `find` act on the **first** match. When several match you get
   `⚠ 30 elements match ".item a"; used the first…` on stderr: use a ref, a narrower selector or `find nth`.
+- `upload <target> <files>` works on an `<input type=file>` or on the button that opens a file chooser
+  (the page creates its input on click, e.g. "Upload resume"): bvl intercepts the chooser so no native
+  dialog opens. It fails with `timeout` if the click opens no chooser (sites using
+  `window.showOpenFilePicker` can't be fulfilled). `check`/`uncheck` on a hidden custom checkbox fail
+  with `not_visible`: `click` its label or wrapper instead.
 - `fill` checks the value afterwards. Date/time/color/range inputs are set directly (use their value format:
   `time` `HH:MM`, `date` `YYYY-MM-DD`, `datetime-local` `YYYY-MM-DDTHH:MM`, `color` `#rrggbb`); if the field stays
   empty the command fails (`fill did not stick: …`; for plain fields the page may have reset it while loading: retry),
@@ -159,7 +165,7 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
   `unknown_command`, `bad_args` (the message ends with `Usage: bvl …`), `unknown_ref`/`stale_ref` (re-snapshot),
   `not_found`, `not_visible`, `disabled`, `covered`, `timeout`, `navigation_failed` (DNS/network error or empty
   HTTP error response; check the URL), `dialog_open` (`dialog accept|dismiss`),
-  `no_tab` (`open` a page), `tab_gone`, `not_shared`/`revoked` (ask again with `tab <id>`), `denied` (the user
+  `no_tab` (`open` a page), `tab_gone`, `not_shared`/`revoked` (ask again with `tab <id>`), `not_controllable` (Chrome refuses to debug the tab: on a normal page another extension's overlay/frame, e.g. password manager or PDF viewer, is in it; close it or disable that extension on the site and retry, `bvl reload` also clears it but loses unsaved form data), `denied` (the user
   said no: do not retry), `domain_blocked` (site not allowed: do not retry), `not_connected` (extension/proxy down: `bvl doctor`), `not_paired` (`bvl setup`).
   Page and Chrome errors (such as a JS exception in `eval`) have no `code`.
 - `Element is covered by <div#…>`: dismiss that overlay, re-snapshot, retry.

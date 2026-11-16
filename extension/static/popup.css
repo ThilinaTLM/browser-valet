@@ -365,6 +365,12 @@ button.icon[aria-pressed='true'] {
   flex: 1;
   min-width: 0;
 }
+.tab.goto {
+  cursor: pointer;
+}
+.tab.goto:hover .title {
+  text-decoration: underline;
+}
 .tab + .tab {
   border-top: 1px solid var(--border-subtle);
 }

@@ -215,4 +215,11 @@ describe('read', () => {
     expect(r.stdout).toContain('Readable prose');
     expect(r.stdout).not.toContain('Cookie banner');
   });
+
+  it('works on pages that enforce Trusted Types with a rewriting default policy', async () => {
+    const r = await bvl('read', fixture('/trusted-types.html'));
+    expect(r).toMatchObject({ code: 0, stderr: '' });
+    expect(r.stdout).toContain('# Strict page');
+    expect(r.stdout).toContain('- One\n- Two');
+  });
 });

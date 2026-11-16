@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type ChromeMock, installChromeMock } from '../helpers/chrome-mock';
 
 let mock: ChromeMock;
@@ -38,11 +38,76 @@ describe('attach', () => {
     expect(cdp.isAttached(7)).toBe(false);
   });
 
-  it('keeps the friendly message for pages Chrome does not allow', async () => {
-    vi.mocked(mock.chrome.debugger.attach).mockRejectedValueOnce(
+  it("keeps the chrome:// wording for restricted URLs, with Chrome's message, no retry", async () => {
+    vi.mocked(mock.chrome.debugger.attach).mockRejectedValue(
       new Error('Cannot access a chrome:// URL'),
     );
-    await expect(cdp.attach(7)).rejects.toThrow(/does not allow extensions/);
+    Object.assign(mock.chrome.tabs, {
+      get: vi.fn(() => Promise.resolve({ url: 'chrome://extensions/' })),
+    });
+    const err = await cdp.attach(7).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'not_controllable' });
+    expect((err as Error).message).toMatch(
+      /does not allow extensions.*Cannot access a chrome:\/\/ URL/,
+    );
+    expect(mock.chrome.debugger.attach).toHaveBeenCalledTimes(1);
+  });
+
+  describe('refused on an https page', () => {
+    const OTHER = 'a'.repeat(32);
+    beforeEach(() => {
+      vi.useFakeTimers();
+      Object.assign(mock.chrome.tabs, {
+        get: vi.fn(() => Promise.resolve({ url: 'https://example.com/form' })),
+      });
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('retries, then explains the likely cause and names the extension', async () => {
+      Object.assign(mock.chrome.debugger, {
+        getTargets: vi.fn(() =>
+          Promise.resolve([{ tabId: 7, url: `chrome-extension://${OTHER}/frame.html` }]),
+        ),
+      });
+      vi.mocked(mock.chrome.debugger.attach).mockRejectedValue(
+        new Error('Cannot access a chrome-extension:// URL of different extension'),
+      );
+      const p = cdp.attach(7).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(3000);
+      const err = (await p) as Error & { code?: string };
+      expect(err.code).toBe('not_controllable');
+      expect(err.message).toMatch(/another extension/);
+      expect(err.message).toContain(`chrome-extension://${OTHER}`);
+      expect(err.message).toContain('of different extension');
+      expect(err.message).not.toMatch(/does not allow extensions/);
+      expect(mock.chrome.debugger.attach).toHaveBeenCalledTimes(6);
+    });
+
+    it('recovers when the overlay goes away during the retries', async () => {
+      vi.mocked(mock.chrome.debugger.attach).mockRejectedValueOnce(
+        new Error('Cannot access a chrome-extension:// URL of different extension'),
+      );
+      const p = cdp.attach(7);
+      await vi.advanceTimersByTimeAsync(1000);
+      await p;
+      expect(cdp.isAttached(7)).toBe(true);
+    });
+
+    it('mentions the last detach reason when re-attaching is refused', async () => {
+      await cdp.attach(7);
+      (mock.events.debuggerOnDetach as unknown as { fire(...a: unknown[]): void }).fire(
+        { tabId: 7 },
+        'target_closed',
+      );
+      vi.mocked(mock.chrome.debugger.attach).mockRejectedValue(
+        new Error('Cannot attach to this target.'),
+      );
+      const p = cdp.attach(7).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(((await p) as Error).message).toMatch(
+        /detached \(reason: target_closed, \d+ s ago\) and Chrome refused to re-attach: Cannot attach to this target\./,
+      );
+    });
   });
 });
 

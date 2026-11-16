@@ -74,21 +74,98 @@ function push<T>(buf: T[], entry: T): void {
   if (buf.length > MAX_BUFFER) buf.splice(0, buf.length - MAX_BUFFER);
 }
 
+/** Why the debugger last left a tab (Chrome's `onDetach` reason) and when; cleared by a successful attach. */
+const lastDetach = new Map<number, { reason: string; at: number }>();
+
+/** Schemes Chrome never lets extensions debug. */
+const RESTRICTED_URL =
+  /^(chrome|edge|brave|devtools|chrome-extension|chrome-search|chrome-untrusted|chrome-error|view-source|about):|^https:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore|microsoftedge\.microsoft\.com\/addons)\//i;
+const CONTROLLABLE_URL = /^(https?|file|ftp):/i;
+/** Attach retries for ordinary pages (transient overlays of other extensions). */
+const ATTACH_RETRIES = 5;
+const ATTACH_RETRY_MS = 400;
+
+async function tabUrl(tabId: number): Promise<string | undefined> {
+  try {
+    const t = await chrome.tabs.get(tabId);
+    const url = t.url !== undefined && t.url !== '' ? t.url : t.pendingUrl;
+    return url !== undefined && url !== '' ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Origins of other extensions' targets in this tab, as far as `chrome.debugger.getTargets` shows them. */
+async function foreignExtensions(tabId: number, msg: string): Promise<string[]> {
+  const found = new Set<string>();
+  try {
+    const targets = await chrome.debugger.getTargets(); // throws in the unit-test mock
+    for (const t of targets) {
+      if (t.tabId !== tabId) continue;
+      const m = /^chrome-extension:\/\/([a-p]{32})/.exec(t.url);
+      if (m && m[1] !== chrome.runtime.id) found.add(`chrome-extension://${m[1]}`);
+    }
+  } catch {
+    // best effort
+  }
+  const m = /chrome-extension:\/\/([a-p]{32})/.exec(msg);
+  if (m && m[1] !== chrome.runtime.id) found.add(`chrome-extension://${m[1]}`);
+  return [...found];
+}
+
+async function refusedError(tabId: number, cause: unknown, url: string | undefined) {
+  const msg = (cause as Error).message;
+  const last = lastDetach.get(tabId);
+  const detached = last
+    ? `The debugger was detached (reason: ${last.reason}, ${Math.max(0, Math.round((Date.now() - last.at) / 1000))} s ago) and Chrome refused to re-attach: `
+    : 'Chrome refused to attach the debugger: ';
+  if (url !== undefined && CONTROLLABLE_URL.test(url)) {
+    const who = await foreignExtensions(tabId, msg);
+    return new UserError(
+      `${detached}${msg}. This page is normally controllable, so another extension has probably put its own frame into it` +
+        ' (password manager or autofill overlay, PDF viewer, wallet, translate)' +
+        (who.length ? `; found ${who.join(', ')}` : '') +
+        '. Chrome blocks control while that frame is present: close its popup or overlay, or disable that extension on this site, then retry.' +
+        ' `bvl reload` also clears it but loses unsaved form data.',
+      'not_controllable',
+      { cause },
+    );
+  }
+  if (
+    url === undefined ||
+    RESTRICTED_URL.test(url) ||
+    /chrome:\/\/|chrome-extension:\/\//i.test(msg)
+  ) {
+    return new UserError(
+      `Chrome does not allow extensions to control this page (e.g. chrome:// pages)${url ? `: ${url}` : ''}. ${detached}${msg}`,
+      'not_controllable',
+      { cause },
+    );
+  }
+  return new UserError(`${detached}${msg}`, 'not_controllable', { cause });
+}
+
 export async function attach(tabId: number): Promise<void> {
   if (attached.has(tabId)) return;
   let alreadyAttached = false;
   try {
-    await chrome.debugger.attach({ tabId }, '1.3');
-  } catch (e) {
-    const msg = (e as Error).message;
-    if (/cannot access|cannot attach/i.test(msg)) {
-      throw new Error(
-        'Chrome does not allow extensions to control this page (e.g. chrome:// pages)',
-        {
-          cause: e,
-        },
-      );
+    for (let tries = 0; ; tries++) {
+      try {
+        await chrome.debugger.attach({ tabId }, '1.3');
+        break;
+      } catch (e) {
+        if (!/cannot access|cannot attach/i.test((e as Error).message)) throw e;
+        const url = await tabUrl(tabId);
+        if (url !== undefined && CONTROLLABLE_URL.test(url) && tries < ATTACH_RETRIES) {
+          await sleep(ATTACH_RETRY_MS);
+          continue;
+        }
+        throw await refusedError(tabId, e, url);
+      }
     }
+  } catch (e) {
+    if (e instanceof UserError) throw e;
+    const msg = (e as Error).message;
     if (!/already attached/i.test(msg)) throw e;
     alreadyAttached = true;
     // Chrome words "already attached" the same way for our own attachment (kept across a
@@ -102,6 +179,7 @@ export async function attach(tabId: number): Promise<void> {
       );
     }
   }
+  lastDetach.delete(tabId);
   attached.add(tabId);
   if (alreadyAttached) resumed.add(tabId);
   else {
@@ -342,6 +420,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 
 chrome.debugger.onDetach.addListener((source, reason) => {
   if (source.tabId === undefined) return;
+  lastDetach.set(source.tabId, { reason, at: Date.now() });
   attached.delete(source.tabId);
   resumed.delete(source.tabId);
   rediscovered.delete(source.tabId);

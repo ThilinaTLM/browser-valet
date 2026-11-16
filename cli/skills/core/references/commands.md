@@ -2,13 +2,13 @@
 
 ```
 open [url]   back   forward   reload   close
-tab [list | new [--label L] [url] | <tN|label> | close [tN|label]]
+tab [list | new [--label L] [url] | show [tN|label] | <tN|label> | close [tN|label]]
 snapshot [-i] [-c] [-d N] [-s <selector>] [-u] [--delta] [--full] [@ref]   # --json: {origin,title,refs,removedRefs,snapshot}
 click <t> [--new-tab] [--right]   dblclick <t>   hover <t>   focus <t>
 fill <t> <text>   type <t> <text>   press <key>   keydown <key>   keyup <key>
 keyboard type|inserttext <text>   check <t>   uncheck <t>   select <t> <value...>
 scroll [up|down|left|right] [px] [--selector <t>]   scrollintoview <t>
-drag <src> <dst>   upload <t> <files...>
+drag <src> <dst>   upload <t> <files...>   # <t> may be the button that opens the chooser
 mouse move <x> <y> [--duration ms] [--steps n]   mouse down|up [left|right|middle]   mouse wheel <dy> [dx]
 highlight <t>   pushstate <url>   session list|info
 frame <selector|@ref|name|url|main>   # scope snapshot, selectors, get, eval, wait --fn to an iframe

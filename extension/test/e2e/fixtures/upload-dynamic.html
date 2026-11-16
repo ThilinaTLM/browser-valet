@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Dynamic Upload</title>
+  </head>
+  <body>
+    <button id="up" type="button">Upload resume</button>
+    <button id="single" type="button">Upload single</button>
+    <button id="nothing" type="button">Does nothing</button>
+    <p id="name"></p>
+    <script>
+      function pick(multiple) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = multiple;
+        input.addEventListener('change', () => {
+          document.getElementById('name').textContent = [...input.files]
+            .map((f) => f.name)
+            .join(',');
+        });
+        input.click();
+      }
+      document.getElementById('up').addEventListener('click', () => pick(true));
+      document.getElementById('single').addEventListener('click', () => pick(false));
+    </script>
+  </body>
+</html>

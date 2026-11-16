@@ -281,3 +281,36 @@ describe('with an allowed-domains policy', () => {
     expect(r).toMatchObject({ success: false, code: 'domain_blocked' });
   });
 });
+
+describe('same-origin iframe under a strict CSP (no unsafe-eval)', () => {
+  it('runs selectors, get count and eval in the frame without eval', async () => {
+    expect((await bvl('open', fixture('/csp-top.html'))).code).toBe(0);
+    for (let i = 0; i < 40; i++) {
+      if (
+        (
+          await bvl('eval', 'document.querySelector("iframe").contentDocument?.readyState')
+        ).stdout.includes('complete')
+      )
+        break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    // sanity: the page really forbids eval
+    const ev = await bvl('eval', 'document.querySelector("iframe").contentWindow.eval("1")');
+    expect(ev.code).not.toBe(0);
+    expect((await bvl('frame', '#csp-frame')).code).toBe(0);
+    expect((await bvl('get', 'count', 'input[type=file]')).stdout.trim()).toBe('2');
+    expect((await bvl('get', 'count', '.nothing')).stdout.trim()).toBe('0');
+    expect((await bvl('get', 'count', '//input')).stdout.trim()).toBe('3');
+    // eval runs in the page's main world, so page globals are visible
+    expect((await bvl('eval', 'window.cspGlobal')).stdout.trim()).toBe('"visible"');
+    expect((await bvl('click', '#go')).code).toBe(0);
+    expect((await bvl('get', 'text', '#out')).stdout.trim()).toBe('went');
+    expect((await bvl('fill', '#name', 'Ada')).code).toBe(0);
+    expect((await bvl('get', 'value', '#name')).stdout.trim()).toBe('Ada');
+    // a real selector error is still reported as such
+    const bad = await bvl('get', 'text', 'input[');
+    expect(bad.code).not.toBe(0);
+    expect(bad.stderr).toContain('Invalid selector');
+    await bvl('frame', 'main');
+  });
+});
