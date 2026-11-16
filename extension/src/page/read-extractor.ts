@@ -62,27 +62,36 @@ function mainContent(doc: Document): Element | undefined {
   return best;
 }
 
+// HTML strings are never parsed here (no innerHTML, no Turndown string input): pages enforcing
+// Trusted Types (`require-trusted-types-for 'script'`) reject that, or their default policy
+// rewrites the markup, which broke Turndown's own wrapper (LinkedIn). Elements are passed instead.
 export function extract(): { markdown: string; title: string; url: string } {
   const doc = document.cloneNode(true) as Document;
   let root: Element | undefined = mainContent(doc);
   if (!root) {
     // No landmark: let Readability score the page, else fall back to the body.
-    const article = new Readability(doc.cloneNode(true) as Document, {
-      charThreshold: 100,
-    }).parse();
-    if (article?.content) {
-      const holder = doc.createElement('div');
-      holder.innerHTML = article.content;
-      root = holder;
-    } else {
-      root = doc.body;
+    try {
+      const article = new Readability<Node>(doc.cloneNode(true) as Document, {
+        charThreshold: 100,
+        serializer: (n) => n,
+      }).parse();
+      if (article?.content instanceof Element) root = article.content;
+    } catch {
+      // fall back to the body
     }
+    root ??= doc.body;
   }
   root.querySelectorAll(NOISE).forEach((n) => {
     n.remove();
   });
-  const markdown = turndown().turndown(root.innerHTML).trim();
-  return { markdown, title: document.title, url: location.href };
+  let markdown: string;
+  try {
+    markdown = turndown().turndown(root as HTMLElement);
+  } catch {
+    // Never fail outright: plain text is better than nothing.
+    markdown = (root as HTMLElement).innerText || root.textContent;
+  }
+  return { markdown: markdown.trim(), title: document.title, url: location.href };
 }
 
 (globalThis as unknown as { __bvlRead: typeof extract }).__bvlRead = extract;

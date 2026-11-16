@@ -18,7 +18,8 @@ export type ErrorCode =
   | 'not_shared'
   | 'denied'
   | 'domain_blocked'
-  | 'revoked';
+  | 'revoked'
+  | 'not_controllable';
 
 /** A failure with a message written for the agent (shown without a stack, no "Error:" prefix). */
 export class UserError extends Error {

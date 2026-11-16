@@ -22,6 +22,7 @@ interface RemoteObject {
   value?: unknown;
   unserializableValue?: string;
   description?: string;
+  className?: string;
   objectId?: string;
 }
 
@@ -231,11 +232,23 @@ export async function resolve(tabId: number, target: string): Promise<Handle> {
   await syncDocument(tabId);
   const loc = await scopeLoc(tabId);
   const r = loc
-    ? await evalInFrame(tabId, loc, queryExpression(target), { byValue: false, gesture: false })
+    ? await evalInFrame(tabId, loc, queryExpression(target), {
+        byValue: false,
+        gesture: false,
+        isolatedOk: true,
+      })
     : await cdp.send<EvalResult>(tabId, 'Runtime.evaluate', {
         expression: queryExpression(target),
       });
-  if (r.exceptionDetails) throw new UserError(`Invalid selector: ${target}`, 'bad_args');
+  if (r.exceptionDetails) {
+    // Only a malformed selector/XPath is the user's mistake; anything else is the real problem.
+    const d = r.exceptionDetails;
+    const cls = d.exception?.className;
+    if (cls === 'SyntaxError' || cls === 'DOMException') {
+      throw new UserError(`Invalid selector: ${target}`, 'bad_args');
+    }
+    throw new UserError(exceptionText(d));
+  }
   if (!r.result.objectId) throw new UserError(`Element not found: ${target}`, 'not_found');
   const handle: Handle = {
     tabId,
@@ -245,7 +258,11 @@ export async function resolve(tabId: number, target: string): Promise<Handle> {
   // How many elements matched, so actions can warn that they used the first of several.
   try {
     const c = loc
-      ? await evalInFrame(tabId, loc, countExpression(target), { byValue: true, gesture: false })
+      ? await evalInFrame(tabId, loc, countExpression(target), {
+          byValue: true,
+          gesture: false,
+          isolatedOk: true,
+        })
       : await cdp.send<EvalResult>(tabId, 'Runtime.evaluate', {
           expression: countExpression(target),
           returnByValue: true,

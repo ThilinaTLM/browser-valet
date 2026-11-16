@@ -12,7 +12,7 @@ import {
   type NavInfo,
 } from '../nav-outcome';
 import { findTab, meta, save, session, state } from '../state';
-import { grant, isControlled, requestControl, revoke, sleep, waitForLoad } from '../tabs';
+import { focusTab, grant, isControlled, requestControl, revoke, sleep, waitForLoad } from '../tabs';
 
 function normalizeUrl(url: string): string {
   if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
@@ -375,17 +375,18 @@ export const navigationCommands: Command[] = [
   {
     name: 'tab',
     details:
-      'Without arguments lists tabs; `[not shared]` marks tabs you opened yourself that the agent may not use. Switching to a tab the agent did not open asks the user in the browser and waits for the answer (code `denied` if refused). `tab new` opens an agent tab, `tab close` closes one.',
+      'Without arguments lists tabs; `tab show [tN|label]` brings an agent or shared tab and its window to the front (default: the current tab) so the user can take over; it changes no grants and not the current tab, and is the only command that focuses a tab. `[not shared]` marks tabs you opened yourself that the agent may not use. Switching to a tab the agent did not open asks the user in the browser and waits for the answer (code `denied` if refused). `tab new` opens an agent tab, `tab close` closes one.',
     examples: [
       'bvl tab',
       'bvl tab t3',
       'bvl tab new --label docs https://example.com',
+      'bvl tab show t3',
       'bvl tab close docs',
     ],
     show: Infinity,
     showFlags: ['label'],
     group: 'Tabs',
-    usage: 'tab [list | new [--label L] [url] | <tN|label> | close [tN|label]]',
+    usage: 'tab [list | new [--label L] [url] | show [tN|label] | <tN|label> | close [tN|label]]',
     summary: 'List tabs, open a tab, switch (asks the user for non-agent tabs), or close',
     flags: [{ name: 'label', type: 'string', desc: 'Label for `tab new`' }],
     async run(ctx, a) {
@@ -442,6 +443,20 @@ export const navigationCommands: Command[] = [
           url: a.pos[1] ? normalizeUrl(a.pos[1]) : '',
           timeout: ctx.timeout,
         });
+      }
+
+      if (sub === 'show') {
+        const id = a.pos[1] ? resolveTabRef(a.pos[1]) : await ctx.tab();
+        if (!isControlled(id))
+          throw new UserError(`Tab ${meta(id).tid} is not shared with the agent`, 'not_shared');
+        const focused = await focusTab(id);
+        return {
+          text: focused ? `✓ Showing [${meta(id).tid}]` : `⚠ Could not focus [${meta(id).tid}]`,
+          data: { tabId: meta(id).tid, focused },
+          ...(focused
+            ? {}
+            : { warning: 'Chrome refused to focus the tab; its window was flagged instead.' }),
+        };
       }
 
       if (sub === 'close') {

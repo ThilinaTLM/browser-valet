@@ -47,7 +47,7 @@ flowchart LR
 4. **CLI, proxy, embedded extension and skills are one version.** *Why:* the protocol has no negotiation; a mismatch is handled by restarting or updating, never by compatibility code.
 5. **Keep the agent-browser interface** (command names, flags, snapshot and ref format). Deviate only where the real browser requires it (consent, `tab <tN>` approval, no profile-changing commands). *Why:* agents already know agent-browser, so they need no new vocabulary.
 6. **Don't modify the user's profile beyond what a command explicitly asks.** *Why:* cookies, storage, device emulation and network interception (not read-only observation) were deliberately left out; viewport and color-scheme emulation exist only on agent tabs (see Settled directions).
-7. **Agent tabs stay in the background.** *Why:* the user keeps working while the agent runs; see [automation.md](automation.md) for the cost.
+7. **Agent tabs stay in the background.** *Why:* the user keeps working while the agent runs; see [automation.md](automation.md) for the cost. The one exception is an explicit hand-off: `bvl tab show` (or a click in the popup's Agent tabs list) focuses a controlled tab.
 
 ## Change risk
 

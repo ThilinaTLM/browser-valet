@@ -55,11 +55,19 @@ function ago(ts: number): string {
   return `${Math.round(s / 3600)}h`;
 }
 
-function tabRow(t: chrome.tabs.Tab | undefined, tid: string, sub: string, actions: string) {
+function tabRow(
+  t: chrome.tabs.Tab | undefined,
+  tid: string,
+  sub: string,
+  actions: string,
+  focusId?: string,
+) {
   const icon = t?.favIconUrl?.startsWith('http')
     ? `<img src="${esc(t.favIconUrl)}" alt="" />`
     : '<span class="noicon"></span>';
-  return `<div class="tab">${icon}
+  const go =
+    focusId && t ? ` data-action="focus" data-tab="${esc(focusId)}" title="Show this tab"` : '';
+  return `<div class="tab${go ? ' goto' : ''}"${go}>${icon}
     <div class="grow">
       <div class="title">${esc(t?.title ?? '(closed)')}</div>
       <div class="small muted">${tid ? `<span class="tid">${esc(tid)}</span> · ` : ''}${sub}</div>
@@ -240,6 +248,7 @@ async function render(): Promise<void> {
           m.tid + (m.label ? ` (${m.label})` : ''),
           sub,
           `<button class="danger" data-action="revoke" data-tab="${id}">Stop</button>`,
+          id,
         );
       })
       .join('');
@@ -283,6 +292,9 @@ app.addEventListener('click', (ev) => {
       break;
     case 'revoke':
       void send({ type: 'revoke', tabId });
+      break;
+    case 'focus':
+      void send({ type: 'focus', tabId });
       break;
     case 'revokeAll':
       void send({ type: 'revokeAll' });

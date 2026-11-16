@@ -74,60 +74,125 @@ export async function scopeLoc(tabId: number): Promise<FrameLoc | undefined> {
   return scope ? locateFrame(tabId, scope.frameId) : undefined;
 }
 
+// Default (main-world) execution context of each same-process frame, per tab and session. The
+// tab's own session is enabled by cdp.attach; child sessions are not, so `evalInFrame` enables
+// Runtime there on demand. cdp.onEvent only forwards the tab's own session, hence this module
+// listens to chrome.debugger directly.
+const contexts = new Map<string, Map<string, number>>();
+const key = (tabId: number, sessionId?: string) => `${tabId}/${sessionId ?? ''}`;
+const dropTab = (tabId: number) => {
+  for (const k of contexts.keys()) if (k.startsWith(`${tabId}/`)) contexts.delete(k);
+};
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (source.tabId === undefined) return;
+  const k = key(source.tabId, (source as { sessionId?: string }).sessionId);
+  const p = (params ?? {}) as {
+    context?: { id: number; auxData?: { frameId?: string; isDefault?: boolean } };
+    executionContextId?: number;
+  };
+  if (method === 'Runtime.executionContextCreated') {
+    const aux = p.context?.auxData;
+    if (p.context && aux?.isDefault && aux.frameId) {
+      let m = contexts.get(k);
+      if (!m) contexts.set(k, (m = new Map<string, number>()));
+      m.set(aux.frameId, p.context.id);
+    }
+  } else if (method === 'Runtime.executionContextDestroyed') {
+    const m = contexts.get(k);
+    if (m) for (const [f, id] of m) if (id === p.executionContextId) m.delete(f);
+  } else if (method === 'Runtime.executionContextsCleared') {
+    contexts.delete(k);
+  }
+});
+cdp.onDetached(dropTab);
+
+async function knownContext(
+  tabId: number,
+  sessionId: string | undefined,
+  frameId: string,
+  waitMs: number,
+): Promise<number | undefined> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const id = contexts.get(key(tabId, sessionId))?.get(frameId);
+    if (id !== undefined || Date.now() >= deadline) return id;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 /**
- * Evaluate an expression in a frame. An out-of-process frame has its own session; a frame in the
- * same process is reached through its element's `contentWindow` (same-origin only).
+ * Evaluate an expression in a frame. An out-of-process frame has its own session. A frame in the
+ * same process is evaluated with `Runtime.evaluate { contextId }` in its default (main-world)
+ * context, tracked from `Runtime.executionContext*` events: unlike `contentWindow.eval` this is
+ * not subject to the page's CSP, and page globals stay visible.
+ *
+ * When no context is known (the service worker restarted and missed the events):
+ *  1. With `isolatedOk` (DOM queries, which need no page globals), use `Page.createIsolatedWorld`.
+ *  2. Otherwise (`eval`), `Runtime.disable` + `enable` makes Chrome re-emit the contexts. It also
+ *     replays earlier console messages into the tab's console buffer, so it is the last resort.
+ * Cross-origin frames in the same process cannot be scripted and report so.
  */
 export async function evalInFrame(
   tabId: number,
   loc: FrameLoc,
   expression: string,
-  opts: { byValue: boolean; gesture?: boolean },
+  opts: { byValue: boolean; gesture?: boolean; isolatedOk?: boolean },
 ): Promise<EvalResult> {
-  if (loc.top) {
-    return cdp.send<EvalResult>(
+  const run = (contextId: number | undefined, sessionId?: string) =>
+    cdp.send<EvalResult>(
       tabId,
       'Runtime.evaluate',
       {
         expression,
+        ...(contextId !== undefined ? { contextId } : {}),
         returnByValue: opts.byValue,
         awaitPromise: opts.byValue,
         userGesture: opts.gesture ?? true,
         replMode: opts.byValue,
       },
-      loc.sessionId,
+      sessionId,
     );
+  if (loc.top) return run(undefined, loc.sessionId);
+
+  let contextId = await knownContext(tabId, loc.sessionId, loc.frameId, 200);
+  if (contextId === undefined && opts.isolatedOk) {
+    try {
+      const w = await cdp.send<{ executionContextId: number }>(
+        tabId,
+        'Page.createIsolatedWorld',
+        { frameId: loc.frameId, worldName: 'bvl' },
+        loc.sessionId,
+      );
+      contextId = w.executionContextId;
+    } catch {
+      // reported below
+    }
   }
-  const { backendNodeId } = await cdp.send<{ backendNodeId: number }>(
-    tabId,
-    'DOM.getFrameOwner',
-    { frameId: loc.frameId },
-    loc.sessionId,
-  );
-  const { object } = await cdp.send<{ object: { objectId?: string } }>(
-    tabId,
-    'DOM.resolveNode',
-    { backendNodeId },
-    loc.sessionId,
-  );
-  return cdp.send<EvalResult>(
-    tabId,
-    'Runtime.callFunctionOn',
-    {
-      objectId: object.objectId,
-      functionDeclaration: `function (e) {
-        const w = this.contentWindow;
-        if (!w) throw new Error('The frame has no window');
-        try { w.document; } catch { throw new Error('This frame is on another origin and cannot be scripted from here'); }
-        return w.eval(e);
-      }`,
-      arguments: [{ value: expression }],
-      returnByValue: opts.byValue,
-      awaitPromise: opts.byValue,
-      userGesture: opts.gesture ?? true,
-    },
-    loc.sessionId,
-  );
+  if (contextId === undefined) {
+    try {
+      await cdp.send(tabId, 'Runtime.disable', {}, loc.sessionId);
+      await cdp.send(tabId, 'Runtime.enable', {}, loc.sessionId);
+    } catch {
+      // fall through
+    }
+    contextId = await knownContext(tabId, loc.sessionId, loc.frameId, 1000);
+  }
+  if (contextId === undefined) {
+    throw new UserError('The frame has no scriptable context. Run `bvl frame main`.', 'not_found');
+  }
+  try {
+    return await run(contextId, loc.sessionId);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/context/i.test(msg)) {
+      throw new UserError(
+        'This frame is on another origin or has navigated and cannot be scripted from here',
+        'not_found',
+      );
+    }
+    throw e;
+  }
 }
 
 /**

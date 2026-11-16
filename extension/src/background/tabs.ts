@@ -55,6 +55,22 @@ function failApprovals(tabId: number, error: Error): void {
   for (const a of state.approvals) if (a.tabId === tabId) pending.get(a.id)?.reject(error);
 }
 
+/**
+ * Bring a tab and its window to the front (explicit hand-off or popup click). The caller checks
+ * consent. Returns false when Chrome refused to focus it; the window is then flagged instead.
+ */
+export async function focusTab(tabId: number): Promise<boolean> {
+  const t = await chrome.tabs.get(tabId);
+  try {
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(t.windowId, { focused: true });
+    return true;
+  } catch {
+    await chrome.windows.update(t.windowId, { drawAttention: true }).catch(() => undefined);
+    return false;
+  }
+}
+
 async function showApprovalUi(windowId: number): Promise<void> {
   try {
     await chrome.windows.update(windowId, { drawAttention: true });

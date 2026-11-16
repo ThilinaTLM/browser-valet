@@ -18,6 +18,9 @@ import { openInNewTab } from './navigation';
 
 const pt = ({ x, y }: { x: number; y: number }) => ({ x, y });
 
+/** How long `upload` waits for the file chooser a click should open (capped by --timeout). */
+const CHOOSER_TIMEOUT_MS = 5000;
+
 const DONE: Result = { text: '✓ Done' };
 
 /** `✓ Done` with the upstream-style JSON payload (`{ clicked: '@e3' }`, …). */
@@ -81,6 +84,71 @@ async function clickEl(h: Handle, count = 1, button: input.Button = 'left'): Pro
     await input.click(h.tabId, x, y, { count, button, ...(sessionId ? { sessionId } : {}) });
     return DONE;
   });
+}
+
+/** Click a non-input target while intercepting the file chooser, then fulfil it with `files`. */
+async function uploadViaChooser(ctx: Ctx, h: Handle, files: string[]): Promise<void> {
+  if (h.sessionId) {
+    throw new UserError(
+      'upload through a file chooser does not work inside a cross-origin iframe; target the <input type=file> itself',
+      'bad_args',
+    );
+  }
+  const wait = Math.min(ctx.timeout, CHOOSER_TIMEOUT_MS);
+  let opened!: (p: { backendNodeId?: number; mode?: string }) => void;
+  const chooser = new Promise<{ backendNodeId?: number; mode?: string }>((r) => (opened = r));
+  const off = cdp.onEvent((tabId, method, params) => {
+    if (tabId === h.tabId && method === 'Page.fileChooserOpened') {
+      opened(params ?? {});
+    }
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await cdp.send(h.tabId, 'Page.setInterceptFileChooserDialog', { enabled: true }, h.sessionId);
+    await clickEl(h);
+    const timedOut = new Promise<undefined>((r) => {
+      timer = setTimeout(() => {
+        r(undefined);
+      }, wait);
+    });
+    const aborted = new Promise<undefined>((_, rej) => {
+      ctx.signal.addEventListener(
+        'abort',
+        () => {
+          rej(new UserError('Cancelled'));
+        },
+        { once: true },
+      );
+    });
+    const ev = await Promise.race([chooser, timedOut, aborted]);
+    if (!ev) {
+      throw new UserError(
+        `No file chooser opened within ${String(wait)} ms after clicking the target. Check that it is the upload button (re-snapshot). Sites that use window.showOpenFilePicker cannot be fulfilled through CDP.`,
+        'timeout',
+      );
+    }
+    if (ev.mode === 'selectSingle' && files.length > 1) {
+      throw new UserError(
+        `The file chooser accepts a single file but ${String(files.length)} were given`,
+        'bad_args',
+      );
+    }
+    if (ev.backendNodeId === undefined) {
+      throw new UserError('The file chooser did not report its input element');
+    }
+    await cdp.send(
+      h.tabId,
+      'DOM.setFileInputFiles',
+      { backendNodeId: ev.backendNodeId, files },
+      h.sessionId,
+    );
+  } finally {
+    clearTimeout(timer);
+    off();
+    await cdp
+      .send(h.tabId, 'Page.setInterceptFileChooserDialog', { enabled: false }, h.sessionId)
+      .catch(() => 0);
+  }
 }
 
 async function focusEl(h: Handle): Promise<void> {
@@ -167,7 +235,19 @@ async function setChecked(h: Handle, want: boolean): Promise<Result> {
       h,
       `function () { return this.checked ?? this.getAttribute('aria-checked') === 'true'; }`,
     );
-  if ((await isChecked()) !== want) await clickEl(h);
+  if ((await isChecked()) !== want) {
+    try {
+      await clickEl(h);
+    } catch (e) {
+      if (e instanceof UserError && e.code === 'not_visible') {
+        throw new UserError(
+          `${e.message}. Custom checkbox: try \`click\` on its label or wrapper`,
+          'not_visible',
+        );
+      }
+      throw e;
+    }
+  }
   if ((await isChecked()) !== want) throw new UserError(`Could not ${want ? 'check' : 'uncheck'}`);
   return DONE;
 }
@@ -653,18 +733,29 @@ export const interactionCommands: Command[] = [
     show: Infinity,
     group: 'Interaction',
     usage: 'upload <target> <file> [more…]',
-    summary: 'Set files on an <input type=file>',
+    summary: 'Upload files to an <input type=file>, or to the chooser a button opens',
+    details:
+      'If the target is an <input type=file> the files are set on it. Any other target (a button such as "Upload resume") is clicked while the native file chooser is intercepted, so no dialog opens in the browser, and the files are given to the chooser the click opens. Fails after 5 s (or --timeout if shorter) when no chooser opens; sites using window.showOpenFilePicker cannot be fulfilled.',
+    examples: ['bvl upload "input[type=file]" resume.pdf', 'bvl upload @e594 resume.pdf'],
     async run(ctx, a) {
       a.need(1, 'file');
       const h = await element(ctx, target(a));
       const files = a.pos.slice(1).map((f) => ctx.path(f));
-      await cdp.send(
-        h.tabId,
-        'DOM.setFileInputFiles',
-        { objectId: h.objectId, files },
-        h.sessionId,
+      const isInput = await call<boolean>(
+        h,
+        `function () { return this.tagName === 'INPUT' && this.type === 'file'; }`,
       );
-      return warn({ text: '✓ Done', data: { files } }, multi(h, target(a)));
+      if (isInput) {
+        await cdp.send(
+          h.tabId,
+          'DOM.setFileInputFiles',
+          { objectId: h.objectId, files },
+          h.sessionId,
+        );
+        return warn({ text: '✓ Done', data: { files } }, multi(h, target(a)));
+      }
+      await uploadViaChooser(ctx, h, files);
+      return warn({ text: '✓ Done', data: { files, viaChooser: true } }, multi(h, target(a)));
     },
   },
   {

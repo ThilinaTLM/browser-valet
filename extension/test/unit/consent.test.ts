@@ -54,3 +54,19 @@ describe('requestControl', () => {
     await expect(p).rejects.toThrow(/denied/);
   });
 });
+
+describe('focusTab', () => {
+  it('activates the tab and focuses its window', async () => {
+    const update = vi.fn(() => Promise.resolve({}));
+    mock.chrome.tabs.update = update as unknown as typeof chrome.tabs.update;
+    expect(await tabs.focusTab(5)).toBe(true);
+    expect(update).toHaveBeenCalledWith(5, { active: true });
+    expect(mock.chrome.windows.update).toHaveBeenCalledWith(1, { focused: true });
+  });
+
+  it('flags the window when focusing is refused', async () => {
+    mock.chrome.tabs.update = vi.fn(() => Promise.reject(new Error('no'))).mockName('update');
+    expect(await tabs.focusTab(5)).toBe(false);
+    expect(mock.chrome.windows.update).toHaveBeenCalledWith(1, { drawAttention: true });
+  });
+});
