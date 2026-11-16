@@ -63,10 +63,49 @@ export async function evaluate(tabId: number, expression: string): Promise<Remot
  */
 export async function evaluateScoped(tabId: number, expression: string): Promise<RemoteObject> {
   const loc = await scopeLoc(tabId);
-  if (!loc) return evaluate(tabId, expression);
-  const r = await evalInFrame(tabId, loc, expression, { byValue: true });
+  // By reference first: REPL mode awaits a top-level `await`, but a promise that is the
+  // completion value (`fetch(u).then(r => r.status)`) comes back unresolved, and by value it
+  // would print as `{}`. Settle it here, then fetch the value.
+  const r = loc
+    ? await evalInFrame(tabId, loc, expression, { byValue: false, repl: true })
+    : await cdp.send<EvalResult>(tabId, 'Runtime.evaluate', {
+        expression,
+        awaitPromise: true,
+        userGesture: true,
+        replMode: true,
+      });
   if (r.exceptionDetails) throw new UserError(exceptionText(r.exceptionDetails));
-  return r.result;
+  return byValue(tabId, r.result, loc?.sessionId);
+}
+
+/** The value of a by-reference result, awaiting it first when it is a promise. */
+async function byValue(
+  tabId: number,
+  obj: RemoteObject,
+  sessionId: string | undefined,
+): Promise<RemoteObject> {
+  const objectId = obj.objectId;
+  if (!objectId) return obj; // primitives, null and undefined already carry their value
+  try {
+    const r =
+      obj.subtype === 'promise'
+        ? await cdp.send<EvalResult>(
+            tabId,
+            'Runtime.awaitPromise',
+            { promiseObjectId: objectId, returnByValue: true },
+            sessionId,
+          )
+        : await cdp.send<EvalResult>(
+            tabId,
+            'Runtime.callFunctionOn',
+            { objectId, functionDeclaration: 'function () { return this; }', returnByValue: true },
+            sessionId,
+          );
+    if (r.exceptionDetails) throw new UserError(exceptionText(r.exceptionDetails));
+    return r.result;
+  } finally {
+    void cdp.send(tabId, 'Runtime.releaseObject', { objectId }, sessionId).catch(() => undefined);
+  }
 }
 
 /** Run `fn` (a function source string) with `this` bound to the element. Returns by value. */
@@ -226,6 +265,21 @@ export function countExpression(target: string): string {
     : `document.querySelectorAll(${t}).length`;
 }
 
+/** Playwright-style locators (`text=…`, `role=…`, `:has-text()`) are not CSS: point to `find`. */
+function selectorHint(target: string): string {
+  const m = /^(text|role|label|placeholder|alt|title|data-testid)\s*=\s*(.*)$/i.exec(target);
+  if (m) {
+    const kind =
+      (m[1] ?? '').toLowerCase() === 'data-testid' ? 'testid' : (m[1] ?? '').toLowerCase();
+    const value = (m[2] ?? '').replace(/^(["'])(.*)\1$/, '$2');
+    return `. Playwright-style locators are not supported; use refs from \`bvl snapshot\` or \`bvl find ${kind} ${JSON.stringify(value)} <action>\``;
+  }
+  if (/:(has-text|text|text-is|visible)\(/.test(target)) {
+    return '. Playwright pseudo-classes are not supported; use refs from `bvl snapshot` or `bvl find text "…" <action>`';
+  }
+  return '';
+}
+
 /** Resolve a ref (`@e3`), CSS selector or XPath to an element handle. */
 export async function resolve(tabId: number, target: string): Promise<Handle> {
   if (isRef(target)) return resolveRef(tabId, target);
@@ -246,7 +300,7 @@ export async function resolve(tabId: number, target: string): Promise<Handle> {
     const d = r.exceptionDetails;
     const cls = d.exception?.className;
     if (cls === 'SyntaxError' || cls === 'DOMException') {
-      throw new UserError(`Invalid selector: ${target}`, 'bad_args');
+      throw new UserError(`Invalid selector: ${target}${selectorHint(target)}`, 'bad_args');
     }
     throw new UserError(exceptionText(d));
   }
@@ -342,7 +396,9 @@ const CHECK = `function (samples) {
   if (el.disabled || el.getAttribute('aria-disabled') === 'true') return { disabled: true };
   const doc = el.ownerDocument;
   const ok = (hit) => {
-    if (hit === el || el.contains(hit)) return true;
+    // The hit is el or inside it in the flat tree: light-DOM content slotted into el's shadow
+    // tree (a web-component button's label) and nodes of el's own shadow root count as el.
+    for (let n = hit; n; n = n.assignedSlot || n.parentNode || n.host) if (n === el) return true;
     // Shadow DOM retargets hits to the host, which is an ancestor of el.
     for (let n = el; n; n = n.parentNode || n.host) if (n === hit) return true;
     return hit.tagName === 'LABEL' && hit.control === el;

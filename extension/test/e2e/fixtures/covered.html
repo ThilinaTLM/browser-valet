@@ -57,6 +57,11 @@
     <ul id="combo-list" role="listbox" hidden>
       <li role="option">October</li>
     </ul>
+    <!-- A web-component button whose label is light-DOM content slotted into the shadow
+         <button> (SmartRecruiters' <oc-button>/<spl-button>): hits land on the label <span>. -->
+    <x-outer id="shadow-host"
+      ><x-button><span class="label">Submit</span></x-button></x-outer
+    >
     <div id="spinner" class="done"></div>
     <script>
       const out = document.getElementById('out');
@@ -66,6 +71,24 @@
           out.textContent += id + ';';
         });
       }
+      class XButton extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' }).innerHTML =
+            '<style>button { width: 160px; height: 40px; }</style><button id="inner"><slot></slot></button>';
+          this.shadowRoot.getElementById('inner').addEventListener('click', () => {
+            out.textContent += 'shadow;';
+          });
+        }
+      }
+      class XOuter extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' }).innerHTML = '<div><slot></slot></div>';
+        }
+      }
+      customElements.define('x-button', XButton);
+      customElements.define('x-outer', XOuter);
       // A loading overlay that is only removed on the next animation frame, which a hidden tab
       // never produces by itself.
       document.getElementById('busy').addEventListener('click', () => {

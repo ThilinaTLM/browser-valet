@@ -117,6 +117,14 @@ describe('out-of-process iframes', () => {
     const pay = refOf((await bvl('snapshot', '-i')).stdout, /button "Pay"/);
     expect((await bvl('hover', `@${pay}`)).code).toBe(0);
   });
+
+  it('wait --text finds text inside out-of-process and nested iframes', async () => {
+    await openFrames();
+    expect((await bvl('wait', '--text', 'Card number', '--timeout', '3000')).code).toBe(0);
+    expect((await bvl('wait', '--text', 'Deep button', '--timeout', '3000')).code).toBe(0);
+    const r = await bvl('wait', '--text', 'Not on any frame', '--timeout', '500');
+    expect(r.stderr).toContain('Timed out');
+  });
 });
 
 describe('screenshot --annotate', () => {
@@ -165,6 +173,7 @@ describe('frame command', () => {
 
     expect((await bvl('eval', 'document.title')).stdout.trim()).toBe('"Frame Inner"');
     expect((await bvl('eval', 'location.hostname')).stdout.trim()).toBe('"localhost"');
+    expect((await bvl('eval', 'Promise.resolve(1).then((x) => x + 1)')).stdout.trim()).toBe('2');
     expect((await bvl('get', 'text', 'h2')).stdout.trim()).toBe('Payment');
     expect((await bvl('get', 'count', 'button')).stdout.trim()).toBe('1');
     expect((await bvl('wait', '--fn', "document.title === 'Frame Inner'")).code).toBe(0);
