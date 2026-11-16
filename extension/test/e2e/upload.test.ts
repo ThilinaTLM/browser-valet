@@ -41,3 +41,17 @@ describe('upload through a file chooser', () => {
     expect(j.error).toContain('showOpenFilePicker');
   });
 });
+
+describe('upload of a missing file', () => {
+  it('fails before touching the page, and still accepts an empty file', async () => {
+    await bvl('open', fixture('/upload.html'), ...S);
+    const r = await bvl('upload', '#f', 'does-not-exist.pdf', ...S, '--json');
+    const j = jsonOf(r.stdout) as { success: boolean; code?: string; error?: string };
+    expect(j).toMatchObject({ success: false, code: 'bad_args' });
+    expect(j.error).toContain('does-not-exist.pdf');
+    expect((await bvl('get', 'text', '#name', ...S)).stdout.trim()).toBe('(empty)');
+    await writeFile(join(workDir(), 'empty.txt'), '');
+    expect((await bvl('upload', '#f', 'empty.txt', ...S)).code).toBe(0);
+    expect((await bvl('get', 'text', '#name', ...S)).stdout.trim()).toBe('empty.txt');
+  });
+});

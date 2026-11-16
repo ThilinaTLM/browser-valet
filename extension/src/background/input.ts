@@ -1,7 +1,7 @@
 // Trusted mouse and keyboard input via CDP Input.* events.
 
 import * as cdp from './cdp';
-import { UserError } from './dom';
+import { UserError } from './errors';
 
 /**
  * Background tabs don't render, and Chrome drops input aimed at a hidden document that has no

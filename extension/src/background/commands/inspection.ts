@@ -34,6 +34,7 @@ import {
 } from '../snapshot-diff';
 import { session, state } from '../state';
 import { sleep } from '../tabs';
+import { prime } from '../input';
 
 async function element(ctx: Ctx, target: string): Promise<Handle> {
   return resolveWait(await ctx.tab(), target, ctx.timeout, ctx.signal);
@@ -64,9 +65,19 @@ function urlMatches(url: string, pattern: string): boolean {
   return /[*?]/.test(pattern) ? globToRegExp(pattern).test(url) : url.includes(pattern);
 }
 
+/** How often `wait` forces a frame on a hidden tab (see `poll`). */
+const FRAME_EVERY_MS = 500;
+
 async function poll(ctx: Ctx, what: string, check: () => Promise<boolean>): Promise<void> {
   const deadline = Date.now() + ctx.timeout;
+  let framed = Date.now();
   for (;;) {
+    // A hidden tab renders no frames, so work the page does in requestAnimationFrame (hiding a
+    // spinner, showing results) never runs. Force a frame now and then while waiting.
+    if (ctx.tabId !== undefined && Date.now() - framed >= FRAME_EVERY_MS) {
+      framed = Date.now();
+      await prime(ctx.tabId).catch(() => false);
+    }
     try {
       if (await check()) return;
     } catch {
