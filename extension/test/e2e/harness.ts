@@ -159,6 +159,19 @@ export async function tidForTitle(title: string): Promise<string> {
 export async function approveNextConsent(decision: 'allow' | 'deny' = 'allow'): Promise<string> {
   const page = await browser().newPage();
   try {
+    // The window-mode popup closes itself when nothing is pending, and the command we race against
+    // may not have asked yet (bvl still starting, a session tab still opening). Wait for the
+    // request in the plain popup first, then switch to window mode as the extension does.
+    await page.goto(`${info().extensionOrigin}/popup.html`);
+    await page.waitForFunction(
+      async () => {
+        const { state } = await chrome.storage.session.get<{ state?: { approvals: unknown[] } }>(
+          'state',
+        );
+        return (state?.approvals.length ?? 0) > 0;
+      },
+      { timeout: 30_000, polling: 100 },
+    );
     await page.goto(`${info().extensionOrigin}/popup.html?window=1`);
     const button = await page.waitForSelector(`button[data-action="${decision}"]`, {
       timeout: 30_000,
