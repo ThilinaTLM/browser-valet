@@ -90,6 +90,36 @@ async function poll(ctx: Ctx, what: string, check: () => Promise<boolean>): Prom
   }
 }
 
+/**
+ * Whether the text is on the page or in any of its iframes (the snapshot inlines them too).
+ * Same-origin frames are searched from their parent's script; each out-of-process iframe through
+ * its own session. A failing child session (navigating, gone) is skipped.
+ */
+async function pageHasText(tabId: number, text: string): Promise<boolean> {
+  const expression = `(function has(w, t) {
+    try {
+      if (w.document.body?.innerText.includes(t)) return true;
+    } catch { return false; } // cross-origin: its own session covers it, if any
+    for (let i = 0; i < w.frames.length; i++) if (has(w.frames[i], t)) return true;
+    return false;
+  })(window, ${JSON.stringify(text)})`;
+  if ((await evaluate(tabId, expression)).value === true) return true;
+  for (const c of cdp.childSessions(tabId)) {
+    try {
+      const r = await cdp.send<{ result: { value?: unknown } }>(
+        tabId,
+        'Runtime.evaluate',
+        { expression, returnByValue: true },
+        c.sessionId,
+      );
+      if (r.result.value === true) return true;
+    } catch {
+      // the iframe navigated or went away
+    }
+  }
+  return false;
+}
+
 function formatValue(value: unknown, token?: string): string {
   if (token !== undefined) return token;
   return typeof value === 'object' && value !== null
@@ -355,8 +385,7 @@ export const inspectionCommands: Command[] = [
           throw new UserError('--state must be visible|hidden|attached|detached', 'bad_args');
         await poll(ctx, `${first} to be ${st}`, check);
       } else if (text !== undefined) {
-        const expr = `document.body?.innerText.includes(${JSON.stringify(text)}) ?? false`;
-        await poll(ctx, `text "${text}"`, async () => (await evaluate(id, expr)).value === true);
+        await poll(ctx, `text "${text}"`, () => pageHasText(id, text));
         result = { text, data: { text } };
       } else if (url !== undefined) {
         let matched = '';
@@ -448,7 +477,7 @@ export const inspectionCommands: Command[] = [
       let data: string;
       let truncated = false;
       if (full) ({ data, truncated } = await fullPage(id, format));
-      else ({ data } = await captureScreenshot(id, { format }));
+      else ({ data } = await viewport(id, format));
 
       const extra: Record<string, unknown> = {};
       if (conditional) {
@@ -651,6 +680,25 @@ async function captureScreenshot(
     const r = await Promise.race([pending, sleep(4000).then(() => undefined)]);
     if (r) return r;
   }
+}
+
+/**
+ * Screenshot of the visible viewport. A hidden (background) tab has no surface of its own to copy,
+ * and a plain capture of it has been seen to return another tab's picture. For a hidden tab,
+ * capture the viewport's area of the page the way `--full` does (`captureBeyondViewport`), which
+ * renders this tab's own frame.
+ */
+async function viewport(tabId: number, format: 'png' | 'jpeg'): Promise<{ data: string }> {
+  const hidden = (await evaluate(tabId, 'document.visibilityState')).value === 'hidden';
+  if (!hidden) return captureScreenshot(tabId, { format });
+  const { cssVisualViewport: v } = await cdp.send<{
+    cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number };
+  }>(tabId, 'Page.getLayoutMetrics');
+  return captureScreenshot(tabId, {
+    format,
+    captureBeyondViewport: true,
+    clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale: 1 },
+  });
 }
 
 /** The capture decoded and downscaled for comparison. */

@@ -266,7 +266,7 @@ async function fillEl(h: Handle, text: string): Promise<Result> {
   // Many comboboxes only commit a choice made from their popup and revert typed text on blur.
   const comboHint =
     prep.combo && text
-      ? 'combobox: the text was typed, but many comboboxes revert it on blur unless an option is chosen. Open its list (click it or its open button), snapshot, then click the option.'
+      ? 'combobox: the text was typed, but many comboboxes revert it on blur unless an option is chosen. Open its list (click it or its open button, or `press ArrowDown` while it has focus), snapshot, then click the option.'
       : undefined;
   if (!prep.field) return warn(DONE, comboHint);
   const value = await call<string>(h, 'function () { return this.value; }');

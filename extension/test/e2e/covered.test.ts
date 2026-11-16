@@ -44,6 +44,17 @@ describe('covered check', () => {
     expect(await out()).toBe('partial-btn;');
   });
 
+  it('treats content slotted into a shadow-DOM button as the button', async () => {
+    await bvl('open', fixture('/covered.html'), ...S);
+    const snap = (await bvl('snapshot', '-i', ...S)).stdout;
+    const ref = /button "Submit" \[ref=(e\d+)\]/.exec(snap)?.[1];
+    expect(ref, snap).toBeDefined();
+    const r = await bvl('click', `@${ref ?? ''}`, ...S);
+    expect(r.stderr).toBe('');
+    expect(r.code).toBe(0);
+    expect(await out()).toBe('shadow;');
+  });
+
   it('still refuses a fully covered element and names both', async () => {
     await bvl('open', fixture('/covered.html'), ...S);
     const r = await json('click', '#hidden-btn');

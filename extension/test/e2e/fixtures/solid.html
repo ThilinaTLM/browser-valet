@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Solid</title>
+  </head>
+  <body style="margin: 0">
+    <script>
+      // ?c=<css color> fills the page with one colour (tells tabs apart on a screenshot).
+      document.body.style.background = new URLSearchParams(location.search).get('c') || 'white';
+      document.body.style.height = '100vh';
+    </script>
+  </body>
+</html>

@@ -109,6 +109,31 @@ describe('XPath selectors', () => {
   });
 });
 
+describe('agent mistakes', () => {
+  it('points Playwright-style locators at find', async () => {
+    await bvl('open', fixture('/styled.html'));
+    const r = await bvl('click', 'text=Apply now');
+    expect(r.stderr).toContain('Invalid selector: text=Apply now');
+    expect(r.stderr).toContain('bvl find text "Apply now" <action>');
+    expect((await bvl('click', 'button:has-text("Go")')).stderr).toContain('bvl find text');
+  });
+
+  it('eval awaits a promise that is the completion value', async () => {
+    await bvl('open', fixture('/styled.html'));
+    const r = await bvl('eval', 'Promise.resolve({ a: 1 }).then((o) => ({ ...o, b: 2 }))');
+    expect(JSON.parse(r.stdout)).toEqual({ a: 1, b: 2 });
+    expect((await bvl('eval', 'await Promise.resolve(3)')).stdout.trim()).toBe('3');
+    expect((await bvl('eval', '({ x: [1, 2] })')).stdout).toContain('"x"');
+    expect((await bvl('eval', 'undefined')).stdout.trim()).toBe('undefined');
+    const rej = await bvl('eval', 'Promise.reject(new Error("nope"))');
+    expect(rej.code).not.toBe(0);
+    expect(rej.stderr).toContain('nope');
+    // The rejection reaches bvl; it is not an uncaught page error.
+    await bvl('wait', '200');
+    expect((await bvl('errors')).stdout).not.toContain('nope');
+  });
+});
+
 describe('pushstate', () => {
   it('navigates client-side and fires popstate; rejects other origins', async () => {
     await bvl('open', fixture('/spa.html'));

@@ -132,13 +132,15 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
   `time` `HH:MM`, `date` `YYYY-MM-DD`, `datetime-local` `YYYY-MM-DDTHH:MM`, `color` `#rrggbb`); if the field stays
   empty the command fails (`fill did not stick: …`; for plain fields the page may have reset it while loading: retry),
   if the page reformatted it you get a warning. On a `combobox` it only types text and warns: if the widget
-  reverts typed text on blur, open its list (click it or its open button), snapshot, then click the option.
+  reverts typed text on blur, open its list (click it or its open button, or `press ArrowDown` while it has
+  focus, as react-select needs), snapshot, then click the option.
 - `open` waits at most `--timeout` ms. If the page committed but is still loading you get
   `⚠ Page still loading after N ms…` (exit 0, `--json` `loaded:false`); if nothing arrived it fails with `timeout`.
   An HTTP error page loads with `⚠ HTTP 404 from <url>` (`--json` `status`).
 - In text mode an empty `get` result prints `(empty)`; `get attr` of a missing attribute prints `null`.
 - Prefer `wait --text`, `wait --url`, `wait <t>` over fixed `wait <ms>`. `wait --url` prints the URL it
   matched and `wait --text` the text (`--json`: `{url}` / `{text}`), so you often need no `get url` after it.
+  `wait --text` also searches iframes (as the snapshot shows them).
 - `--max-output <chars>` (any command) cuts each output text to that size and appends
   `[truncated: showing N of M chars. Use --max-output to adjust]`; `--json` data gets `truncated: true`.
   The user may set a default limit in the popup; your flag overrides it. Prefer `snapshot -i -s <css>`,
@@ -179,7 +181,10 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
   (`--bail` stops at the first failure; snapshot first, batch only steps whose refs you already know).
   Errors name their step (`✗ [3/4] click @e3: …`) and a `batch: …` summary line follows.
 - A mistyped command or flag gets a hint: ``Unknown command: clik. Did you mean `click`?``.
-- For scripts with quotes, use `eval --stdin` with a quoted heredoc.
+- For scripts with quotes, use `eval --stdin` with a quoted heredoc. `eval` awaits a returned promise
+  (`fetch(u).then(r => r.status)` prints the status).
+- Targets are refs, CSS or XPath only: Playwright locators (`text=Apply`, `:has-text()`) fail with
+  `Invalid selector`; use `bvl find text "Apply" click` instead.
 - `network requests [--filter --type --method --status 4xx --clear]` / `network request <id>` show what the
   page sent and received (read-only). Recording starts at the first `network` command on a tab, so
   reload or repeat the action afterwards. Cookie, Authorization and similar headers, secret fields in

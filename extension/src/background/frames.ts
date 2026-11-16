@@ -137,8 +137,10 @@ export async function evalInFrame(
   tabId: number,
   loc: FrameLoc,
   expression: string,
-  opts: { byValue: boolean; gesture?: boolean; isolatedOk?: boolean },
+  opts: { byValue: boolean; repl?: boolean; gesture?: boolean; isolatedOk?: boolean },
 ): Promise<EvalResult> {
+  // `repl`: REPL mode (top-level await) without returning by value.
+  const repl = opts.repl ?? opts.byValue;
   const run = (contextId: number | undefined, sessionId?: string) =>
     cdp.send<EvalResult>(
       tabId,
@@ -147,9 +149,9 @@ export async function evalInFrame(
         expression,
         ...(contextId !== undefined ? { contextId } : {}),
         returnByValue: opts.byValue,
-        awaitPromise: opts.byValue,
+        awaitPromise: repl,
         userGesture: opts.gesture ?? true,
-        replMode: opts.byValue,
+        replMode: repl,
       },
       sessionId,
     );

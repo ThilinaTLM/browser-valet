@@ -216,3 +216,20 @@ describe('screenshot --if-changed / --threshold', () => {
     expect(json).toMatchObject({ changed: false, revision: 3 });
   });
 });
+
+describe('screenshot of a background tab', () => {
+  it('captures the session tab, not another tab', async () => {
+    const other = ['--session', 'shot-other'];
+    await bvl('open', fixture('/solid.html?c=rgb(0,0,255)'), ...other);
+    await bvl('open', fixture('/solid.html?c=rgb(255,0,0)'));
+    expect((await bvl('eval', 'document.visibilityState')).stdout.trim()).toBe('"hidden"');
+    for (let i = 0; i < 3; i++) {
+      expect((await bvl('screenshot', `bg${String(i)}.png`)).code).toBe(0);
+      const img = await decode(`bg${String(i)}.png`);
+      expect(img.width).toBe(await innerWidth());
+      expect(redAt(img, Math.floor(img.width / 2), Math.floor(img.height / 2))).toBe(true);
+      await bvl('screenshot', 'other.png', ...other);
+    }
+    await bvl('close', ...other);
+  });
+});
