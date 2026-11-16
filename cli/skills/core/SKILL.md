@@ -125,12 +125,14 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
 - `upload <target> <files>` works on an `<input type=file>` or on the button that opens a file chooser
   (the page creates its input on click, e.g. "Upload resume"): bvl intercepts the chooser so no native
   dialog opens. It fails with `timeout` if the click opens no chooser (sites using
-  `window.showOpenFilePicker` can't be fulfilled). `check`/`uncheck` on a hidden custom checkbox fail
+  `window.showOpenFilePicker` can't be fulfilled). A missing or unreadable file fails with `bad_args` before
+  anything is sent to the page. `check`/`uncheck` on a hidden custom checkbox fail
   with `not_visible`: `click` its label or wrapper instead.
 - `fill` checks the value afterwards. Date/time/color/range inputs are set directly (use their value format:
   `time` `HH:MM`, `date` `YYYY-MM-DD`, `datetime-local` `YYYY-MM-DDTHH:MM`, `color` `#rrggbb`); if the field stays
   empty the command fails (`fill did not stick: …`; for plain fields the page may have reset it while loading: retry),
-  if the page reformatted it you get a warning.
+  if the page reformatted it you get a warning. On a `combobox` it only types text and warns: if the widget
+  reverts typed text on blur, open its list (click it or its open button), snapshot, then click the option.
 - `open` waits at most `--timeout` ms. If the page committed but is still loading you get
   `⚠ Page still loading after N ms…` (exit 0, `--json` `loaded:false`); if nothing arrived it fails with `timeout`.
   An HTTP error page loads with `⚠ HTTP 404 from <url>` (`--json` `status`).
@@ -168,7 +170,9 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
   `no_tab` (`open` a page), `tab_gone`, `not_shared`/`revoked` (ask again with `tab <id>`), `not_controllable` (Chrome refuses to debug the tab: on a normal page another extension's overlay/frame, e.g. password manager or PDF viewer, is in it; close it or disable that extension on the site and retry, `bvl reload` also clears it but loses unsaved form data), `denied` (the user
   said no: do not retry), `domain_blocked` (site not allowed: do not retry), `not_connected` (extension/proxy down: `bvl doctor`), `not_paired` (`bvl setup`).
   Page and Chrome errors (such as a JS exception in `eval`) have no `code`.
-- `Element is covered by <div#…>`: dismiss that overlay, re-snapshot, retry.
+- `Element <x> is covered by <div#…>`: bvl already forced a frame (background tabs don't render on their own),
+  waited briefly and tried other points of the element, so the overlay is real: dismiss it, re-snapshot, retry.
+  A button that only appears on hover: `hover` its row first, or `focus` it and `press Enter`.
 - A `confirm`/`prompt` dialog pauses the page: `bvl dialog accept` or `bvl dialog dismiss`.
   Alerts are accepted automatically.
 - Known sequences cost one call as `bvl batch "fill @e1 a@b.c" "fill @e2 pw" "click @e3" "wait --url **/home"`

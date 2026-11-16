@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Covered</title>
+    <style>
+      #spinner {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        background: white;
+      }
+      #spinner.done {
+        display: none;
+      }
+      #partial {
+        position: relative;
+        width: 200px;
+        height: 40px;
+      }
+      #partial-btn {
+        width: 200px;
+        height: 40px;
+      }
+      #reset {
+        position: absolute;
+        left: 70px;
+        top: 0;
+        width: 60px;
+        height: 40px;
+      }
+      #full-cover {
+        position: relative;
+        width: 200px;
+        height: 40px;
+      }
+      #full-cover .over {
+        position: absolute;
+        inset: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="out"></p>
+    <label id="wrap"><input id="agree" type="checkbox" /> I agree</label>
+    <button id="busy">Load</button>
+    <div id="partial">
+      <button id="partial-btn">Cell</button>
+      <button id="reset">x</button>
+    </div>
+    <div id="full-cover">
+      <button id="hidden-btn">Edit</button>
+      <span class="over">Subtitle</span>
+    </div>
+    <input id="combo" role="combobox" aria-expanded="false" aria-controls="combo-list" />
+    <input id="plain" />
+    <ul id="combo-list" role="listbox" hidden>
+      <li role="option">October</li>
+    </ul>
+    <div id="spinner" class="done"></div>
+    <script>
+      const out = document.getElementById('out');
+      const spinner = document.getElementById('spinner');
+      for (const id of ['agree', 'busy', 'partial-btn', 'hidden-btn']) {
+        document.getElementById(id).addEventListener('click', () => {
+          out.textContent += id + ';';
+        });
+      }
+      // A loading overlay that is only removed on the next animation frame, which a hidden tab
+      // never produces by itself.
+      document.getElementById('busy').addEventListener('click', () => {
+        spinner.classList.remove('done');
+        setTimeout(() => requestAnimationFrame(() => spinner.classList.add('done')), 50);
+      });
+    </script>
+  </body>
+</html>

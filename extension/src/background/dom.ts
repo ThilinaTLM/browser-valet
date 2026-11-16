@@ -4,6 +4,7 @@
 import { UserError } from './errors';
 import * as cdp from './cdp';
 import { evalInFrame, scopeLoc } from './frames';
+import { prime } from './input';
 import { refFate, syncDocument } from './refs';
 import { state } from './state';
 
@@ -305,11 +306,70 @@ const DESCRIBE = `function describe(el) {
 }`;
 
 /**
+ * Points tried by the covered check, as fractions of the element's box: the center first, then
+ * points spread over the box, so an element partly covered (a clear button over a cell, a label
+ * over part of a row) is clicked where it is visible, as a person would.
+ */
+const SAMPLES: [number, number][] = [
+  [0.5, 0.5],
+  [0.25, 0.5],
+  [0.75, 0.5],
+  [0.5, 0.25],
+  [0.5, 0.75],
+  [0.1, 0.5],
+  [0.9, 0.5],
+  [0.25, 0.25],
+  [0.75, 0.25],
+  [0.25, 0.75],
+  [0.75, 0.75],
+];
+
+interface Check {
+  hidden?: true;
+  disabled?: true;
+  covered?: string;
+  self?: string;
+  at?: [number, number];
+}
+
+const CHECK = `function (samples) {
+  ${DESCRIBE}
+  const el = this.nodeType === 1 ? this : this.parentElement;
+  if (!el || !el.isConnected) return { hidden: true };
+  const r = el.getBoundingClientRect();
+  const st = getComputedStyle(el);
+  if (r.width === 0 || r.height === 0 || st.visibility === 'hidden') return { hidden: true };
+  if (el.disabled || el.getAttribute('aria-disabled') === 'true') return { disabled: true };
+  const doc = el.ownerDocument;
+  const ok = (hit) => {
+    if (hit === el || el.contains(hit)) return true;
+    // Shadow DOM retargets hits to the host, which is an ancestor of el.
+    for (let n = el; n; n = n.parentNode || n.host) if (n === hit) return true;
+    return hit.tagName === 'LABEL' && hit.control === el;
+  };
+  // A text node is measured by its own quads, which only match the parent's box at the center.
+  const pts = this.nodeType === 1 ? samples : samples.slice(0, 1);
+  let covered = null;
+  for (const [fx, fy] of pts) {
+    const hit = doc.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+    // Outside the viewport (e.g. scrolling failed): nothing to compare, keep the old behaviour.
+    if (!hit) { if (fx === 0.5 && fy === 0.5) return { at: [fx, fy] }; continue; }
+    if (ok(hit)) return { at: [fx, fy] };
+    if (!covered) covered = hit;
+  }
+  return { covered: describe(covered), self: describe(el) };
+}`;
+
+/**
  * Scroll the element into view and return the viewport point to click, after checking that it is
  * visible, enabled and not covered by another element. For a node in an out-of-process iframe the
  * point is relative to that iframe and `sessionId` names the session to send the input to: a
  * hidden tab hit-tests nothing inside an iframe, so input addressed to the tab would land on the
  * parent page.
+ *
+ * A hidden (background) tab renders no frames by itself, so an overlay the page removes on its
+ * next animation frame (a loading spinner) still sits there for `elementFromPoint`. When the
+ * element looks covered, a frame is forced (`prime`) and the check repeated before failing.
  */
 export async function clickPoint(
   h: Handle,
@@ -320,29 +380,19 @@ export async function clickPoint(
   } catch {
     // not an element (e.g. text node) or not rendered; checks below report it
   }
-  const check = await call<{ hidden?: boolean; disabled?: boolean; covered?: string }>(
-    h,
-    `function () {
-      ${DESCRIBE}
-      const el = this.nodeType === 1 ? this : this.parentElement;
-      if (!el || !el.isConnected) return { hidden: true };
-      const r = el.getBoundingClientRect();
-      const st = getComputedStyle(el);
-      if (r.width === 0 || r.height === 0 || st.visibility === 'hidden') return { hidden: true };
-      if (el.disabled || el.getAttribute('aria-disabled') === 'true') return { disabled: true };
-      const hit = el.ownerDocument.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      if (!hit || hit === el || el.contains(hit)) return {};
-      // Shadow DOM retargets hits to the host, which is an ancestor of el.
-      for (let n = el; n; n = n.parentNode || n.host) if (n === hit) return {};
-      if (hit.tagName === 'LABEL' && hit.control === el) return {};
-      return { covered: describe(hit) };
-    }`,
-  );
+  let check = await call<Check>(h, CHECK, [SAMPLES]);
+  // Covered: give the page frames (hidden tab) and a moment (transient overlay), then look again.
+  for (const pause of [0, 250]) {
+    if (!check.covered) break;
+    if (pause) await new Promise((r) => setTimeout(r, pause));
+    await prime(h.tabId);
+    check = await call<Check>(h, CHECK, [SAMPLES]);
+  }
   if (check.hidden) throw new UserError('Element is not visible', 'not_visible');
   if (check.disabled && !opts.allowDisabled) throw new UserError('Element is disabled', 'disabled');
   if (check.covered) {
     throw new UserError(
-      `Element is covered by ${check.covered}. Dismiss it, re-snapshot, retry.`,
+      `Element ${check.self ?? ''} is covered by ${check.covered}. Dismiss it, re-snapshot, retry. If the element only appears on hover, \`hover\` its container first, or \`focus\` it and \`press Enter\`.`,
       'covered',
     );
   }
@@ -355,9 +405,13 @@ export async function clickPoint(
   );
   const q = quads.find((q) => q.length === 8);
   if (!q) throw new UserError('Element is not visible', 'not_visible');
+  // Quad corners: top-left, top-right, bottom-right, bottom-left. Interpolate the checked point,
+  // so the click lands where the hit test passed (also for transformed elements).
   const [x1 = 0, y1 = 0, x2 = 0, y2 = 0, x3 = 0, y3 = 0, x4 = 0, y4 = 0] = q;
-  const x = (x1 + x2 + x3 + x4) / 4;
-  const y = (y1 + y2 + y3 + y4) / 4;
+  const [fx, fy] = check.at ?? [0.5, 0.5];
+  const w = [(1 - fx) * (1 - fy), fx * (1 - fy), fx * fy, (1 - fx) * fy] as const;
+  const x = w[0] * x1 + w[1] * x2 + w[2] * x3 + w[3] * x4;
+  const y = w[0] * y1 + w[1] * y2 + w[2] * y3 + w[3] * y4;
   // Quads of a node in an out-of-process iframe are relative to that iframe.
   return h.sessionId ? { x, y, sessionId: h.sessionId } : { x, y };
 }

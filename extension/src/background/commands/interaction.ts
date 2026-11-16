@@ -5,6 +5,7 @@ import {
   clickPoint,
   evaluate,
   evaluateHandle,
+  type EvalResult,
   fromBackend,
   type Handle,
   resolveWait,
@@ -84,6 +85,57 @@ async function clickEl(h: Handle, count = 1, button: input.Button = 'left'): Pro
     await input.click(h.tabId, x, y, { count, button, ...(sessionId ? { sessionId } : {}) });
     return DONE;
   });
+}
+
+/**
+ * Fail before touching the page when a file does not exist. Chrome accepts any path in
+ * `DOM.setFileInputFiles` and gives the page an empty file, so the site fails later with its own
+ * vague error. The files are set on a detached scratch `<input type=file>` (no page listener sees
+ * it), and every 0-byte file is read: an empty file reads fine, a missing one throws.
+ */
+async function checkFiles(h: Handle, files: string[]): Promise<void> {
+  const made = await cdp.send<EvalResult>(
+    h.tabId,
+    'Runtime.callFunctionOn',
+    {
+      objectId: h.objectId,
+      functionDeclaration: `function () {
+        const doc = this.ownerDocument || document;
+        const i = doc.createElement('input');
+        i.type = 'file';
+        i.multiple = true;
+        return i;
+      }`,
+    },
+    h.sessionId,
+  );
+  const objectId = made.result.objectId;
+  if (!objectId) return; // could not make a scratch input; skip the check
+  const scratch: Handle = {
+    tabId: h.tabId,
+    objectId,
+    ...(h.sessionId ? { sessionId: h.sessionId } : {}),
+  };
+  await cdp.send(h.tabId, 'DOM.setFileInputFiles', { objectId, files }, h.sessionId);
+  const missing = await call<number[]>(
+    scratch,
+    `async function () {
+      const bad = [];
+      const list = [...this.files];
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].size > 0) continue;
+        try { await list[i].arrayBuffer(); } catch { bad.push(i); }
+      }
+      return bad;
+    }`,
+  );
+  if (missing.length) {
+    const names = missing.map((i) => files[i] ?? '').join(', ');
+    throw new UserError(
+      `File not found or not readable: ${names}. Relative paths are resolved against the directory bvl runs in.`,
+      'bad_args',
+    );
+  }
 }
 
 /** Click a non-input target while intercepting the file chooser, then fulfil it with `files`. */
@@ -171,7 +223,7 @@ async function fillEl(h: Handle, text: string): Promise<Result> {
     .send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }, h.sessionId)
     .catch(() => 0);
   // Date/time-like inputs ignore inserted text: their value is set through the native setter.
-  const prep = await call<{ field: boolean; type: string; special: boolean }>(
+  const prep = await call<{ field: boolean; type: string; special: boolean; combo?: boolean }>(
     h,
     `function (text, special, formats) {
       const types = new Set(special);
@@ -194,6 +246,7 @@ async function fillEl(h: Handle, text: string): Promise<Result> {
         this.dispatchEvent(new Event('change', { bubbles: true }));
         return { field, type, special: true };
       }
+      const combo = this.getAttribute('role') === 'combobox';
       if (typeof this.select === 'function') this.select();
       else if (this.isContentEditable) {
         const r = document.createRange();
@@ -202,7 +255,7 @@ async function fillEl(h: Handle, text: string): Promise<Result> {
         s.removeAllRanges();
         s.addRange(r);
       } else throw new Error('Element is not an input, textarea or contenteditable');
-      return { field, type, special: false };
+      return { field, type, special: false, combo };
     }`,
     [text, [...SPECIAL_INPUT_TYPES], FILL_FORMATS],
   );
@@ -210,11 +263,16 @@ async function fillEl(h: Handle, text: string): Promise<Result> {
     if (text) await input.insertText(h.tabId, text);
     else await input.press(h.tabId, 'Delete');
   }
-  if (!prep.field) return DONE;
+  // Many comboboxes only commit a choice made from their popup and revert typed text on blur.
+  const comboHint =
+    prep.combo && text
+      ? 'combobox: the text was typed, but many comboboxes revert it on blur unless an option is chosen. Open its list (click it or its open button), snapshot, then click the option.'
+      : undefined;
+  if (!prep.field) return warn(DONE, comboHint);
   const value = await call<string>(h, 'function () { return this.value; }');
   const problem = fillProblem(prep.type, text, value);
   if (problem?.fail) throw new UserError(problem.message);
-  return problem ? warn(DONE, problem.message) : DONE;
+  return warn(DONE, problem?.message, comboHint);
 }
 
 async function typeEl(h: Handle, text: string): Promise<Result> {
@@ -741,6 +799,7 @@ export const interactionCommands: Command[] = [
       a.need(1, 'file');
       const h = await element(ctx, target(a));
       const files = a.pos.slice(1).map((f) => ctx.path(f));
+      await checkFiles(h, files);
       const isInput = await call<boolean>(
         h,
         `function () { return this.tagName === 'INPUT' && this.type === 'file'; }`,
