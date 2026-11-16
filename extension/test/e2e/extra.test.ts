@@ -128,6 +128,9 @@ describe('agent mistakes', () => {
     const rej = await bvl('eval', 'Promise.reject(new Error("nope"))');
     expect(rej.code).not.toBe(0);
     expect(rej.stderr).toContain('nope');
+    // The rejection reaches bvl; it is not an uncaught page error.
+    await bvl('wait', '200');
+    expect((await bvl('errors')).stdout).not.toContain('nope');
   });
 });
 

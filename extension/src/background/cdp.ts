@@ -41,6 +41,8 @@ const rediscovered = new Set<number>();
 const events = new Map<number, TabEvents>();
 const listeners = new Set<(tabId: number, method: string, params: unknown) => void>();
 const MAX_BUFFER = 500;
+/** CDP exception id of each buffered page error, so a revoked one can be dropped. */
+const exceptionIds = new WeakMap<PageError, number>();
 const detachListeners = new Set<(tabId: number) => void>();
 const attachListeners = new Set<(tabId: number) => void>();
 
@@ -401,6 +403,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   } else if (method === 'Runtime.exceptionThrown') {
     const d = p.exceptionDetails as
       | {
+          exceptionId?: number;
           text?: string;
           exception?: RemoteObject;
           lineNumber?: number;
@@ -408,12 +411,19 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
           url?: string;
         }
       | undefined;
-    push(ev.errors, {
+    const entry: PageError = {
       text: d?.exception?.description ?? d?.text ?? 'Uncaught error',
       line: d?.lineNumber ?? null,
       column: d?.columnNumber ?? null,
       url: d?.url ?? null,
-    });
+    };
+    if (d?.exceptionId !== undefined) exceptionIds.set(entry, d.exceptionId);
+    push(ev.errors, entry);
+  } else if (method === 'Runtime.exceptionRevoked') {
+    // A promise rejection that got a handler later is not uncaught after all (DevTools drops it
+    // too). `eval` of a rejected promise causes this: the rejection is seen before bvl awaits it.
+    const i = ev.errors.findIndex((e) => exceptionIds.get(e) === p.exceptionId);
+    if (i >= 0) ev.errors.splice(i, 1);
   }
   for (const fn of listeners) fn(tabId, method, params);
 });
