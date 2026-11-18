@@ -31,15 +31,16 @@ beforeEach(async () => {
 });
 
 describe('help generation', () => {
-  it('lists every group and the core loop for `help` and no arguments', async () => {
+  it('lists every group and the global flags for `help` and no arguments', async () => {
     for (const argv of [[], ['help']]) {
       const r = await run(...argv);
       expect(r.exitCode).toBe(0);
       for (const g of ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging']) {
         expect(r.stdout).toContain(`\n${g}\n`);
       }
-      expect(r.stdout).toContain('Core loop:');
-      expect(r.stdout).toContain('Handled by the CLI itself:');
+      expect(r.stdout).toMatch(/^Browser commands /);
+      expect(r.stdout).toContain('Global flags (any browser command):');
+      expect(r.stdout).toContain('--session <value>');
     }
   });
 
@@ -50,12 +51,6 @@ describe('help generation', () => {
     expect(a.stdout).toMatch(/^Usage: bvl click /);
     expect(a.stdout).toContain('--json');
     expect(a.stdout).toContain('--session <value>');
-  });
-
-  it('points agents at the core skill in the top-level help', async () => {
-    expect((await run('help')).stdout).toContain(
-      'Start here (for AI agents): `bvl skills get core`',
-    );
   });
 
   it('renders details and examples when a command has them', async () => {
@@ -94,7 +89,7 @@ describe('help generation', () => {
   });
 
   it('falls back to general help for an unknown `help <x>`', async () => {
-    expect((await run('help', 'zzz')).stdout).toContain('Core loop:');
+    expect((await run('help', 'zzz')).stdout).toMatch(/^Browser commands /);
   });
 
   it('suggests the closest command for a typo', async () => {

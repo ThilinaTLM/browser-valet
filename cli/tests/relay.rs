@@ -890,3 +890,73 @@ fn doctor_detects_a_squatter_on_the_port() {
         .contains("server authentication failed"));
     std::fs::remove_dir_all(&d).ok();
 }
+
+// ---- help ----
+
+fn text(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).to_string()
+}
+
+#[test]
+fn help_works_unpaired_and_never_runs_local_commands() {
+    let d = tmpdir("help-unpaired");
+    for args in [&[][..], &["--help"], &["-h"], &["help"]] {
+        let o = run_bvl(&d, &d, args);
+        let s = text(&o);
+        assert_eq!(o.status.code(), Some(0), "{args:?}: {s}");
+        assert!(s.contains("Start here (for AI agents): `bvl skills get core`"), "{s}");
+        assert!(s.contains("  doctor    "), "{s}");
+        assert!(
+            s.contains("not paired yet") && s.contains("bvl skills get core --ref commands"),
+            "{s}"
+        );
+    }
+    let o = run_bvl(&d, &d, &["help", "setup"]);
+    assert!(text(&o).starts_with("Usage: bvl setup [--browser"), "{}", text(&o));
+    assert!(!d.join("extension").exists(), "help must not run setup");
+    let o = run_bvl(&d, &d, &["click", "--help"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("--ref commands"));
+    std::fs::remove_dir_all(&d).ok();
+}
+
+#[test]
+fn local_command_help_does_not_unpair_or_stop() {
+    let mut p = start(&[]);
+    for cmd in ["unpair", "stop"] {
+        for flag in ["--help", "-h"] {
+            let o = bvl(&p, &[cmd, flag]);
+            assert_eq!(o.status.code(), Some(0));
+            assert!(text(&o).starts_with(&format!("Usage: bvl {cmd}")), "{}", text(&o));
+        }
+    }
+    assert!(p.dir.join("config.json").is_file());
+    assert!(!wait_exit(&mut p, 1), "proxy must keep running");
+}
+
+#[test]
+fn help_appends_the_extension_command_list() {
+    let p = start(&[]);
+    let _t = answering_ext(
+        &p,
+        json!({"browser":"Test Chrome 1","extVersion":env!("CARGO_PKG_VERSION")}),
+    );
+    let o = bvl(&p, &["--help"]);
+    let s = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{s}");
+    assert!(
+        s.contains("Start here (for AI agents)") && s.ends_with("\nhelp\n"),
+        "{s}"
+    );
+}
+
+#[test]
+fn help_with_the_extension_off_says_so_quickly() {
+    let p = start(&[]);
+    let t = Instant::now();
+    let o = bvl(&p, &["help"]);
+    let s = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{s}");
+    assert!(s.contains("Start here") && s.contains("switch it on"), "{s}");
+    assert!(t.elapsed() < Duration::from_secs(6), "{:?}", t.elapsed());
+}

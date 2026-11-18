@@ -116,7 +116,7 @@ snapshot: `--outline` lists headings, `--filter <text>` returns matching section
 `read`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 `screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
 Full list with arguments and global flags: `bvl skills get core --ref commands`.
-`bvl <command> --help` for details.
+`bvl <command> --help` for details; `bvl --help` gives the overview and the full command list.
 
 ## Tips
 
