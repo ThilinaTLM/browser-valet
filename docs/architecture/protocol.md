@@ -159,7 +159,15 @@ Handled by the CLI itself (never forwarded): `setup [--browser B] [--open] [--no
 `skills [list | get <name> [--full] [--ref R] | path [name] | install [--dir D]]`,
 `pair <secret> [--port N]`, `unpair`, `status`, `doctor [--json] [--quick] [--fix]`, `proxy [--idle-timeout S] [--port N]`
 (foreground relay), `stop`, `version`/`--version`.
-Everything else (including `help` / `--help`) is forwarded as a `req`.
+Everything else is forwarded as a `req`.
+
+Help never runs a command. `<local command> --help`/`-h` and `help <local command>` print that
+command's help from the CLI. Top-level help (`bvl`, `help`, `--help`, `-h`, without `--json`) always
+works and exits 0: the CLI prints its overview (`cli/src/help.rs`), then, if paired, starts the
+proxy, waits up to 2.5 s for the extension in `status` and forwards `["help"]` as a normal `req`,
+printing its `stdout` (the browser command list) below. If any step fails it prints why (not
+paired, proxy unreachable, extension switched off) and points at `bvl skills get core --ref commands`.
+`help <browser command>`, `<browser command> --help` and `--json` help are forwarded as before.
 
 `doctor` runs these checks in order and prints ✓/!/✗ with a one-line fix: config (exists, secret,
 mode 0600 on Unix), managed folder (`pairing.json` matches the config, files match the bundled

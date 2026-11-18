@@ -58,10 +58,11 @@ describe('agent tab (no consent needed)', () => {
     expect(unknown.stderr).toContain('Unknown command: nonsense');
   });
 
-  it('help comes from the extension', async () => {
+  it('help: the CLI overview, then the command list from the extension', async () => {
     const r = await bvl('help');
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain('Core loop:');
+    expect(r.stdout).toContain('Start here (for AI agents): `bvl skills get core`');
+    expect(r.stdout).toContain('Browser commands (run in the extension');
   });
 });
 

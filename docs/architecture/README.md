@@ -31,7 +31,7 @@ flowchart LR
 
 | Component | Owns | Must not contain |
 |---|---|---|
-| `cli/src/main.rs` (CLI) | argv capture, config file, proxy auto-start, executing `res` (print, write `files`), CLI-local commands | command parsing, help text, formatting, browser state |
+| `cli/src/main.rs` (CLI) | argv capture, config file, proxy auto-start, executing `res` (print, write `files`), CLI-local commands; `help.rs`: the top-level overview and CLI-local command help | browser command parsing or help text, formatting, browser state |
 | `cli/src/proxy.rs` (proxy) | auth, Origin check, relaying req/event/res/cancel by id, idle exit, triggering managed updates | durable state, knowledge of command semantics |
 | `cli/src/embed.rs`, `setup.rs`, `build.rs` | embedded extension + skills, managed folder, `setup`/`skills` | anything the extension must decide at runtime |
 | `cli/skills/` | agent guide sources (`bvl skills get`) | version-specific facts not matching the binary |

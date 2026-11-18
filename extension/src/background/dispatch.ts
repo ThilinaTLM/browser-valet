@@ -54,15 +54,12 @@ function lookup(name: string): Command | undefined {
   return COMMANDS.find((c) => c.name === name || c.aliases?.includes(name));
 }
 
+/**
+ * The browser part of top-level help. The CLI prints its own overview (what bvl is, `skills get core`,
+ * core loop, CLI-local commands) above this.
+ */
 function generalHelp(): string {
-  const lines = [
-    'bvl — control your real browser from the command line (Browser Valet)',
-    '',
-    'Usage: bvl <command> [args] [--json] [--session <name>] [--timeout <ms>] [--max-output <chars>]',
-    '',
-    'Start here (for AI agents): `bvl skills get core`',
-    'It explains the snapshot-and-ref workflow, tab consent and the JSON error codes.',
-  ];
+  const lines = ['Browser commands (run in the extension; `bvl <command> --help` for details):'];
   for (const g of GROUPS) {
     lines.push('', g);
     for (const c of COMMANDS.filter((c) => c.group === g)) {
@@ -70,22 +67,13 @@ function generalHelp(): string {
       lines.push(`  ${usage.padEnd(44)} ${c.summary}`);
     }
   }
-  lines.push(
-    '',
-    'Handled by the CLI itself: pair, unpair, status, stop, proxy, version',
-    '',
-    'Core loop:',
-    '  bvl open https://example.com    # agent tab, opened in the background',
-    '  bvl snapshot -i                 # interactive elements with @refs',
-    '  bvl click @e3                   # act on refs; re-snapshot after page changes',
-    '',
-    'Tabs the agent did not open are off-limits until the user approves:',
-    '  bvl tab                         # [not shared] marks tabs the agent cannot use',
-    '  bvl tab t3                      # asks the user in the browser, waits for the answer',
-    '',
-    'Run `bvl <command> --help` for details.',
-  );
+  lines.push('', 'Global flags (any browser command):', ...GLOBAL_FLAGS.map(flagLine));
   return lines.join('\n');
+}
+
+function flagLine(f: (typeof GLOBAL_FLAGS)[number]): string {
+  const name = `${f.short ? `-${f.short}, ` : '    '}--${f.name}${f.type === 'string' ? ' <value>' : ''}`;
+  return `  ${name.padEnd(28)} ${f.desc}`;
 }
 
 function commandHelp(c: Command): string {
@@ -93,11 +81,7 @@ function commandHelp(c: Command): string {
   if (c.aliases?.length) lines.push(`Aliases: ${c.aliases.join(', ')}`);
   if (c.details) lines.push('', c.details);
   const flags = [...(c.flags ?? []), ...GLOBAL_FLAGS];
-  lines.push('', 'Flags:');
-  for (const f of flags) {
-    const name = `${f.short ? `-${f.short}, ` : '    '}--${f.name}${f.type === 'string' ? ' <value>' : ''}`;
-    lines.push(`  ${name.padEnd(28)} ${f.desc}`);
-  }
+  lines.push('', 'Flags:', ...flags.map(flagLine));
   if (c.examples?.length) lines.push('', 'Examples:', ...c.examples.map((e) => `  ${e}`));
   return lines.join('\n');
 }

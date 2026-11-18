@@ -159,7 +159,7 @@ bvl tab t4                          # asks you in the browser, waits for the ans
 bvl close                           # close the session's tabs, release yours
 ```
 
-Run `bvl help` for every command. For agents: `bvl skills get core` (add `--full` for the command
+Run `bvl --help` for an overview and every command (it works before setup too). For agents: `bvl skills get core` (add `--full` for the command
 reference).
 
 | Area | Commands |
@@ -172,7 +172,7 @@ reference).
 | Debugging | `console`, `errors` |
 
 Global flags: `--json` (`{success, data, error}`), `--session <name>` (or `BVL_SESSION`),
-`--timeout <ms>`. CLI-local commands: `setup`, `skills`, `pair`, `unpair`, `status`, `stop`,
+`--timeout <ms>`. CLI-local commands: `setup`, `skills`, `doctor`, `pair`, `unpair`, `status`, `stop`,
 `proxy`, `version`.
 
 Deliberately left out: cookies/storage/state, network interception (read-only `network requests` is available), device emulation, video/trace —

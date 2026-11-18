@@ -5,6 +5,7 @@
 //! defaults to BVL_CONFIG_DIR when only that is set, so tests stay isolated).
 mod doctor;
 mod embed;
+mod help;
 mod proxy;
 mod setup;
 
@@ -251,23 +252,6 @@ fn paired() -> Config {
     })
 }
 
-const HELP: &str = "bvl local commands:
-  setup [--browser chrome|edge|brave|chromium] [--open] [--no-wait]
-                             install the browser extension (load it once) and pair automatically
-  skills [list]              list agent skills; `skills get core` prints the usage guide (read it first!)
-  skills get <name> [--full] [--ref <ref>]   print a skill (+ all / one reference)
-  skills path [name]         write skills to the config dir and print the path
-  skills install [--dir D]   install a stub `bvl` skill for Claude Code / other agents
-  pair <secret> [--port N]   pair manually with a code (normally `setup` does this)
-  unpair                     forget the secret and stop the proxy
-  status [--json]            show proxy and extension connection
-  doctor [--json] [--quick] [--fix]   diagnose config, extension folder, proxy, extension, round trip
-  proxy [--idle-timeout S] [--port N]   run the relay in the foreground
-  stop                       stop the background proxy
-  version                    print version
-All other commands are forwarded to the browser extension.
-New here? Run `bvl skills get core`.";
-
 /// The `--json` error envelope for failures that happen before the extension answers
 /// (same shape as the extension's, see automation.md).
 fn json_error(msg: &str, code: &str) -> String {
@@ -286,9 +270,24 @@ fn forward(argv: Vec<String>) -> Result<i32> {
         );
         return Ok(1);
     }
+    let wants_help = help::wants_help(&argv) || command_name(&argv) == Some("help");
+    if wants_help && !json_out && load().is_none() {
+        eprintln!(
+            "Not paired, so help for browser commands is not available from the extension. Offline \
+             reference: `bvl skills get core --ref commands`. To set up, ask the user to run `bvl setup`."
+        );
+        return Ok(1);
+    }
     match forward_inner(argv) {
         Err(e) if json_out => {
             println!("{}", json_error(&format!("{e:#}"), "not_connected"));
+            Ok(1)
+        }
+        Err(e) if wants_help => {
+            eprintln!(
+                "bvl: {e:#}\nHelp for browser commands comes from the extension. Offline reference: \
+                 `bvl skills get core --ref commands`."
+            );
             Ok(1)
         }
         r => r,
@@ -297,11 +296,6 @@ fn forward(argv: Vec<String>) -> Result<i32> {
 
 fn forward_inner(argv: Vec<String>) -> Result<i32> {
     let json_out = argv.iter().any(|a| a == "--json");
-    let helpish = matches!(argv.first().map(String::as_str), None | Some("help" | "--help" | "-h"));
-    if helpish && load().is_none() {
-        println!("{HELP}\n\nNot paired. Run `bvl setup` to install the browser extension and pair.");
-        return Ok(1);
-    }
     let c = paired();
     let stdin = if argv.iter().any(|a| a == "--stdin") {
         let mut s = String::new();
@@ -310,22 +304,9 @@ fn forward_inner(argv: Vec<String>) -> Result<i32> {
     } else {
         None
     };
-    let mut ws = match ensure_proxy(&c).and_then(|_| connect(&c)) {
-        Ok(ws) => ws,
-        Err(e) if helpish => {
-            println!("{HELP}\n\nCould not reach the extension: {e:#}");
-            return Ok(1);
-        }
-        Err(e) => return Err(e),
-    };
-    let mut req = json!({
-        "argv": argv,
-        "cwd": std::env::current_dir()?.to_string_lossy(),
-        "tmp": std::env::temp_dir().to_string_lossy(),
-        "sep": std::path::MAIN_SEPARATOR.to_string(),
-        "platform": match std::env::consts::OS { "macos" => "macos", "windows" => "windows", _ => "linux" },
-        "session": std::env::var("BVL_SESSION").unwrap_or_else(|_| "default".into()),
-    });
+    ensure_proxy(&c)?;
+    let mut ws = connect(&c)?;
+    let mut req = make_req(&argv)?;
     if let Some(s) = stdin {
         req["stdin"] = s.into();
     }
@@ -340,6 +321,37 @@ fn forward_inner(argv: Vec<String>) -> Result<i32> {
         match m["t"].as_str() {
             Some("event") => eprint!("{}", m["stderr"].as_str().unwrap_or("")),
             Some("res") => return finish(&m["res"], json_out),
+            Some("error") => bail!("{}", m["error"].as_str().unwrap_or("proxy error")),
+            _ => {}
+        }
+    }
+}
+
+fn make_req(argv: &[String]) -> Result<Value> {
+    Ok(json!({
+        "argv": argv,
+        "cwd": std::env::current_dir()?.to_string_lossy(),
+        "tmp": std::env::temp_dir().to_string_lossy(),
+        "sep": std::path::MAIN_SEPARATOR.to_string(),
+        "platform": match std::env::consts::OS { "macos" => "macos", "windows" => "windows", _ => "linux" },
+        "session": std::env::var("BVL_SESSION").unwrap_or_else(|_| "default".into()),
+    }))
+}
+
+/// Send one request and return its `res`, ignoring progress events (for output the CLI composes itself).
+pub(crate) fn request(c: &Config, argv: &[String], timeout: Duration) -> Result<Value> {
+    let mut ws = connect(c)?;
+    send(&mut ws, json!({"t":"req","req":make_req(argv)?}))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            bail!("no answer within {} s", timeout.as_secs());
+        }
+        ws.get_ref().set_read_timeout(Some(left))?;
+        let m = recv(&mut ws)?;
+        match m["t"].as_str() {
+            Some("res") => return Ok(m["res"].clone()),
             Some("error") => bail!("{}", m["error"].as_str().unwrap_or("proxy error")),
             _ => {}
         }
@@ -435,7 +447,44 @@ fn flag(args: &[String], name: &str) -> Option<String> {
         .cloned()
 }
 
+/// The command name: the first argument that is not a flag (global flags may precede it).
+fn command_name(args: &[String]) -> Option<&str> {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--session" | "--timeout" | "--max-output" | "--allowed-domains" | "--confirm-actions" => {
+                it.next();
+            }
+            s if s.starts_with('-') => {}
+            s => return Some(s),
+        }
+    }
+    None
+}
+
 fn local(args: Vec<String>) -> Result<i32> {
+    // Help never runs a command. `--json` help stays with the extension (JSON envelope).
+    let json_out = args.iter().any(|a| a == "--json");
+    if args.first().map(String::as_str) == Some("--version") {
+        println!("bvl {VERSION}");
+        return Ok(0);
+    }
+    match command_name(&args) {
+        None | Some("help") if !json_out => {
+            let topic = args
+                .iter()
+                .skip_while(|a| *a != "help")
+                .nth(1)
+                .filter(|a| !a.starts_with('-'));
+            return Ok(match topic {
+                None => help::top(),
+                Some(t) if help::is_local(t) => help::local(t),
+                Some(_) => return forward(args),
+            });
+        }
+        Some(name) if help::is_local(name) && help::wants_help(&args) => return Ok(help::local(name)),
+        _ => {}
+    }
     match args.first().map(String::as_str) {
         Some("pair") => {
             let secret = args
@@ -503,7 +552,7 @@ fn local(args: Vec<String>) -> Result<i32> {
             proxy::run(c.secret, port, idle)?;
             Ok(0)
         }
-        Some("version" | "--version") => {
+        Some("version") => {
             println!("bvl {VERSION}");
             Ok(0)
         }
