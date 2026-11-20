@@ -167,17 +167,17 @@ works and exits 0: the CLI prints its overview (`cli/src/help.rs`), then, if pai
 proxy, waits up to 2.5 s for the extension in `status` and forwards `["help"]` as a normal `req`,
 printing its `stdout` (the browser command list) below. If any step fails it prints why (not
 paired, proxy unreachable, extension switched off) and points at `bvl skills get core --ref commands`.
-`help <browser command>`, `<browser command> --help` and `--json` help are forwarded as before.
+`help <browser command>`, `<browser command> --help` and `--json` help are forwarded as a `req` (without the 2.5 s extension check); when not paired, text help fails locally with exit 1.
 
 `doctor` runs these checks in order and prints ✓/!/✗ with a one-line fix: config (exists, secret,
-mode 0600 on Unix), managed folder (`pairing.json` matches the config, files match the bundled
+mode 0600 on Unix), managed folder (`pairing.json` matches the config, the folder's `manifest.json` version matches the bundled
 version), proxy (port reachable, handshake, version), extension (connected, version equals the
 CLI's, browser version ≥ 127) and a round trip (`help` as a normal `req`, with latency). It reads
 the extension's info from the proxy's `status` reply, so there is no extra message type. It exits 1
 if any check fails (version mismatches only warn). `--json` prints `{version, ok, checks:[{name,
 status: pass|warn|fail|skip|fixed, message, fix?}]}`. `--quick` skips the round trip and does not
 start a proxy. `--fix` does only safe repairs: chmod 0600 on `config.json`, rewrite the managed
-folder, restart an idle proxy (never one with pending requests). It never re-pairs. Without
+folder, restart an idle proxy (never one with pending requests) and retry a failed round trip once. It never re-pairs. Without
 `--quick` it starts the proxy on demand, like every other command.
 
 If the proxy is not reachable, the CLI starts `bvl proxy` detached (Unix: own process group;

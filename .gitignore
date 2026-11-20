@@ -2,3 +2,4 @@ cli/target
 extension/node_modules
 extension/dist
 extension/key.pem
+.nerve/

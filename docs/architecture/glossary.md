@@ -15,8 +15,8 @@ Project terms as used in code and docs.
 | managed | The extension runs from the folder that `bvl setup` wrote, with `pairing.json` present. Only managed extensions are auto-updated. See [runtime.md](runtime.md). | a dev build loaded from `extension/dist` |
 | `pairing.json` | `{secret, port}` in the managed folder. It overrides the secret and port stored in the extension. | `config.json` (the CLI's copy of the secret) |
 | prime | Forcing one frame in a hidden tab (a 1×1 capture) so trusted input is delivered. See [automation.md](automation.md). | — |
-| proxy | `bvl proxy`: a stateless relay on `127.0.0.1` that exits when idle. | an HTTP proxy |
-| ref (`@eN`) | Element handle from the last `snapshot` of a tab. Numbering restarts on every snapshot. See [automation.md](automation.md). | tab id (`tN`) |
+| proxy | `bvl proxy`: a relay on `127.0.0.1` with no durable state (only in-flight requests and the idle clock) that exits when idle. | an HTTP proxy |
+| ref (`@eN`) | Element handle from a `snapshot` of a tab. Stable for the same element and monotonic per session; a navigation clears the tab's refs but never reuses numbers. See [automation.md](automation.md). | tab id (`tN`) |
 | revoke | Removing control from a tab (popup Stop, closing the debug bar, `close`), which also detaches the debugger. | closing the tab |
 | session | A named agent context (`--session`, `BVL_SESSION`, default `default`) with a current tab. It lives in the extension. | browser session, `chrome.storage.session` |
 | shared tab | A tab the user approved (`control: 'user'`). `open <url>` never navigates it. | agent tab |
