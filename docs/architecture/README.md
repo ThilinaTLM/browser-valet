@@ -4,8 +4,8 @@ Browser Valet lets coding agents drive the user's **real**, day-to-day Chromium 
 cookies, open tabs) through `bvl`, instead of a separate test instance. Its commands stay close to
 [agent-browser](https://github.com/vercel-labs/agent-browser), which agents already know. It has three parts: a thin Rust CLI, a stateless relay proxy (the same
 binary), and an MV3 TypeScript extension that owns all state and logic. It is pre-1.0 (0.x). CI
-builds and tests the CLI on Linux, macOS and Windows. The extension has unit tests and a small
-Chrome-for-Testing E2E smoke suite on Linux; other browser behaviour is verified by hand. Edge, Brave and other Chromium browsers are
+builds and tests the CLI on Linux, macOS and Windows. The extension has unit tests and a
+Chrome-for-Testing E2E suite on Linux; other browser behaviour is verified by hand. Edge, Brave and other Chromium browsers are
 expected to work, but they are not tested.
 
 ```mermaid
@@ -72,12 +72,15 @@ flowchart LR
 
 ## Settled directions
 
-Do not reintroduce these without a proposal ([proposals](../proposals/README.md)):
+Do not reintroduce these without a proposal in [`docs/proposals/`](../proposals/):
 
 - Stateful daemon, or argument parsing in the CLI (replaced by the thin CLI and stateless proxy in v0.2).
 - `.crx` or self-hosted extension install: Chrome rejects off-store `.crx`. Load unpacked from the managed folder.
 - Manual pairing as the default flow: `pairing.json` in the managed folder replaces it. `bvl pair` remains for dev builds.
-- Cookies/storage/state commands, network interception (routing, mocking, blocking, header changes), video/trace, and emulation beyond `set viewport` / `set media` on agent tabs (no `set device/geo/offline/headers/credentials`): they would modify the real profile, change what servers see, or aren't needed. `pdf` is allowed (read-only). Read-only network *observation* (`network requests`) is allowed under the redaction rules in [security.md](security.md).
+- Cookies/storage/state commands (`cookies`, `storage`, `state save/load`, the `auth` vault), network interception (`network route`/`unroute`, mocking, blocking, header changes), `har`, `addinitscript`/`--init-script`, `clipboard` (system clipboard), video/trace, and emulation beyond `set viewport` / `set media` on agent tabs (no `set device/geo/offline/headers/credentials`): they would modify the real profile, change what servers see, or aren't needed. `pdf` is allowed (read-only). Read-only network *observation* (`network requests`) is allowed under the redaction rules in [security.md](security.md).
+- `wait --download`: needs the manifest `downloads` permission, which widens what the extension can see, and downloads land in the user's real Downloads folder. Revisit only with a security note.
+- agent-browser's browser launch and hosting options (`--cdp`/`connect`, `--profile`, `--headed`, `--engine`, `--proxy`, `--executable-path`, `--extension`, `install`, `get cdp-url`, `--restore`, `--namespace`): they don't apply to the user's real browser.
+- Heavy upstream features not needed now: `record`, `trace`, `profiler`, `stream`, `dashboard`, `mcp` server, `plugin`, `webmcp` (needs Chrome flags in the user's browser), `react *` (needs a hook installed before the page loads).
 - Firefox support: there is no `chrome.debugger` there.
 
 ## Freedom

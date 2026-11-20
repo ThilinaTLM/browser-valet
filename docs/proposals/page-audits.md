@@ -1,6 +1,6 @@
 # Page audits: `a11y` and `vitals`
 
-**Status:** Draft · **Area:** automation
+**Status:** Draft · **Labels:** feature, automation
 
 ## Problem
 
@@ -31,7 +31,7 @@ accessibility and performance checks. agent-browser has `a11y` (axe-core audit; 
 
 ## Priority
 
-Low. Useful for web developers, but not needed for general browsing. Do it after the parity work.
+Low. Useful for web developers, but not needed for general browsing.
 
 ## Open questions
 

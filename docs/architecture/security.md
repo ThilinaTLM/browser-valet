@@ -1,5 +1,7 @@
 # Security and consent
 
+<!-- size: reviewed (every MUST guards consent or secrets) -->
+
 How local processes, web pages and agents are kept away from tabs and secrets they weren't given.
 Code: `cli/src/proxy.rs`, `cli/src/main.rs`, `extension/src/background/{connection,tabs,command,dispatch}.ts`.
 The wire details are in [protocol.md](protocol.md).
@@ -10,7 +12,7 @@ The wire details are in [protocol.md](protocol.md).
 - **MUST** keep the Origin rule at WebSocket upgrade: no Origin → `cli` only; `chrome-extension://fekhggniifjffgnkljlblgfcoolaonbm` → `ext` only; any other Origin → 403. *Why:* web pages can open WebSockets to localhost.
 - **MUST NOT** change the manifest `key` (it pins the extension ID). *Why:* the proxy accepts only that origin, and the managed folder already loaded in users' browsers carries it.
 - **MUST** keep the secret off the wire and out of web-accessible resources. Store it with mode 0600 on Unix (`config.json`, `pairing.json`). *Why:* it is the only credential. Windows relies on the per-user ACLs of `%APPDATA%` (`config.json`) and `%LOCALAPPDATA%` (`pairing.json`), with no explicit protection.
-- **MUST** route every tab access through `Ctx.tab()` / `isControlled()`. Never call CDP on a tab id taken straight from argv. *Why:* this is the consent boundary.
+- **MUST** route every tab access through `Ctx.tab()` / `isControlled()`. Never call CDP on a tab id taken straight from argv. *Why:* this is the consent boundary. The one narrowing: `dialog` falls back to the session's current tab when `ctx.tab()` refuses only because a dialog blocks it (`currentTabIgnoringDialog`).
 - **MUST NOT** let `open <url>` navigate a shared tab. It opens an agent tab instead. *Why:* sharing a tab means "look and act here", not "replace my page".
 - **MUST** redact user-typed text from the activity log. *Why:* agents type passwords and personal data. The popup and session storage are visible to anyone at the machine.
 - **MUST** log `batch` per item (each through its own command's redaction) and never as a raw line; see [automation.md](automation.md).
@@ -33,9 +35,9 @@ The wire details are in [protocol.md](protocol.md).
 
 `network requests` / `network request <id>` (`network.ts`, `commands/network.ts`) are read-only: they change no traffic and nothing in the profile. They still expose what page JS cannot read (`HttpOnly` cookies, `Authorization`), so:
 
-- **MUST** redact credentials at ingestion, with no flag that reveals them: the headers `Cookie`, `Set-Cookie`, `Authorization`, `Proxy-Authorization`, `X-Api-Key`, `X-Csrf-Token`, `X-Xsrf-Token` and any header whose name looks like a token, secret, key, session, csrf/xsrf or `auth`; secret-like query values in URLs; `password`/`token`/`secret`/`api key`/`csrf`-like fields in JSON, urlencoded and multipart request bodies. *Why:* the buffer, `--json` output and the agent's context must never hold the user's session.
+- **MUST** redact credentials at ingestion, with no flag that reveals them: the headers `Cookie`, `Set-Cookie`, `Authorization`, `Proxy-Authorization`, `X-Api-Key`, `X-Csrf-Token`, `X-Xsrf-Token` and any header whose name looks like a token, secret, API key, credential, session, csrf/xsrf or `auth`/`authorization`; secret-like query values in URLs; password, token, secret, API key, credential, csrf, PIN, OTP, private key and session-id fields in JSON, urlencoded and multipart request bodies (`isCredentialHeader`, `isSecretKey` in `network.ts`). *Why:* the buffer, `--json` output and the agent's context must never hold the user's session.
 - **MUST** redact the obvious token fields (`access_token`, `refresh_token`, `id_token`, `token`, `secret`, `password`, `client_secret`, at any depth) of JSON response bodies before output. Other body content (HTML, free text, non-listed JSON keys) is returned as is: it is page content, like `get text`. *Why:* OAuth token endpoints answer with bearer tokens.
-- **MUST** show text bodies only, capped at 32 KB; binary bodies are not returned. *Why:* size, and secrets in binary blobs cannot be redacted.
+- **MUST** show text bodies only, capped at 32,768 characters; binary bodies are not returned. *Why:* size, and secrets in binary blobs cannot be redacted.
 - **MUST** keep bodies out of the activity log: `network` logs `network requests` (with `--type/--method/--status` values) or `network request <id>`; `--filter` text is redacted.
 - **MUST** use `ctx.tab()` (controlled tabs only), record lazily (`Network.enable` on the first `network` command per tab) and keep at most 500 entries per tab in memory. The buffer is dropped when the debugger session ends (`cdp.onDetached`: revoke, user detach, a navigation that swaps the renderer, tab close). *Why:* no recording on tabs the agent never asked about, and nothing survives a revoke.
 - Not built: `network route`/`unroute` (interception: the document-only navigation guard under [Guardrails](#guardrails) never alters traffic) and `har` (would write whole bodies and headers to disk).
@@ -82,5 +84,5 @@ The user's policy lives in `chrome.storage.local` key `guardrails` (set in the p
 | Handshake, Origin rule, manifest `key` | High | relay tests (`cli/tests/relay.rs` covers bad MAC, origin 403, role mismatch, fake server); user sign-off |
 | Consent paths (`tabs.ts`, `Ctx.tab()`, opener grant, revoke) | High | manual approve/deny/revoke/debug-bar test; user sign-off for any widening |
 | Guardrails (`guardrails.ts`, domain policy, confirmation cards) | High | unit tests for matching and merge; E2E for block, allow and deny; user sign-off |
-| Activity-log content | Medium | check new commands with free-text args against `SECRET_ARGS` |
+| Activity-log content | Medium | give new commands with free-text args the right `show` / `showFlags` / `log` (`logArgs` in `command.ts`) |
 | File paths in `res.files` / `upload` | Medium | any new file-writing command is a security change |
