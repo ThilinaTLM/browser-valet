@@ -109,7 +109,7 @@ that folder. Then click the Browser Valet toolbar icon and **switch it on**. `se
 extension connects:
 
 ```
-✓ Connected: Google Chrome 142 (extension v0.1.0)
+✓ Connected: Google Chrome 142 (extension v0.2.1)
 ```
 
 There is no pairing step. `setup` puts a `pairing.json` with the shared secret in the extension
@@ -159,20 +159,20 @@ bvl tab t4                          # asks you in the browser, waits for the ans
 bvl close                           # close the session's tabs, release yours
 ```
 
-Run `bvl --help` for an overview and every command (it works before setup too). For agents: `bvl skills get core` (add `--full` for the command
+Run `bvl --help` for an overview and every command (the overview works before setup too; the command list needs the extension). For agents: `bvl skills get core` (add `--ref commands` for the command
 reference).
 
 | Area | Commands |
 |---|---|
 | Navigation | `open` (`goto`, `navigate`), `back`, `forward`, `reload`, `close` |
-| Tabs | `tab`, `tab new [--label L] [url]`, `tab <tN\|label>`, `tab close` |
-| Reading | `snapshot [-i -c -d N -s sel -u]`, `get text\|html\|value\|attr\|title\|url\|count\|box`, `is visible\|enabled\|checked`, `screenshot [--full]`, `pdf <path>`, `set viewport\|media` (agent tabs), `eval` (`-b`, `--stdin`) |
-| Interaction | `click [--new-tab]`, `dblclick`, `hover`, `focus`, `fill`, `type`, `press`, `keydown`, `keyup`, `keyboard`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview`, `drag`, `upload`, `find …` |
+| Tabs | `tab`, `tab new [--label L] [url]`, `tab <tN\|label>`, `tab show`, `tab close`, `session list\|info` |
+| Reading | `snapshot [-i -c -d N -s sel -u]`, `get text\|html\|value\|attr\|title\|url\|count\|box`, `is visible\|enabled\|checked`, `screenshot [--full]`, `pdf <path>`, `set viewport\|media` (agent tabs), `eval` (`-b`, `--stdin`), `read [url]`, `frame` |
+| Interaction | `click [--new-tab]`, `dblclick`, `hover`, `focus`, `fill`, `type`, `press`, `keydown`, `keyup`, `keyboard`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview`, `drag`, `upload`, `find …`, `mouse`, `pushstate`, `batch` |
 | Waiting | `wait <t\|ms>`, `--text`, `--url <glob>`, `--load`, `--fn`, `--state`; `dialog status\|accept\|dismiss` |
-| Debugging | `console`, `errors` |
+| Debugging | `console`, `errors`, `network requests\|request`, `highlight` |
 
 Global flags: `--json` (`{success, data, error}`), `--session <name>` (or `BVL_SESSION`),
-`--timeout <ms>`. CLI-local commands: `setup`, `skills`, `doctor`, `pair`, `unpair`, `status`, `stop`,
+`--timeout <ms>`, plus the guardrail flags `--max-output`, `--content-boundaries`, `--allowed-domains`, `--confirm-actions`. CLI-local commands: `setup`, `skills`, `doctor`, `pair`, `unpair`, `status`, `stop`,
 `proxy`, `version`.
 
 Deliberately left out: cookies/storage/state, network interception (read-only `network requests` is available), device emulation, video/trace —
@@ -209,7 +209,7 @@ Controlled tabs show an **AI** badge on the toolbar icon.
 | `BVL_PORT` | Proxy port (default `47823`; set it before `bvl setup`, or use `bvl pair --port` / the popup's Settings for manual pairing) |
 | `BVL_SESSION` | Default session name |
 | `BVL_IDLE_TIMEOUT` | Proxy idle shutdown in seconds (default 600, `0` = never) |
-| `BVL_CONFIG_DIR` | Override the config directory (tests); also the data directory unless `BVL_DATA_DIR` is set |
+| `BVL_CONFIG_DIR` | Override the config directory (tests); also the data and log directories unless `BVL_DATA_DIR` is set |
 | `BVL_DATA_DIR` | Override the data directory (extension, skills, `proxy.log`) |
 
 | | Linux | macOS | Windows |
@@ -248,7 +248,6 @@ pnpm watch                                   # rebuild on change, then reload th
 
 ## Limitations
 
-- Cross-origin (out-of-process) iframes aren't included in snapshots; same-origin ones are.
 - Chrome pages (`chrome://…`, the Web Store) can't be controlled.
 - One browser connects at a time (the most recent one wins).
 - Firefox isn't supported (no `chrome.debugger`).

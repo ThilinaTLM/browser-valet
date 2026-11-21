@@ -44,7 +44,7 @@ Pass `--session <name>` (or set `BVL_SESSION`) so you don't take over another ag
 bvl --session task-42 open https://example.com
 ```
 
-`bvl --session task-42 close` closes the tabs that session opened when you're done.
+`bvl --session task-42 close` closes the tabs that session opened, and releases a shared current tab without closing it, when you're done.
 
 ## Tabs and consent
 
@@ -116,7 +116,7 @@ snapshot: `--outline` lists headings, `--filter <text>` returns matching section
 `read`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 `screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
 Full list with arguments and global flags: `bvl skills get core --ref commands`.
-`bvl <command> --help` for details; `bvl --help` gives the overview and the full command list.
+`bvl <command> --help` for details; `bvl --help` gives the overview and, once the extension is connected, the full command list.
 
 ## Tips
 
@@ -176,7 +176,7 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
   waited briefly and tried other points of the element, so the overlay is real: dismiss it, re-snapshot, retry.
   A button that only appears on hover: `hover` its row first, or `focus` it and `press Enter`.
 - A `confirm`/`prompt` dialog pauses the page: `bvl dialog accept` or `bvl dialog dismiss`.
-  Alerts are accepted automatically.
+  Alerts and `beforeunload` prompts are accepted automatically.
 - Known sequences cost one call as `bvl batch "fill @e1 a@b.c" "fill @e2 pw" "click @e3" "wait --url **/home"`
   (`--bail` stops at the first failure; snapshot first, batch only steps whose refs you already know).
   Errors name their step (`✗ [3/4] click @e3: …`) and a `batch: …` summary line follows.
