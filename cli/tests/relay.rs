@@ -960,3 +960,18 @@ fn help_with_the_extension_off_says_so_quickly() {
     assert!(s.contains("Start here") && s.contains("switch it on"), "{s}");
     assert!(t.elapsed() < Duration::from_secs(6), "{:?}", t.elapsed());
 }
+
+#[test]
+fn cli_status_waits_briefly_for_the_extension() {
+    let p = start(&[]);
+    let port = p.port;
+    // The extension connects a moment after `bvl status` asked (as after a fresh proxy start).
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        try_connect(port, "ext", Some(EXT_ORIGIN), true).unwrap()
+    });
+    let s = bvl(&p, &["status"]);
+    let _e = t.join().unwrap();
+    let s = String::from_utf8_lossy(&s.stdout).to_string();
+    assert!(s.contains("extension: Test Chrome 1"), "{s}");
+}

@@ -392,12 +392,28 @@ fn finish(res: &Value, json_out: bool) -> Result<i32> {
     Ok(code)
 }
 
+/// How long `status` and top-level help wait for the extension. It retries about once a second, so
+/// it needs a moment to connect to a freshly started (or restarted) proxy.
+pub(crate) const EXT_GRACE: Duration = Duration::from_millis(2500);
+
+/// The proxy's `status` reply, polled until an extension is connected or `wait` has passed.
+pub(crate) fn status_with_ext(c: &Config, wait: Duration) -> Result<Value> {
+    let end = Instant::now() + wait;
+    loop {
+        let mut ws = connect(c)?;
+        send(&mut ws, json!({"t":"status"}))?;
+        let v = recv(&mut ws)?;
+        if v["ext"].is_object() || Instant::now() >= end {
+            return Ok(v);
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
 fn status(json_out: bool) -> Result<i32> {
     let c = paired();
     ensure_proxy(&c)?;
-    let mut ws = connect(&c)?;
-    send(&mut ws, json!({"t":"status"}))?;
-    let v = recv(&mut ws)?;
+    let v = status_with_ext(&c, EXT_GRACE)?;
     if json_out {
         println!("{v}");
         return Ok(0);
