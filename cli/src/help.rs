@@ -1,9 +1,8 @@
 //! `bvl help` / `--help` / `-h`: the CLI owns the overview and the help of its local commands; the browser
 //! command list and per-command help come from the extension (forwarded as a normal `help` req).
-use crate::{connect, ensure_proxy, load, recv, request, send, Config, VERSION};
+use crate::{ensure_proxy, load, request, status_with_ext, Config, EXT_GRACE, VERSION};
 use anyhow::{bail, Result};
-use serde_json::{json, Value};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// A command handled by the CLI itself (never forwarded).
 struct Local {
@@ -40,7 +39,8 @@ const LOCAL: &[Local] = &[
         usage: "status [--json]",
         summary: "show the proxy and extension connection",
         details: "\"extension: <browser> …\" means ready. \"not connected\" usually means the extension is switched\n\
-                  off: ask the user to click the Browser Valet icon and switch it on. Starts the proxy if needed.",
+                  off: ask the user to click the Browser Valet icon and switch it on. Starts the proxy if needed and\n\
+                  waits up to 2.5 s for the extension to connect.",
     },
     Local {
         name: "doctor",
@@ -201,17 +201,9 @@ fn browser_help() -> Result<String> {
 /// The extension reconnects about once a second after the proxy starts; don't wait the proxy's full
 /// request timeout for one that is switched off.
 fn wait_for_ext(c: &Config) -> Result<()> {
-    let end = Instant::now() + Duration::from_millis(2500);
-    loop {
-        let mut ws = connect(c)?;
-        send(&mut ws, json!({"t":"status"}))?;
-        let v: Value = recv(&mut ws)?;
-        if v["ext"].is_object() {
-            return Ok(());
-        }
-        if Instant::now() >= end {
-            return Err(NotConnected.into());
-        }
-        std::thread::sleep(Duration::from_millis(250));
+    if status_with_ext(c, EXT_GRACE)?["ext"].is_object() {
+        Ok(())
+    } else {
+        Err(NotConnected.into())
     }
 }

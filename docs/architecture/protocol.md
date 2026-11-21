@@ -159,6 +159,8 @@ Handled by the CLI itself (never forwarded): `setup [--browser B] [--open] [--no
 `skills [list | get <name> [--full] [--ref R] | path [name] | install [--dir D]]`,
 `pair <secret> [--port N]`, `unpair`, `status`, `doctor [--json] [--quick] [--fix]`, `proxy [--idle-timeout S] [--port N]`
 (foreground relay), `stop`, `version`/`--version`.
+`bvl status` (text and `--json`) starts the proxy if needed and repeats the `status` message for up
+to 2.5 s while `ext` is `null`, so an extension still reconnecting to a fresh proxy is reported.
 Everything else is forwarded as a `req`.
 
 Help never runs a command. `<local command> --help`/`-h` and `help <local command>` print that

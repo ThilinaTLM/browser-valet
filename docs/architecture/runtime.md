@@ -92,7 +92,7 @@ Request lifecycle rules (in the proxy):
 
 ## Gotchas
 
-- `bvl status` starts a proxy if none is running, so that it can report the extension. This is intended: any `bvl` command would start it anyway.
+- `bvl status` starts a proxy if none is running, so that it can report the extension. This is intended: any `bvl` command would start it anyway. It then polls the proxy's `status` for up to 2.5 s until an extension is connected, because the extension retries about once a second and would otherwise be reported as not connected on the first run.
 - On Windows the proxy is spawned with `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`. On Unix it gets its own process group. This path has no automated tests.
 - `BVL_EXT_WAIT_MS` (how long a request waits for an extension, default 10 s) is a test hook that production code also reads.
 - Writing the managed folder is synchronous inside the async proxy. That is fine at its size, but don't add heavy work there.
