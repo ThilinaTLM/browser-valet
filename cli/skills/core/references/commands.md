@@ -19,6 +19,7 @@ get text|html|value|attr|title|url|count|box [t] [attr]   get styles <t> [prop..
 wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob | --load s | --fn js
 read [url] [--outline] [--filter <text>]
 vitals [url]   # TTFB/FCP/LCP/CLS/INP + ratings; --json: {url,ttfb,fcp,lcp,cls,inp,ratings,notMeasurable}
+a11y [url] [--tags wcag2a,wcag2aa] [-s <css>]   # axe-core audit; violations by impact, @eN for snapshot elements
 screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
    [--screenshot-format png|jpeg] [--screenshot-quality <0-100>] [--screenshot-dir <dir>]
 diff screenshot [-o <file>] [-t <0-1>] [-f|--full]   # pixel diff vs the last screenshot of this tab (grey baseline, changes red); first call records the baseline, kept in memory only; --baseline <file> unsupported
@@ -51,7 +52,7 @@ Not allowed inside a batch: `batch`, `--session`, `--stdin`; `--timeout` applies
 actions echo their target (`click` → `{clicked:"@e3"}`, `fill` → `{filled}`, `press` → `{pressed}`, …), page reads add
 `origin`, `get attr|value` → `{value}`, `get count` → `{count,selector}`, `console` → `{messages:[{type,text,args}]}`,
 `errors` → `{errors:[{text,line,column,url}]}`, `dialog status` → `{hasDialog,type,message,defaultPrompt}`,
-`tab` → `{tabs:[{tabId,label,title,url,active,controlled,pending,…}]}`, `wait --url` → `{url}`, `wait --text` → `{text}`.
+`tab` → `{tabs:[{tabId,label,title,url,active,controlled,pending,…}]}`, `wait --url` → `{url}`, `wait --text` → `{text}`, `a11y` → `{axeVersion,url,counts,violations,incomplete}`.
 `click`, `dblclick`, `press`, `select` (and `find … click`) add `navigated:{url,title}` when they changed the page.
 `open`/`back`/`forward`/`reload`/`tab new` add `loaded:false` when `--timeout` hit before the load event and `status` (HTTP) when known.
 `unknown_command` errors add `suggestion` when a command name is close.

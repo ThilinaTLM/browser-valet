@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>A11y Fixture</title>
+  </head>
+  <body>
+    <main>
+      <h1>Audit me</h1>
+      <img id="noalt" width="10" height="10" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" />
+      <p id="low" style="color: #aaa; background: #fff">Low contrast text</p>
+      <input id="unlabelled" type="text" />
+      <label>Named <input id="named" type="text" /></label>
+      <button id="go">Go</button>
+      <section id="other">
+        <img id="other-img" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" />
+      </section>
+      <iframe id="inner" title="inner" width="400" height="200"></iframe>
+    </main>
+    <script>
+      // ?inner=<url> points the iframe at another site (an out-of-process iframe).
+      const inner = new URLSearchParams(location.search).get('inner');
+      if (inner) document.getElementById('inner').src = inner;
+    </script>
+  </body>
+</html>

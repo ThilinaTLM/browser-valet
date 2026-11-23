@@ -21,6 +21,16 @@ for (const [family, weights] of Object.entries(FONTS)) {
   }
 }
 
+// axe-core (MPL-2.0), loaded by `a11y` on first use and run in an isolated world. Shipped unmodified
+// with its license, as the MPL requires; NOTICE points to it.
+await copyFile('node_modules/axe-core/axe.min.js', 'dist/axe.min.js');
+await mkdir('dist/licenses', { recursive: true });
+await copyFile('node_modules/axe-core/LICENSE', 'dist/licenses/axe-core-LICENSE.txt');
+await copyFile(
+  'node_modules/axe-core/LICENSE-3RD-PARTY.txt',
+  'dist/licenses/axe-core-LICENSE-3RD-PARTY.txt',
+);
+
 // pairing.json only ever exists in bvl's managed folder, never in a build.
 await rm('dist/pairing.json', { force: true });
 

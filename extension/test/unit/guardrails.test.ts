@@ -108,6 +108,7 @@ describe('content boundaries', () => {
     const yes: [string, string[]][] = [
       ['snapshot', []],
       ['read', []],
+      ['a11y', []],
       ['console', []],
       ['errors', []],
       ['eval', ['1']],
