@@ -24,7 +24,8 @@ react suspense [--only-dynamic] [--json]
 ### Installing the hook
 
 - `open --enable react-devtools <url>` **always opens a fresh agent tab** (never navigates a
-  shared tab or an existing one; `open <url>` already refuses shared tabs). It registers the bundled script with
+  shared tab or an existing one; on a shared tab, `open <url>` already opens a new agent tab, and
+  `--enable` does the same). It registers the bundled script with
   `Page.addScriptToEvaluateOnNewDocument` (`runImmediately`), then navigates. `--enable` needs
   `showFlags` for the activity log. Env `BVL_ENABLE` is **dropped**: the CLI forwards only
   `BVL_SESSION` (`main.rs`), and it would need CLI and protocol changes.
@@ -34,8 +35,10 @@ react suspense [--only-dynamic] [--json]
   the script registered, then navigated. For hook-enabled tabs the extension **re-registers after every
   attach** (persisted flag) and reloads if the hook is missing. A spike must show this on a
   cross-site fixture.
-- **Scope:** the hook applies only to the origin given to `--enable`. On a cross-origin main-frame
-  navigation the script is removed (and the flag cleared), so it doesn't follow the tab to other sites.
+- **Scope:** the hook applies only to the origin given to `--enable`. The script itself checks
+  `location.origin` against it (baked in at registration) and **no-ops elsewhere**, because removal
+  after `frameNavigated` comes too late for the next page's first script. As a cleanup, a
+  cross-origin main-frame navigation also removes the script and clears the flag.
 - **Persisted state:** the script identifier is stored per tab in `state` (with a default).
   A worker restart does **not** drop the attachment (`cdp.ts`), so without it `react disable`
   could not remove the script. `react disable` (new, not upstream) removes it with
@@ -46,7 +49,10 @@ react suspense [--only-dynamic] [--json]
 
 ### Coexisting with the React DevTools extension
 
-Its hook is installed at `document_start`, before ours. Our script **never overwrites an existing
+Its hook is installed at `document_start`, and ordering against our init script is unknown. **Spike
+item:** with the extension loaded, which runs first? Fallbacks: make our hook complete enough to stand
+alone (renderers map, `getFiberRoots`, `onCommitFiberRoot`), or detect the existing hook and defer to it.
+Until then, the rule is: Our script **never overwrites an existing
 hook**: if `__REACT_DEVTOOLS_GLOBAL_HOOK__` exists, we read through it and register our listeners on it, and
 `renders` wraps `onCommitFiberRoot` and restores the previous one at stop. Reading an existing hook
 on **shared** tabs is not in v1: it exposes props and state beyond what `snapshot`/`read` show and needs a
