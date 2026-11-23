@@ -73,6 +73,55 @@ function urlMatches(url: string, pattern: string): boolean {
 /** How often `wait` forces a frame on a hidden tab (see `poll`). */
 const FRAME_EVERY_MS = 500;
 
+/**
+ * `networkidle`: the document has loaded and no resource finished loading for 500 ms. An observer
+ * (`PerformanceObserver`, type `resource`, not `buffered`) runs in an isolated world, so the page
+ * cannot see it and nothing of the page's performance timeline changes (no buffer size, no
+ * clearing: RUM scripts and `vitals` observe what they would anyway). It only sees resources that
+ * finish after it started, and no `Network.enable` is involved, so it is blind to a request still
+ * in flight (a long poll counts as idle until it finishes) and to anything that produces no
+ * resource-timing entry (WebSocket traffic, requests failing before a response).
+ */
+export async function waitNetworkIdle(ctx: Ctx, id: number): Promise<void> {
+  let world: number | undefined;
+  const setup = async (): Promise<number> => {
+    const tree = await cdp.send<{ frameTree: { frame: { id: string } } }>(id, 'Page.getFrameTree');
+    const w = await cdp.send<{ executionContextId: number }>(id, 'Page.createIsolatedWorld', {
+      frameId: tree.frameTree.frame.id,
+      worldName: 'bvl-idle',
+    });
+    await cdp.send(id, 'Runtime.evaluate', {
+      contextId: w.executionContextId,
+      expression: `(() => {
+        const s = { last: performance.now() };
+        new PerformanceObserver(() => { s.last = performance.now(); }).observe({ type: 'resource' });
+        globalThis.__bvlIdle = s;
+      })()`,
+    });
+    return w.executionContextId;
+  };
+  await poll(ctx, 'network idle', async () => {
+    try {
+      world ??= await setup();
+      const r = await cdp.send<{ result: { value?: { ready: boolean; quiet: number } } }>(
+        id,
+        'Runtime.evaluate',
+        {
+          contextId: world,
+          expression:
+            '({ ready: document.readyState === "complete", quiet: performance.now() - globalThis.__bvlIdle.last })',
+          returnByValue: true,
+        },
+      );
+      const v = r.result.value;
+      return !!v && v.ready && v.quiet >= 500;
+    } catch (e) {
+      world = undefined; // the page navigated and the world is gone: observe again
+      throw e;
+    }
+  });
+}
+
 async function poll(ctx: Ctx, what: string, check: () => Promise<boolean>): Promise<void> {
   const deadline = Date.now() + ctx.timeout;
   let framed = Date.now();
@@ -412,18 +461,7 @@ export const inspectionCommands: Command[] = [
         } else if (load === 'load') {
           await poll(ctx, 'load', () => ready('complete'));
         } else if (load === 'networkidle') {
-          // No new resource requests for 500ms after load.
-          let last = -1;
-          let since = Date.now();
-          await poll(ctx, 'network idle', async () => {
-            if (!(await ready('complete'))) return false;
-            const n = (await evaluate(id, "performance.getEntriesByType('resource').length")).value;
-            if (n !== last) {
-              last = n as number;
-              since = Date.now();
-            }
-            return Date.now() - since >= 500;
-          });
+          await waitNetworkIdle(ctx, id);
         } else throw new UserError('--load must be load|domcontentloaded|networkidle', 'bad_args');
       } else {
         throw new UserError('Usage: wait <target|ms> | --text | --url | --load | --fn', 'bad_args');

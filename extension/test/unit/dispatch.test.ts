@@ -225,6 +225,36 @@ describe('activity log (describe)', () => {
     expect(lastCommand()).toBe('diff snapshot --depth 3 --compact');
   });
 
+  it('logs diff url like open: both URLs, selector, depth and wait-until', async () => {
+    await run('diff', 'url', 'https://a.test/', 'https://b.test/', '-s', '#secret', '-d', '2');
+    expect(lastCommand()).toBe(
+      'diff url https://a.test/ https://b.test/ --selector #secret --depth 2',
+    );
+    await run('diff', 'url', 'a.test', 'b.test', '--screenshot', '--wait-until', 'load');
+    expect(lastCommand()).toBe('diff url a.test b.test --screenshot --wait-until load');
+  });
+
+  it('diff url: usage errors', async () => {
+    for (const argv of [
+      ['diff', 'url'],
+      ['diff', 'url', 'a.test'],
+      ['diff', 'url', 'a.test', 'b.test', 'c.test'],
+      ['diff', 'url', 'a.test', 'b.test', '--wait-until', 'soon'],
+      ['diff', 'url', 'a.test', 'b.test', '-d', '-1'],
+      ['diff', 'url', '', 'b.test'],
+      ['diff', 'url', 'a.test', '  '],
+      ['diff', 'url', 'a.test', 'b.test', '-t', '0.2'],
+      ['diff', 'url', 'a.test', 'b.test', '-o', 'x.png'],
+      ['diff', 'url', 'a.test', 'b.test', '--stdin'],
+      ['diff', 'url', 'a.test', 'b.test', '--baseline', 'x.png'],
+      ['diff', 'snapshot', '-t', '0.2'],
+      ['diff', 'screenshot', '-s', '#a'],
+    ]) {
+      const r = await run(...argv, '--json');
+      expect((JSON.parse(r.stdout) as { code?: string }).code, argv.join(' ')).toBe('bad_args');
+    }
+  });
+
   it('diff: usage errors', async () => {
     for (const argv of [
       ['diff'],

@@ -23,6 +23,7 @@ vitals [url]   # TTFB/FCP/LCP/CLS/INP + ratings; --json: {url,ttfb,fcp,lcp,cls,i
 a11y [url] [--tags wcag2a,wcag2aa] [-s <css>]   # axe-core audit; violations by impact, @eN for snapshot elements
 screenshot [target] [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
    [--screenshot-format png|jpeg] [--screenshot-quality <0-100>] [--screenshot-dir <dir>]
+diff url <u1> <u2> [--screenshot] [--full] [--wait-until load|domcontentloaded|networkidle] [-s] [-c] [-d N]   # opens each URL in the agent tab (like open), diffs ref-stripped snapshots (+ pixels with --screenshot); tab left on u2; --json: {diff,url1,url2,snapshot1,snapshot2,screenshot?}
 diff screenshot [-o <file>] [-t <0-1>] [-f|--full]   # pixel diff vs the last screenshot of this tab (grey baseline, changes red); first call records the baseline, kept in memory only; --baseline <file> unsupported
 eval <js> | eval -b <base64> | eval --stdin
 batch [--bail] [--omit-command] "<cmd>" "<cmd>" … | batch --stdin   # one command per line

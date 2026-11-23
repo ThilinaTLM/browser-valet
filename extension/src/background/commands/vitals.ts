@@ -48,7 +48,8 @@ export const vitalsCommands: Command[] = [
       if (url) {
         // Same rules as `open <url>`: never navigates a tab the user shared.
         const open = navigationCommands.find((c) => c.name === 'open');
-        opened = await open?.run(ctx, new Args([url], new Map()));
+        if (!open) throw new Error('open command missing');
+        opened = await open.run(ctx, new Args([url], new Map()));
         await new Promise((r) => setTimeout(r, 500));
       }
       const id = await ctx.tab();

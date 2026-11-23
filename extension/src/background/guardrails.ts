@@ -73,7 +73,7 @@ export function effectiveMaxOutput(a: Args, user: Guardrails = guardrails): numb
 }
 
 // Strings that identify the page rather than carry its content are never cut.
-const KEEP_WHOLE = new Set(['origin', 'url', 'title', 'selector']);
+const KEEP_WHOLE = new Set(['origin', 'url', 'url1', 'url2', 'title', 'selector']);
 
 function limitValue(v: unknown, max: number, key: string | undefined, hit: { n: number }): unknown {
   if (typeof v === 'string') {
@@ -143,7 +143,7 @@ export function isPageContent(command: string, a: Args, result: Result): boolean
         (result.data as { hasDialog?: boolean } | undefined)?.hasDialog === true
       );
     case 'diff':
-      return sub === 'snapshot';
+      return sub === 'snapshot' || sub === 'url';
     case 'network':
       return sub === 'request';
     default:
@@ -319,7 +319,7 @@ export function blockedError(
   );
 }
 
-/** Refuse agent-initiated navigation to `url` (open, tab new, click --new-tab, pushstate, read <url>, vitals <url>). */
+/** Refuse agent-initiated navigation to `url` (open, tab new, click --new-tab, pushstate, read <url>, vitals <url>, diff url). */
 export function assertNavigable(ctx: Ctx, url: string): void {
   const by = blockedBy(url, ctx.agentAllowedDomains);
   if (by) {
@@ -402,7 +402,7 @@ export function siteOf(url: string): string | undefined {
 const MAX_SITES = 200;
 
 /**
- * Before the agent navigates to `url` (open, tab new, click --new-tab, read <url>, vitals <url>): refuse it if
+ * Before the agent navigates to `url` (open, tab new, click --new-tab, read <url>, vitals <url>, diff url): refuse it if
  * the domain policy says so, then ask when `navigate-new-site` is in force and the session has
  * not been to this site yet. A site counts as visited once the agent was allowed there.
  */

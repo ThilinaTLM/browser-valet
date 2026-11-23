@@ -284,7 +284,8 @@ export async function execute(
     const navigates =
       NAVIGATES.has(cmd.name) ||
       (NAVIGATES_WITH_URL.has(cmd.name) && args.pos[0] !== undefined) ||
-      (cmd.name === 'tab' && args.pos[0] === 'new');
+      (cmd.name === 'tab' && args.pos[0] === 'new') ||
+      (cmd.name === 'diff' && args.pos[0] === 'url');
     let raw: Result | undefined;
     try {
       raw = await raceDialog(ctx, cmd.run(ctx, args));
