@@ -4,12 +4,12 @@
 open [url]   back   forward   reload   close
 tab [list | new [--label L] [url] | show [tN|label] | <tN|label> | close [tN|label]]
 snapshot [-i] [-c] [-d N] [-s <selector>] [-u] [--delta] [--full] [@ref]   # --json: {origin,title,refs,removedRefs,snapshot}
-click <t> [--new-tab] [--right]   dblclick <t>   hover <t>   focus <t>
+click <t> [--new-tab] [--right] [--human]   dblclick <t> [--human]   hover <t> [--human]   focus <t>
 fill <t> <text>   type <t> <text>   press <key>   keydown <key>   keyup <key>
 keyboard type|inserttext <text>   check <t>   uncheck <t>   select <t> <value...>
 scroll [up|down|left|right] [px] [--selector <t>]   scrollintoview <t>
-drag <src> <dst>   upload <t> <files...>   # <t> may be the button that opens the chooser
-mouse move <x> <y> [--duration ms] [--steps n]   mouse down|up [left|right|middle]   mouse wheel <dy> [dx]
+drag <src> <dst> [--human]   upload <t> <files...>   # <t> may be the button that opens the chooser
+mouse move <x> <y> [--duration ms] [--steps 1-240] [--human [--seed n]]   mouse down|up [left|right|middle]   mouse wheel <dy> [dx]
 highlight <t>   pushstate <url>   session list|info
 frame <selector|@ref|name|url|main>   # scope snapshot, selectors, get, eval, wait --fn to an iframe
 find role|text|label|placeholder|alt|title|testid <value> <action> [value] [--name n] [--exact]
@@ -31,7 +31,8 @@ network request <id>
 `get styles` prints a curated set (`--all` for every computed property, or name the properties).
 `frame` scopes later commands to an iframe until `frame main` or a navigation; `get title|url` stay on the tab.
 `highlight` outlines the element for 3 s. `pushstate` does client-side navigation (same origin only).
-`mouse` is for canvases, maps and sliders; on a background tab `mouse wheel` scrolls by script. Global flags: `--json`, `--session <name>`,
+`mouse` is for canvases, maps and sliders; on a background tab `mouse wheel` scrolls by script.
+`--human` moves the pointer along a curved, eased path from its last position (use it for hover menus, sliders and drag libraries that need intermediate `mousemove`s); `--seed n` makes the path repeatable. Background tabs deliver about one move per frame, so fewer events arrive than were sent. Global flags: `--json`, `--session <name>`,
 `--timeout <ms>` (default 25000), `--max-output <chars>`, `--content-boundaries`, `--allowed-domains <list>`, `--confirm-actions <list>`. `bvl <command> --help` shows details and examples.
 
 `batch` runs the items in order (quotes and backslashes like a shell, nothing expanded). Text output is each item's output

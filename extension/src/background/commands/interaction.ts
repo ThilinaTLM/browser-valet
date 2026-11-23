@@ -12,6 +12,7 @@ import {
   UserError,
 } from '../dom';
 import * as input from '../input';
+import { planHuman } from '../pointer';
 import { mainFrame } from '../refs';
 import { settle } from '../tabs';
 import { FILL_FORMATS, fillProblem, SPECIAL_INPUT_TYPES } from './fill-rules';
@@ -79,8 +80,26 @@ async function observeNav(tabId: number, act: () => Promise<Result | undefined>)
 // Actions on a resolved element (shared by direct commands and `find`)
 // ---------------------------------------------------------------------------
 
-async function clickEl(h: Handle, count = 1, button: input.Button = 'left'): Promise<Result> {
-  const { x, y, sessionId } = await clickPoint(h);
+/** Approach along a human path, then re-check actionability when the approach was slow. */
+async function approach(
+  h: Handle,
+  pt: { x: number; y: number; sessionId?: string },
+  opts: { allowDisabled?: boolean },
+): Promise<{ x: number; y: number; sessionId?: string }> {
+  const plan = planHuman(h.tabId, pt);
+  await input.move(h.tabId, pt.x, pt.y, pt.sessionId, plan);
+  return plan.durationMs > 200 ? clickPoint(h, opts) : pt;
+}
+
+async function clickEl(
+  h: Handle,
+  count = 1,
+  button: input.Button = 'left',
+  human = false,
+): Promise<Result> {
+  let pt = await clickPoint(h);
+  if (human) pt = await approach(h, pt, {});
+  const { x, y, sessionId } = pt;
   return observeNav(h.tabId, async () => {
     await input.click(h.tabId, x, y, { count, button, ...(sessionId ? { sessionId } : {}) });
     return DONE;
@@ -281,8 +300,10 @@ async function typeEl(h: Handle, text: string): Promise<Result> {
   return DONE;
 }
 
-async function hoverEl(h: Handle): Promise<Result> {
-  const { x, y, sessionId } = await clickPoint(h, { allowDisabled: true });
+async function hoverEl(h: Handle, human = false): Promise<Result> {
+  let pt = await clickPoint(h, { allowDisabled: true });
+  if (human) pt = await approach(h, pt, { allowDisabled: true });
+  const { x, y, sessionId } = pt;
   await input.move(h.tabId, x, y, sessionId);
   return DONE;
 }
@@ -546,11 +567,16 @@ export const interactionCommands: Command[] = [
     ],
     show: Infinity,
     group: 'Interaction',
-    usage: 'click <target> [--new-tab] [--right]',
+    usage: 'click <target> [--new-tab] [--right] [--human]',
     summary: 'Click an element (@ref or CSS selector)',
     flags: [
       { name: 'new-tab', type: 'bool', desc: "Open the link's URL in a new agent tab" },
       { name: 'right', type: 'bool', desc: 'Right-click' },
+      {
+        name: 'human',
+        type: 'bool',
+        desc: 'Approach along a reproducible eased curve from the last pointer position',
+      },
     ],
     async run(ctx, a) {
       const h = await element(ctx, target(a));
@@ -562,7 +588,7 @@ export const interactionCommands: Command[] = [
         if (!href) throw new UserError('Element is not a link');
         return openInNewTab(ctx, href);
       }
-      const r = await clickEl(h, 1, a.has('right') ? 'right' : 'left');
+      const r = await clickEl(h, 1, a.has('right') ? 'right' : 'left', a.has('human'));
       return warn(withData(r, { clicked: target(a) }), multi(h, target(a)));
     },
   },
@@ -570,11 +596,18 @@ export const interactionCommands: Command[] = [
     name: 'dblclick',
     show: Infinity,
     group: 'Interaction',
-    usage: 'dblclick <target>',
+    usage: 'dblclick <target> [--human]',
     summary: 'Double-click an element',
+    flags: [
+      {
+        name: 'human',
+        type: 'bool',
+        desc: 'Approach along a reproducible eased curve from the last pointer position',
+      },
+    ],
     async run(ctx, a) {
       const h = await element(ctx, target(a));
-      const r = await clickEl(h, 2);
+      const r = await clickEl(h, 2, 'left', a.has('human'));
       return warn(withData(r, { clicked: target(a) }), multi(h, target(a)));
     },
   },
@@ -592,11 +625,18 @@ export const interactionCommands: Command[] = [
   {
     name: 'hover',
     group: 'Interaction',
-    usage: 'hover <target>',
+    usage: 'hover <target> [--human]',
     summary: 'Move the mouse over an element',
+    flags: [
+      {
+        name: 'human',
+        type: 'bool',
+        desc: 'Approach along a reproducible eased curve from the last pointer position',
+      },
+    ],
     async run(ctx, a) {
       const h = await element(ctx, target(a));
-      await hoverEl(h);
+      await hoverEl(h, a.has('human'));
       return warn(done({ hovered: target(a) }), multi(h, target(a)));
     },
   },
@@ -772,8 +812,9 @@ export const interactionCommands: Command[] = [
     name: 'drag',
     show: Infinity,
     group: 'Interaction',
-    usage: 'drag <source> <target>',
+    usage: 'drag <source> <target> [--human]',
     summary: 'Drag one element onto another',
+    flags: [{ name: 'human', type: 'bool', desc: 'Drag along a reproducible eased curve' }],
     async run(ctx, a) {
       const from = await clickPoint(await element(ctx, target(a)));
       const to = await clickPoint(await element(ctx, a.need(1, 'drop target')), {
@@ -782,7 +823,9 @@ export const interactionCommands: Command[] = [
       if (from.sessionId !== undefined || to.sessionId !== undefined) {
         throw new UserError('drag does not work inside a cross-origin iframe', 'bad_args');
       }
-      await input.drag(await ctx.tab(), pt(from), pt(to));
+      const tab = await ctx.tab();
+      const path = a.has('human') ? planHuman(tab, pt(to), { from: pt(from) }) : undefined;
+      await input.drag(tab, pt(from), pt(to), path);
       return done({ dragged: true, source: target(a), target: a.need(1, 'drop target') });
     },
   },

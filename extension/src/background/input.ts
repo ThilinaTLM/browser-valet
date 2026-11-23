@@ -2,6 +2,8 @@
 
 import * as cdp from './cdp';
 import { UserError } from './errors';
+import type { Point } from './human-path';
+import { setPointer } from './pointer';
 
 /**
  * Background tabs don't render, and Chrome drops input aimed at a hidden document that has no
@@ -51,8 +53,48 @@ export async function sendInput(
 
 export type Button = 'left' | 'right' | 'middle';
 
-export async function move(tabId: number, x: number, y: number, sessionId?: string): Promise<void> {
+/** A path to move along before the real action: events spaced `delayMs` apart. */
+export interface Travel {
+  points: Point[];
+  delayMs: number;
+}
+
+/**
+ * Dispatch `mouseMoved` along a path. A hidden page acknowledges moves only when it draws a frame,
+ * so there they are sent without waiting (the order is kept) and the renderer coalesces them to
+ * about one per frame.
+ */
+async function travel(
+  tabId: number,
+  hidden: boolean,
+  t: Travel,
+  extra: Record<string, unknown>,
+  sessionId?: string,
+): Promise<void> {
+  for (let i = 0; i < t.points.length; i++) {
+    const params = { type: 'mouseMoved', ...t.points[i], modifiers, ...extra };
+    if (hidden)
+      cdp.send(tabId, 'Input.dispatchMouseEvent', params, sessionId).catch(() => undefined);
+    else await cdp.send(tabId, 'Input.dispatchMouseEvent', params, sessionId);
+    const p = t.points[i];
+    if (p) setPointer(tabId, p.x, p.y);
+    if (i < t.points.length - 1 && t.delayMs > 0) await sleep(t.delayMs);
+  }
+}
+
+export async function move(
+  tabId: number,
+  x: number,
+  y: number,
+  sessionId?: string,
+  path?: Travel,
+): Promise<void> {
   const hidden = await prime(tabId);
+  if (path) {
+    await travel(tabId, hidden, path, {}, sessionId);
+    return;
+  }
+  setPointer(tabId, x, y);
   await sendInput(
     tabId,
     hidden,
@@ -70,11 +112,15 @@ export async function click(
     button = 'left',
     count = 1,
     sessionId,
-  }: { button?: Button; count?: number; sessionId?: string } = {},
+    path,
+  }: { button?: Button; count?: number; sessionId?: string; path?: Travel } = {},
 ): Promise<void> {
   const hidden = await prime(tabId);
-  // Hover first like a real user, except on hidden pages where moves are never acknowledged.
-  if (!hidden) {
+  setPointer(tabId, x, y);
+  if (path) {
+    await travel(tabId, hidden, path, {}, sessionId);
+  } else if (!hidden) {
+    // Hover first like a real user, except on hidden pages where moves are never acknowledged.
     await cdp.send(
       tabId,
       'Input.dispatchMouseEvent',
@@ -107,6 +153,7 @@ export async function drag(
   tabId: number,
   from: { x: number; y: number },
   to: { x: number; y: number },
+  path?: Travel,
 ): Promise<void> {
   let dragData: unknown;
   const off = cdp.onEvent((id, method, params) => {
@@ -124,16 +171,20 @@ export async function drag(
       button: 'left',
       clickCount: 1,
     });
-    const steps = 10;
-    for (let i = 1; i <= steps; i++) {
-      const x = from.x + ((to.x - from.x) * i) / steps;
-      const y = from.y + ((to.y - from.y) * i) / steps;
-      await sendInput(tabId, hidden, 'Input.dispatchMouseEvent', {
-        type: 'mouseMoved',
-        x,
-        y,
-        button: 'left',
-      });
+    if (path) {
+      await travel(tabId, hidden, path, { button: 'left', buttons: 1 });
+    } else {
+      const steps = 10;
+      for (let i = 1; i <= steps; i++) {
+        const x = from.x + ((to.x - from.x) * i) / steps;
+        const y = from.y + ((to.y - from.y) * i) / steps;
+        await sendInput(tabId, hidden, 'Input.dispatchMouseEvent', {
+          type: 'mouseMoved',
+          x,
+          y,
+          button: 'left',
+        });
+      }
     }
     if (dragData !== undefined) {
       for (const type of ['dragEnter', 'dragOver', 'drop']) {
@@ -146,6 +197,7 @@ export async function drag(
       button: 'left',
       clickCount: 1,
     });
+    setPointer(tabId, to.x, to.y);
   } finally {
     off();
     await cdp.send(tabId, 'Input.setInterceptDrags', { enabled: false }).catch(() => undefined);

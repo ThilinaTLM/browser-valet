@@ -73,6 +73,79 @@ describe('mouse', () => {
   });
 });
 
+describe('mouse --human', () => {
+  const setup = () => {
+    giveTab('s', 5, 't1', 's');
+    mock.chrome.debugger.sendCommand = vi.fn((_t, method: string, p?: object) =>
+      Promise.resolve(method === 'Runtime.evaluate' ? { result: { value: 'visible' } } : (p ?? {})),
+    ) as never;
+  };
+  const moves = () =>
+    vi
+      .mocked(mock.chrome.debugger.sendCommand)
+      .mock.calls.filter((c) => c[1] === 'Input.dispatchMouseEvent')
+      .map((c) => c[2] as { x: number; y: number });
+
+  it('same seed gives the same curve, ending on the target', async () => {
+    setup();
+    await run('s', 'mouse', 'move', '5', '5');
+    await run(
+      's',
+      'mouse',
+      'move',
+      '300',
+      '200',
+      '--human',
+      '--seed',
+      '42',
+      '--steps',
+      '12',
+      '--duration',
+      '0',
+    );
+    const first = moves().slice(1);
+    expect(first).toHaveLength(12);
+    expect(first.at(-1)).toMatchObject({ x: 300, y: 200 });
+    // back to the same start, then again with the same seed
+    await run('s', 'mouse', 'move', '5', '5');
+    vi.mocked(mock.chrome.debugger.sendCommand).mockClear();
+    await run(
+      's',
+      'mouse',
+      'move',
+      '300',
+      '200',
+      '--human',
+      '--seed',
+      '42',
+      '--steps',
+      '12',
+      '--duration',
+      '0',
+    );
+    expect(moves()).toEqual(first);
+    const onLine = first.every((p) => Math.abs((p.y - 5) / (p.x - 5) - 195 / 295) < 1e-6);
+    expect(onLine).toBe(false);
+  });
+
+  it('enforces --steps 1-240 and --seed rules', async () => {
+    setup();
+    for (const steps of ['0', '241', '1.5']) {
+      const r = await run('s', 'mouse', 'move', '1', '1', '--steps', steps);
+      expect(r.exitCode).toBe(1);
+      expect(r.stderr).toContain('--steps must be an integer from 1 to 240');
+    }
+    const r = await run('s', 'mouse', 'move', '1', '1', '--human', '--steps', '999');
+    expect(r.stderr).toContain('--steps must be');
+    expect((await run('s', 'mouse', 'move', '1', '1', '--seed', '3')).stderr).toContain(
+      '--seed needs --human',
+    );
+    expect((await run('s', 'mouse', 'move', '1', '1', '--human', '--seed', 'x')).stderr).toContain(
+      '--seed must be a number',
+    );
+  });
+});
+
 describe('highlight', () => {
   it('outlines the node and hides the overlay after the timeout', async () => {
     vi.useFakeTimers();

@@ -6,6 +6,8 @@ import { call, evaluate, type Handle, resolve, UserError } from '../dom';
 import { assertNavigable } from '../guardrails';
 import { heldModifiers, prime, sendInput } from '../input';
 import { meta, state } from '../state';
+import { humanPath, MAX_STEPS } from '../human-path';
+import { pointer, randomSeed } from '../pointer';
 import { isControlled, sleep } from '../tabs';
 
 const DONE = { text: '✓ Done' };
@@ -16,25 +18,6 @@ const DONE = { text: '✓ Done' };
 
 type Button = 'left' | 'right' | 'middle';
 const BUTTON_BIT: Record<Button, number> = { left: 1, right: 2, middle: 4 };
-
-interface Pointer {
-  x: number;
-  y: number;
-  /** Bitmask of held buttons (CDP `buttons`). */
-  buttons: number;
-}
-
-/** Pointer position and held buttons per tab. In memory only: lost on a service-worker restart. */
-const pointers = new Map<number, Pointer>();
-
-function pointer(tabId: number): Pointer {
-  let p = pointers.get(tabId);
-  if (!p) {
-    p = { x: 0, y: 0, buttons: 0 };
-    pointers.set(tabId, p);
-  }
-  return p;
-}
 
 function parseButton(s: string | undefined): Button {
   const b = (s ?? 'left').toLowerCase();
@@ -59,28 +42,59 @@ function heldButton(buttons: number): Button | 'none' {
   return 'none';
 }
 
-async function mouseMove(ctx: Ctx, x: number, y: number, duration: number, steps: number) {
+interface MoveOpts {
+  duration?: number;
+  steps?: number;
+  human: boolean;
+  seed?: number;
+}
+
+async function mouseMove(ctx: Ctx, x: number, y: number, o: MoveOpts) {
   const id = await ctx.tab();
   const p = pointer(id);
   const hidden = await prime(id);
   const fromX = p.x;
   const fromY = p.y;
-  for (let i = 1; i <= steps; i++) {
-    const nx = fromX + ((x - fromX) * i) / steps;
-    const ny = fromY + ((y - fromY) * i) / steps;
+  let points: { x: number; y: number }[];
+  let duration = Math.max(0, o.duration ?? 0);
+  let seed: number | undefined;
+  if (o.human) {
+    seed = o.seed ?? randomSeed();
+    const hp = humanPath(
+      { x: fromX, y: fromY },
+      { x, y },
+      {
+        seed,
+        ...(o.steps !== undefined ? { steps: o.steps } : {}),
+        ...(o.duration !== undefined ? { durationMs: o.duration } : {}),
+      },
+    );
+    points = hp.points;
+    duration = hp.durationMs;
+  } else {
+    const steps =
+      o.steps ?? (duration > 0 ? Math.min(MAX_STEPS, Math.max(1, Math.round(duration / 16))) : 1);
+    points = [];
+    for (let i = 1; i <= steps; i++) {
+      points.push({ x: fromX + ((x - fromX) * i) / steps, y: fromY + ((y - fromY) * i) / steps });
+    }
+  }
+  for (let i = 0; i < points.length; i++) {
+    const pt = points[i];
+    if (!pt) continue;
     await sendInput(id, hidden, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved',
-      x: nx,
-      y: ny,
+      x: pt.x,
+      y: pt.y,
       button: heldButton(p.buttons),
       buttons: p.buttons,
       modifiers: heldModifiers(),
     });
-    p.x = nx;
-    p.y = ny;
-    if (i < steps && duration > 0) await sleep(duration / steps);
+    p.x = pt.x;
+    p.y = pt.y;
+    if (i < points.length - 1 && duration > 0) await sleep(duration / points.length);
   }
-  return { moved: true, x, y };
+  return { moved: true, x, y, ...(o.human ? { human: true, seed } : {}) };
 }
 
 async function mouseButton(ctx: Ctx, down: boolean, button: Button) {
@@ -105,10 +119,16 @@ const mouse: Command = {
   show: Infinity,
   group: 'Interaction',
   usage: 'mouse <move x y|down [btn]|up [btn]|wheel dy [dx]>',
-  summary: 'Low-level pointer: move (--duration/--steps), press, release, wheel',
+  summary: 'Low-level pointer: move (--duration/--steps/--human), press, release, wheel',
   flags: [
     { name: 'duration', type: 'string', desc: '`mouse move`: spread the move over this many ms' },
-    { name: 'steps', type: 'string', desc: '`mouse move`: number of intermediate events' },
+    { name: 'steps', type: 'string', desc: '`mouse move`: number of move events (1-240)' },
+    { name: 'human', type: 'bool', desc: '`mouse move`: follow a reproducible eased curve' },
+    {
+      name: 'seed',
+      type: 'string',
+      desc: '`mouse move --human`: seed for the curve (same seed, same path)',
+    },
   ],
   async run(ctx, a) {
     const what = a.need(0, 'move|down|up|wheel');
@@ -116,12 +136,29 @@ const mouse: Command = {
       case 'move': {
         const x = coord(a.pos[1], 'x');
         const y = coord(a.pos[2], 'y');
-        const duration = Math.max(0, a.num('duration') ?? 0);
-        const steps = Math.min(
-          500,
-          Math.max(1, Math.round(a.num('steps') ?? (duration > 0 ? duration / 16 : 1))),
-        );
-        return { ...DONE, data: await mouseMove(ctx, x, y, duration, steps) };
+        const duration = a.num('duration');
+        if (duration !== undefined && duration < 0) {
+          throw new UserError('--duration must be 0 or more', 'bad_args');
+        }
+        const steps = a.num('steps');
+        if (steps !== undefined && (!Number.isInteger(steps) || steps < 1 || steps > MAX_STEPS)) {
+          throw new UserError(
+            `--steps must be an integer from 1 to ${String(MAX_STEPS)}`,
+            'bad_args',
+          );
+        }
+        const seed = a.num('seed');
+        if (seed !== undefined && !Number.isInteger(seed)) {
+          throw new UserError('--seed must be an integer', 'bad_args');
+        }
+        if (seed !== undefined && !a.has('human')) {
+          throw new UserError('--seed needs --human', 'bad_args');
+        }
+        const o: MoveOpts = { human: a.has('human') };
+        if (duration !== undefined) o.duration = duration;
+        if (steps !== undefined) o.steps = steps;
+        if (seed !== undefined) o.seed = seed;
+        return { ...DONE, data: await mouseMove(ctx, x, y, o) };
       }
       case 'down':
       case 'up': {
