@@ -1,4 +1,4 @@
-// `pdf` (read-only) and `set viewport` / `set media` (agent tabs only). See automation.md.
+// `pdf` (read-only) and `set viewport` / `set media` / `set touch` (agent tabs only). See automation.md.
 //
 // Emulation lives in the tab's debugger session: it persists across navigations while attached and
 // ends on detach (close, revoke, the user closing the debugging bar), so nothing is tracked here.
@@ -28,6 +28,7 @@ function positive(v: string | undefined, what: string, usage: string): number {
 }
 
 const VIEWPORT_USAGE = 'Usage: bvl set viewport <width> <height> [scale] | set viewport reset';
+const TOUCH_USAGE = 'Usage: bvl set touch on|off';
 const MEDIA_USAGE = 'Usage: bvl set media [dark|light] [reduced-motion] | set media reset';
 
 async function setViewport(ctx: Ctx, rest: string[]) {
@@ -51,6 +52,19 @@ async function setViewport(ctx: Ctx, rest: string[]) {
     mobile: false,
   });
   return { text: '✓ Done', data: { width, height, deviceScaleFactor, mobile: false } };
+}
+
+async function setTouch(ctx: Ctx, rest: string[]) {
+  const id = await agentTab(ctx, 'set touch');
+  const v = rest[0]?.toLowerCase();
+  if (rest.length !== 1 || (v !== 'on' && v !== 'off'))
+    throw new UserError(`Missing or invalid argument for: set touch\n${TOUCH_USAGE}`, 'bad_args');
+  const enabled = v === 'on';
+  await cdp.send(id, 'Emulation.setTouchEmulationEnabled', {
+    enabled,
+    ...(enabled ? { maxTouchPoints: 5 } : {}),
+  });
+  return { text: '✓ Done', data: { touch: enabled } };
 }
 
 async function setMedia(ctx: Ctx, rest: string[]) {
@@ -110,25 +124,29 @@ export const emulationCommands: Command[] = [
     show: Infinity,
     group: 'Debugging',
     usage:
-      'set viewport <w> <h> [scale] | set viewport reset | set media [dark|light] [reduced-motion] | set media reset',
-    summary: 'Emulate viewport size or color scheme on agent tabs (cleared on close)',
+      'set viewport <w> <h> [scale] | set viewport reset | set media [dark|light] [reduced-motion] | set media reset | set touch on|off',
+    summary: 'Emulate viewport size, color scheme or touch on agent tabs (cleared on close)',
     async run(ctx, a) {
       const [sub, ...rest] = a.pos;
       if (sub === 'viewport') return setViewport(ctx, rest);
       if (sub === 'media') return setMedia(ctx, rest);
+      if (sub === 'touch') return setTouch(ctx, rest);
       if (sub === undefined) {
         throw new UserError(
-          'Missing arguments for: set\nUsage: bvl set <viewport|media> [args...]',
+          'Missing arguments for: set\nUsage: bvl set <viewport|media|touch> [args...]',
           'bad_args',
         );
       }
       if (NOT_SUPPORTED.includes(sub)) {
         throw new UserError(
-          `set ${sub} is not supported: it would change what servers see in the user's logged-in browser. Only \`set viewport\` and \`set media\` exist, on agent tabs.`,
+          `set ${sub} is not supported: it would change what servers see in the user's logged-in browser. Only \`set viewport\`, \`set media\` and \`set touch\` exist, on agent tabs.`,
           'bad_args',
         );
       }
-      throw new UserError(`Unknown subcommand: ${sub}\nValid options: viewport, media`, 'bad_args');
+      throw new UserError(
+        `Unknown subcommand: ${sub}\nValid options: viewport, media, touch`,
+        'bad_args',
+      );
     },
   },
 ];

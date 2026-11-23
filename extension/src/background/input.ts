@@ -230,6 +230,100 @@ export async function drag(
 }
 
 // ---------------------------------------------------------------------------
+// Touch
+// ---------------------------------------------------------------------------
+
+interface Pt {
+  x: number;
+  y: number;
+}
+
+/** A touch tap: touchStart then touchEnd at the point (in the child session for an OOPIF). */
+export async function tap(tabId: number, x: number, y: number, sessionId?: string): Promise<void> {
+  const hidden = await prime(tabId);
+  const until = Date.now() + ACK_BUDGET_MS;
+  await touch(tabId, hidden, until, 'touchStart', [{ x, y }], sessionId);
+  await touch(tabId, hidden, until, 'touchEnd', [], sessionId);
+}
+
+/** Total time one gesture may spend forcing frames for acks on a hidden tab (a gesture has up to 12 events). */
+const ACK_BUDGET_MS = 8000;
+
+/**
+ * Touch events are acknowledged only after the page produces a frame (unlike mouse events), so on
+ * a hidden tab the ack never comes by itself: send the event, then force frames (1x1 captures)
+ * until it is acked. Each round waits at most 50 + 300 ms; once the gesture's shared `until`
+ * deadline passes, events are still sent (in order) but no longer waited for, so a gesture takes
+ * about ACK_BUDGET_MS at worst instead of 12 x 1.9 s.
+ */
+async function touch(
+  tabId: number,
+  hidden: boolean,
+  until: number,
+  type: string,
+  touchPoints: Pt[],
+  sessionId?: string,
+): Promise<void> {
+  const sent = cdp.send(
+    tabId,
+    'Input.dispatchTouchEvent',
+    { type, touchPoints, modifiers },
+    sessionId,
+  );
+  if (!hidden) {
+    await sent;
+    return;
+  }
+  const ack = { done: false as boolean };
+  const settle = () => {
+    ack.done = true;
+  };
+  const acked = () => ack.done;
+  // A rejected event (tab closed, detached) must not fail the gesture half-way; the next CDP call reports it.
+  const done = sent.then(settle, settle);
+  for (let i = 0; i < 5 && !acked() && Date.now() < until; i++) {
+    await Promise.race([done, sleep(50)]);
+    if (acked()) break;
+    await Promise.race([
+      cdp
+        .send(tabId, 'Page.captureScreenshot', {
+          format: 'jpeg',
+          quality: 1,
+          clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 },
+        })
+        .catch(() => undefined),
+      sleep(300),
+    ]);
+  }
+  await Promise.race([done, sleep(100)]);
+}
+
+/** A touch drag: touchStart, `steps` touchMove events spread over `durationMs`, touchEnd. */
+export async function swipe(
+  tabId: number,
+  from: Pt,
+  to: Pt,
+  {
+    steps = 10,
+    durationMs = 300,
+    sessionId,
+  }: { steps?: number; durationMs?: number; sessionId?: string } = {},
+): Promise<void> {
+  const hidden = await prime(tabId);
+  const until = Date.now() + ACK_BUDGET_MS;
+  const send = (type: string, touchPoints: Pt[]) =>
+    touch(tabId, hidden, until, type, touchPoints, sessionId);
+  await send('touchStart', [from]);
+  for (let i = 1; i <= steps; i++) {
+    if (durationMs > 0) await sleep(durationMs / steps);
+    await send('touchMove', [
+      { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps },
+    ]);
+  }
+  await send('touchEnd', []);
+}
+
+// ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
 

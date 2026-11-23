@@ -6,6 +6,7 @@ tab [list | new [--label L] [url] | show [tN|label] | <tN|label> | close [tN|lab
 snapshot [-i] [-c] [-d N] [-s <selector>] [-u] [--delta] [--full] [@ref]   # --json: {origin,title,refs,removedRefs,snapshot}
 diff snapshot [--stdin] [-s <selector>] [-c] [-d N]   # unified diff vs last snapshot or stdin baseline; --json: {diff,additions,removals,unchanged,changed}
 click <t> [--new-tab] [--right] [--human]   dblclick <t> [--human]   hover <t> [--human]   focus <t>
+tap <t>   swipe <up|down|left|right> [px=300] [--selector <t>] [--duration ms]   # touch events
 fill <t> <text>   type <t> <text>   press <key>   keydown <key>   keyup <key>
 keyboard type|inserttext <text>   check <t>   uncheck <t>   select <t> <value...>
 scroll [up|down|left|right] [px] [--selector <t>]   scrollintoview <t>
@@ -25,7 +26,7 @@ diff screenshot [-o <file>] [-t <0-1>] [-f|--full]   # pixel diff vs the last sc
 eval <js> | eval -b <base64> | eval --stdin
 batch [--bail] [--omit-command] "<cmd>" "<cmd>" … | batch --stdin   # one command per line
 pdf <path> [--landscape] [--background]   set viewport <w> <h> [scale] | reset
-set media [dark|light] [reduced-motion] | reset   (set: agent tabs only)
+set media [dark|light] [reduced-motion] | reset   set touch on|off   (set: agent tabs only)
 dialog status|accept [text]|dismiss   console [--clear]   errors [--clear]
 network requests [--filter <text>] [--type xhr,fetch,document] [--method <m>] [--status 200|2xx|400-499] [--clear]
 network request <id>
@@ -48,7 +49,7 @@ followed by a summary `batch: 2 of 3 steps succeeded; failed: 2 (click); skipped
 Not allowed inside a batch: `batch`, `--session`, `--stdin`; `--timeout` applies per item.
 
 `--json` output: `{success, data, error}`, plus `code` on failures (list in SKILL.md). `data` follows agent-browser:
-actions echo their target (`click` → `{clicked:"@e3"}`, `fill` → `{filled}`, `press` → `{pressed}`, …), page reads add
+actions echo their target (`click` → `{clicked:"@e3"}`, `tap` → `{tapped}`, `swipe` → `{swiped,distance}`, `fill` → `{filled}`, `press` → `{pressed}`, …), page reads add
 `origin`, `get attr|value` → `{value}`, `get count` → `{count,selector}`, `console` → `{messages:[{type,text,args}]}`,
 `errors` → `{errors:[{text,line,column,url}]}`, `dialog status` → `{hasDialog,type,message,defaultPrompt}`,
 `tab` → `{tabs:[{tabId,label,title,url,active,controlled,pending,…}]}`, `wait --url` → `{url}`, `wait --text` → `{text}`.

@@ -16,6 +16,11 @@
       Pay
     </button>
     <p id="out"></p>
+    <script>
+      addEventListener('touchstart', () => {
+        document.getElementById('out').textContent = 'touched';
+      });
+    </script>
     <iframe
       id="deep"
       name="deep-frame"

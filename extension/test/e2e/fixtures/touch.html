@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Touch</title>
+    <style>
+      body {
+        margin: 0;
+        height: 2000px;
+      }
+      #target {
+        position: absolute;
+        left: 20px;
+        top: 20px;
+        width: 200px;
+        height: 80px;
+        background: #cde;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="target">target</div>
+    <a id="link" href="other.html" style="position: absolute; top: 150px; left: 20px">go</a>
+    <script>
+      window.events = [];
+      window.hasTouch = 'ontouchstart' in window;
+      for (const type of [
+        'touchstart',
+        'touchmove',
+        'touchend',
+        'mousedown',
+        'mouseover',
+        'click',
+      ]) {
+        addEventListener(type, (e) => {
+          const t = (e.touches && e.touches[0]) || e.changedTouches?.[0] || e;
+          events.push(`${type} ${Math.round(t.clientX)},${Math.round(t.clientY)} ${e.target.id}`);
+        });
+      }
+    </script>
+  </body>
+</html>
