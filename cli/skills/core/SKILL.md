@@ -227,6 +227,11 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
   reload or repeat the action afterwards. Cookie, Authorization and similar headers, secret fields in
   request bodies and token fields in JSON responses are always shown as `[redacted]`.
 - `pdf <path> [--landscape] [--background]` works on any controlled tab (read-only).
+- `tap <t>` and `swipe <up|down|left|right> [px] [--selector t] [--duration ms]` send touch events
+  (`swipe up` moves content up, i.e. scrolls down) for touch-only pages; they work on any controlled tab.
+  `tap` also gets Chrome's synthesized click, except unreliably inside a cross-origin iframe (use `click` there).
+  `set touch` only changes what the page detects; `click`/`hover` stay mouse input.
+  Pages that detect touch at load need `set touch on|off` first (tabs you opened only; reload after).
 - `set viewport <w> <h> [scale]` / `set media dark|light [reduced-motion]` (and `... reset`) work on
   tabs you opened only; shared tabs are refused. They persist across navigations and end on `close`.
   If the user switches to one of your tabs they will see the emulated size/theme, so reset when done.

@@ -166,8 +166,8 @@ reference).
 |---|---|
 | Navigation | `open` (`goto`, `navigate`), `back`, `forward`, `reload`, `close` |
 | Tabs | `tab`, `tab new [--label L] [url]`, `tab <tN\|label>`, `tab show`, `tab close`, `session list\|info` |
-| Reading | `snapshot [-i -c -d N -s sel -u]`, `get text\|html\|value\|attr\|title\|url\|count\|box`, `is visible\|enabled\|checked`, `screenshot [--full]`, `diff snapshot [--stdin]`, `diff screenshot`, `pdf <path>`, `set viewport\|media` (agent tabs), `eval` (`-b`, `--stdin`), `read [url]`, `frame` |
-| Interaction | `click [--new-tab]`, `dblclick`, `hover`, `focus`, `fill`, `type`, `press`, `keydown`, `keyup`, `keyboard`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview`, `drag`, `upload`, `find …`, `mouse`, `pushstate`, `batch` |
+| Reading | `snapshot [-i -c -d N -s sel -u]`, `get text\|html\|value\|attr\|title\|url\|count\|box`, `is visible\|enabled\|checked`, `screenshot [--full]`, `diff snapshot [--stdin]`, `diff screenshot`, `pdf <path>`, `set viewport\|media\|touch` (agent tabs), `eval` (`-b`, `--stdin`), `read [url]`, `frame` |
+| Interaction | `click [--new-tab]`, `dblclick`, `tap`, `swipe`, `hover`, `focus`, `fill`, `type`, `press`, `keydown`, `keyup`, `keyboard`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview`, `drag`, `upload`, `find …`, `mouse`, `pushstate`, `batch` |
 | Waiting | `wait <t\|ms>`, `--text`, `--url <glob>`, `--load`, `--fn`, `--state`; `dialog status\|accept\|dismiss` |
 | Debugging | `console`, `errors`, `network requests\|request`, `highlight` |
 
@@ -177,7 +177,7 @@ Global flags: `--json` (`{success, data, error}`), `--session <name>` (or `BVL_S
 
 Deliberately left out: cookies/storage/state, network interception (read-only `network requests` is available), device emulation, video/trace —
 they would modify your real profile or aren't needed for driving pages. `pdf` and, on tabs the agent
-opened, `set viewport` / `set media` are available.
+opened, `set viewport` / `set media` / `set touch` are available.
 
 ## The extension popup
 

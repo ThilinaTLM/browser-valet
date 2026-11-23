@@ -616,6 +616,88 @@ export const interactionCommands: Command[] = [
     },
   },
   {
+    name: 'tap',
+    show: Infinity,
+    group: 'Interaction',
+    usage: 'tap <target>',
+    summary: 'Tap an element with touch events (@ref or CSS selector)',
+    details:
+      'Like `click` (same targeting and checks) but dispatches touchstart/touchend instead of mouse events, for pages that only react to touch. Chrome then synthesizes the click, so links and buttons work (unreliable inside a cross-origin iframe: use `click` there). Pages that detect touch at load (`ontouchstart in window`) need `set touch on` first (agent tabs only).',
+    examples: ['bvl tap @e3', 'bvl tap "#carousel .next"'],
+    async run(ctx, a) {
+      const h = await element(ctx, target(a));
+      const { x, y, sessionId } = await clickPoint(h);
+      const r = await observeNav(h.tabId, async () => {
+        await input.tap(h.tabId, x, y, sessionId);
+        return DONE;
+      });
+      return warn(withData(r, { tapped: target(a) }), multi(h, target(a)));
+    },
+  },
+  {
+    name: 'swipe',
+    show: Infinity,
+    showFlags: ['selector', 'duration'],
+    group: 'Interaction',
+    usage: 'swipe <up|down|left|right> [px] [--selector <target>] [--duration <ms>]',
+    summary: 'Swipe with touch events (default 300 px from the viewport centre)',
+    details:
+      'Direction is where the content moves, as in agent-browser: `swipe up` scrolls down. Starts at the centre of the viewport (or of --selector) and sends ~10 touchMove events over --duration (default 300 ms); without --selector the end point is kept inside the viewport (the printed distance is then the real one, with a warning). Without --selector the touches go to the tab itself, not to a cross-origin iframe under the centre; use --selector on an element inside the iframe.',
+    examples: ['bvl swipe up', 'bvl swipe left 200 --selector "#carousel"'],
+    flags: [
+      { name: 'selector', type: 'string', desc: 'Start the swipe at this element' },
+      { name: 'duration', type: 'string', desc: 'Gesture duration in ms (default 300)' },
+    ],
+    async run(ctx, a) {
+      const usage =
+        'Usage: bvl swipe <up|down|left|right> [px] [--selector <target>] [--duration <ms>]';
+      const dir = a.need(0, `direction. ${usage}`).toLowerCase();
+      const vec = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[dir];
+      if (!vec) throw new UserError(`Invalid direction: ${dir}\n${usage}`, 'bad_args');
+      const px = a.pos[1] === undefined ? 300 : Number(a.pos[1]);
+      if (!Number.isFinite(px) || px <= 0)
+        throw new UserError(`Distance must be a positive number\n${usage}`, 'bad_args');
+      const durationMs = a.num('duration') ?? 300;
+      if (durationMs < 0) throw new UserError('--duration must be >= 0', 'bad_args');
+      const id = await ctx.tab();
+      const sel = a.str('selector');
+      let from: { x: number; y: number };
+      let sessionId: string | undefined;
+      let bounds: { w: number; h: number } | undefined;
+      if (sel) {
+        ({ sessionId, ...from } = await clickPoint(await element(ctx, sel)));
+      } else {
+        const v = await cdp.send<{ result: { value?: { w: number; h: number } } }>(
+          id,
+          'Runtime.evaluate',
+          {
+            expression: '({ w: innerWidth, h: innerHeight })',
+            returnByValue: true,
+          },
+        );
+        bounds = { w: v.result.value?.w ?? 800, h: v.result.value?.h ?? 600 };
+        from = { x: bounds.w / 2, y: bounds.h / 2 };
+      }
+      const to = { x: from.x + (vec[0] ?? 0) * px, y: from.y + (vec[1] ?? 0) * px };
+      if (bounds) {
+        // Keep the gesture on screen: events outside the viewport are dropped.
+        to.x = Math.min(Math.max(to.x, 1), bounds.w - 1);
+        to.y = Math.min(Math.max(to.y, 1), bounds.h - 1);
+      }
+      const distance = Math.round(Math.hypot(to.x - from.x, to.y - from.y));
+      const r = await observeNav(id, async () => {
+        await input.swipe(id, from, to, { durationMs, ...(sessionId ? { sessionId } : {}) });
+        return done({ swiped: dir, distance });
+      });
+      return distance < px
+        ? warn(
+            r,
+            `Swipe shortened to ${distance}px to stay inside the viewport (requested ${px}px)`,
+          )
+        : r;
+    },
+  },
+  {
     name: 'dblclick',
     show: Infinity,
     group: 'Interaction',

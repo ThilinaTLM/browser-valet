@@ -122,6 +122,7 @@ describe('shared tab', () => {
       for (const args of [
         ['set', 'viewport', '500', '400'],
         ['set', 'media', 'dark'],
+        ['set', 'touch', 'on'],
       ]) {
         const r = await bvl(...args);
         expect(r.code).toBe(1);

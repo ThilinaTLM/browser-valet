@@ -16,6 +16,11 @@
       Pay
     </button>
     <p id="out"></p>
+    <script>
+      addEventListener('touchstart', () => {
+        document.body.dataset.touched = '1';
+      });
+    </script>
     <iframe
       id="deep"
       name="deep-frame"
