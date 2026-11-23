@@ -21,7 +21,7 @@ wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob |
 read [url] [--outline] [--filter <text>]
 vitals [url]   # TTFB/FCP/LCP/CLS/INP + ratings; --json: {url,ttfb,fcp,lcp,cls,inp,ratings,notMeasurable}
 a11y [url] [--tags wcag2a,wcag2aa] [-s <css>]   # axe-core audit; violations by impact, @eN for snapshot elements
-screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
+screenshot [target] [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
    [--screenshot-format png|jpeg] [--screenshot-quality <0-100>] [--screenshot-dir <dir>]
 diff screenshot [-o <file>] [-t <0-1>] [-f|--full]   # pixel diff vs the last screenshot of this tab (grey baseline, changes red); first call records the baseline, kept in memory only; --baseline <file> unsupported
 eval <js> | eval -b <base64> | eval --stdin

@@ -49,7 +49,7 @@ interface Entry {
 
 const last = new Map<string, Entry>();
 
-/** History key: tab plus capture scope (viewport/full, annotated or not). */
+/** History key: tab plus capture scope (viewport/full or `el:<annotate|plain>:<target>`, annotated or not). */
 export const captureKey = (tabId: number, scope: string): string => `${String(tabId)}:${scope}`;
 export const getCapture = (key: string): Entry | undefined => last.get(key);
 export const setCapture = (key: string, e: Entry): void => void last.set(key, e);

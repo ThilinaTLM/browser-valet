@@ -147,7 +147,7 @@ Load these when the task matches (`bvl skills list` shows all):
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
 `select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`, `frame`,
 `read`, `vitals`, `a11y`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
-`screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
+`screenshot @e3 card.png` (or a CSS/XPath target) captures just that element, much cheaper than a full shot (on a shared tab it scrolls the page only if the element is not already in view); a single argument is the path if it has an image extension or looks like one (`./x`, `dir/x`), else the target (a bare `out` is a target: write `out.png`); use two arguments for an XPath. Not with `--full`; `--annotate` then boxes only refs inside the element. `screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
 `diff screenshot` compares the page with the last `screenshot` / `diff screenshot` of this tab and writes an image (grey baseline, changes red); the first call only records the baseline. Exit code is 0 even when pixels differ: read `match` / `mismatchPercentage`.
 `screenshot --screenshot-format jpeg --screenshot-quality 60` writes a much smaller JPEG (cheaper to read into context); a `.jpg` path does the same, and an explicit path extension wins over the flag (with a warning). JPEG quality defaults to 80. The options are global flags (also valid before the command); only `png` and `jpeg` are accepted. `--screenshot-dir <dir>` sets the folder for path-less captures. The upstream `AGENT_BROWSER_SCREENSHOT_*` environment variables are not supported; use the flags.
 Full list with arguments and global flags: `bvl skills get core --ref commands`.
@@ -198,7 +198,7 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
   to a new site in your session (`--confirm-actions eval,upload,navigate-new-site` adds categories for a
   command; you cannot remove the user's). The command waits up to 120 s while the browser shows a card
   with the redacted command. `denied` = the user said no (do not retry, ask them); `timeout` = no answer.
-- Notices go to stderr as `⚠ …` (a confirm dialog opened, a truncated full-page screenshot, `network`
+- Notices go to stderr as `⚠ …` (a confirm dialog opened, a truncated full-page or element screenshot, `network`
   recording just started, `tab` not-shared hint); stdout is only the result.
 - With `--json`, failures are `{success:false, data:null, error, code}` on stdout (exit 1). Branch on `code`:
   `unknown_command`, `bad_args` (the message ends with `Usage: bvl …`), `unknown_ref`/`stale_ref` (re-snapshot),

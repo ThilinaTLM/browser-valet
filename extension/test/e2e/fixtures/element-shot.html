@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Element Shot</title>
+    <style>
+      body {
+        margin: 0;
+        background: white;
+      }
+      #card {
+        position: absolute;
+        left: 60px;
+        top: 90px;
+        width: 200px;
+        height: 120px;
+        background: rgb(0, 0, 255);
+      }
+      #card button {
+        width: 80px;
+        height: 30px;
+        margin: 10px;
+        background: rgb(255, 0, 0);
+      }
+      #far {
+        position: absolute;
+        left: 30px;
+        top: 1500px;
+        width: 150px;
+        height: 70px;
+        background: rgb(0, 160, 0);
+      }
+      #tall {
+        position: absolute;
+        left: 400px;
+        top: 2000px;
+        width: 40px;
+        height: 9000px;
+        background: rgb(0, 0, 0);
+      }
+      #gone {
+        display: none;
+      }
+      iframe {
+        position: absolute;
+        left: 300px;
+        top: 100px;
+        border: 0;
+        width: 220px;
+        height: 100px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="card"><button>Inside card</button></div>
+    <div id="far"></div>
+    <div id="tall"></div>
+    <div id="gone"></div>
+    <iframe
+      title="same-process"
+      srcdoc="<body style='margin:0'><button style='position:absolute;left:20px;top:10px;width:100px;height:40px'>Inside frame</button></body>"
+    ></iframe>
+  </body>
+</html>
