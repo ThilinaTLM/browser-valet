@@ -656,4 +656,119 @@ describe('redaction hardening', () => {
     expect(r.text).toContain(`[truncated at ${net.MAX_POST_DATA} characters]`);
     expect(r.text).not.toContain('SECRET');
   });
+
+  it('JSON scanner is linear on escaped-quote inputs (closed and unclosed)', () => {
+    const inputs = [
+      `{"${'\\"'.repeat(40_000)}`,
+      `{"${'\\"'.repeat(40_000)}"`,
+      `["${'\\"a'.repeat(80_000)}"`,
+      `["${'\\"a'.repeat(80_000)}`,
+    ];
+    for (const input of inputs) {
+      const s0 = t0();
+      net.redactResponseBody(input, 'application/javascript');
+      net.redactRequestBody(input, 'application/x-ndjson');
+      expect(t0() - s0).toBeLessThan(500);
+    }
+  });
+
+  it('scanner redacts secret values with escapes and bare values', () => {
+    const out = net.redactResponseBody(
+      'x({"a":"q\\"uote","password":"S\\"1","token" : 12345,"ok":true});',
+      'application/javascript',
+    );
+    expect(out).not.toContain('S\\"1');
+    expect(out).not.toContain('12345');
+    expect(out).toContain('"ok":true');
+    expect(out).toContain('"a":"q\\"uote"');
+  });
+
+  it('withholds response bodies over the redaction limit', async () => {
+    const send = mock.chrome.debugger.sendCommand as unknown as {
+      mockImplementation(fn: (t: unknown, m: string) => unknown): void;
+    };
+    send.mockImplementation((_t, m) =>
+      Promise.resolve(
+        m === 'Network.getResponseBody'
+          ? { body: 'x'.repeat(net.MAX_REDACT_INPUT + 1), base64Encoded: false }
+          : {},
+      ),
+    );
+    const r = await net.responseBody(1, {
+      id: 'r',
+      method: 'GET',
+      url: 'u',
+      type: 'Fetch',
+      requestHeaders: {},
+      responseHeaders: {},
+      finished: true,
+      status: 200,
+      mimeType: 'text/plain',
+    });
+    expect(r.text).toBeUndefined();
+    expect(r.note).toBe('body too large to redact');
+  });
+
+  it('redacts the :path pseudo-header from ExtraInfo events', async () => {
+    await net.startRecording(1);
+    fire('Network.requestWillBeSentExtraInfo', {
+      requestId: 'p',
+      headers: { ':path': '/api?access_token=SECRET&a=1', ':method': 'GET' },
+    });
+    const e = net.getEntry(1, 'p');
+    expect(JSON.stringify(e)).not.toContain('SECRET');
+    expect(e?.requestHeaders[':path']).toBe(`/api?access_token=${net.REDACTED}&a=1`);
+  });
+
+  it('notes a body Chrome dropped (hasPostData without postData)', async () => {
+    await net.startRecording(1);
+    request('d', 'http://x/', { method: 'POST', hasPostData: true });
+    const e = net.getEntry(1, 'd');
+    expect(e?.postData).toBeUndefined();
+    expect(e?.postDataNote).toBe('body too large to redact');
+  });
+
+  it('multipart: unquoted names, filename is not a name, fail closed on mismatch', () => {
+    const mp = '--B\r\nContent-Disposition: form-data; name=password\r\n\r\nSECRET\r\n--B--';
+    expect(net.redactRequestBody(mp, 'multipart/form-data; boundary=B')).not.toContain('SECRET');
+    const f =
+      '--B\r\nContent-Disposition: form-data; name="f"; filename="token.txt"\r\n\r\nkeep\r\n--B--';
+    expect(net.redactRequestBody(f, 'multipart/form-data; boundary=B')).toContain('keep');
+    expect(net.redactRequestBody(mp, 'multipart/form-data; boundary=WRONG')).toBe(net.REDACTED);
+  });
+
+  it('redacts NDJSON / unparseable JSON request bodies', () => {
+    const out = net.redactRequestBody(
+      '{"password":"S1"}\n{"token":"S2","a":1}',
+      'application/x-ndjson',
+    );
+    expect(out).not.toMatch(/S1|S2/);
+    expect(out).toContain('"a":1');
+    expect(net.redactRequestBody('{"password":"S1"} trailing', 'application/json')).not.toContain(
+      'S1',
+    );
+  });
+
+  it('redacts JWT-shaped and URL string values regardless of key', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig-nature_1';
+    const out = JSON.parse(
+      net.redactResponseBody(
+        JSON.stringify({
+          access: jwt,
+          list: [jwt],
+          url: 'https://s3.x/f?X-Amz-Signature=SECRET&id=1',
+          note: 'see https://x/?token=SECRET',
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(out.access).toBe(net.REDACTED);
+    expect(out.list).toEqual([net.REDACTED]);
+    expect(out.url).toBe(`https://s3.x/f?X-Amz-Signature=${net.REDACTED}&id=1`);
+    const nd = net.redactResponseBody(
+      `{"a":"${jwt}"}\n{"u":"https:\\/\\/x\\/?api_key=SECRET"}`,
+      'application/x-ndjson',
+    );
+    expect(nd).not.toContain('eyJ');
+    expect(nd).not.toContain('SECRET');
+  });
 });
