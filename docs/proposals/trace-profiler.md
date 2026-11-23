@@ -27,7 +27,7 @@ A throwaway E2E (not committed) called `chrome.debugger` on a fresh tab:
 | `transferMode: ReportEvents` | Works (`Tracing.dataCollected` + `tracingComplete`). Stream is preferable: nothing piles up in the worker. |
 | Scope | **Browser-wide.** Events came from 4 pids (browser, GPU, two renderers); the second `Tracing.start` on the same tab failed with `Tracing has already been started (possibly in another tab)`. Only one trace can run per browser, so it can also collide with the user's own DevTools. The URL of another open (same-site) tab did not appear with these categories; richer categories (`devtools.timeline` with frames, `loading`, netlog) carry URLs and titles. |
 | `Profiler.enable/start/stop` | Works through `chrome.debugger` (4 nodes for a 3 M-iteration loop), tab-scoped by nature, returns a `.cpuprofile` object. |
-| Hidden tab | The tab was in the background and both worked. Timers and rAF are throttled, so durations are skewed (warn). |
+| Hidden tab | The tab was in the background and both worked. Timers and rAF are throttled, so durations are skewed (warn: see Hidden tab below). |
 | Cross-site navigation while tracing | `Page.navigate` to another host did not detach in this run. The extension's own navigation path is reported to detach on a renderer swap (`navigation.ts`); **re-check in the implementation PR**. |
 
 Not yet verified: filtering a trace down to the tab's frames, Perfetto opening the file,
@@ -50,6 +50,10 @@ is its strength); suggested only as a follow-up, `profiler --cpu`.
 - Uses `ctx.tab()`: agent tabs and shared tabs both need the existing grant. Shared tabs are
   allowed only if the privacy filter below works; the user is already watching those.
 - One trace per browser at a time: a failed start says so (and that DevTools may hold it).
+- **Hidden tab:** if `document.visibilityState` is `hidden` at `start`, `stop` prints on stderr
+  `⚠ tab was in the background: timers and animation frames were throttled, so timings are
+  not representative` and JSON adds `hiddenTab: true`. `trace start` never foregrounds the tab
+  (principle 7).
 - 60 s auto-stop discards the data (agent forgot).
 
 ### Worker restart and detach
@@ -57,7 +61,7 @@ is its strength); suggested only as a follow-up, `profiler --cpu`.
 A worker restart does **not** drop the debugger session (`cdp.ts` reuses the attachment), so a
 running trace would continue ownerless, its timer lost, and the next start would fail. Keep a
 per-tab `trace` marker (start time, categories) in `state` (with a default, see the handoff rule),
-and on startup/revoke/close/detach end the trace and drain and discard the stream.
+and on startup/revoke/close/detach **and when handoff is restored** end the trace and drain and discard the stream.
 
 ### Privacy (principle 1)
 
@@ -69,14 +73,18 @@ The trace is browser-wide, so the extension must reduce it to the granted tab **
   too. Verify in the implementation PR with a second same-site tab open.
 - Redact secret-like query values in URLs inside events (same `isSecretKey` rule as network
   observation, which is a MUST) and drop `title`s of other frames.
-- Allowlist categories; reject `disabled-by-default-devtools.screenshot`, `netlog`, `net`,
-  `disabled-by-default-network`, `*.stack` with arguments, and anything unknown unless it is on the
+- Allowlist categories (it includes the `disabled-by-default-*.stack` ones that upstream's `profiler`
+  defaults use, with URL/argument redaction; if a default can't be allowed safely, record that
+  deviation in the PR); reject `disabled-by-default-devtools.screenshot`, `netlog`, `net`,
+  `disabled-by-default-network`, and anything unknown unless it is on the
   allowlist. `--categories` is validated against it.
 - If the filter can't be made reliable, `trace`/`profiler` stay Settled; this proposal then
   closes. Otherwise update the Settled line to drop `trace` and `profiler`, and add the
   allowlist and filter to [security.md](../architecture/security.md).
-- Never log contents. The activity log shows `trace start`/`trace stop` only (`--categories`
-  values are not logged unless `showFlags`).
+- The trace blocks the user's own DevTools Performance recording (one trace per browser) for up
+  to 60 s: say so in the skill and in `security.md`, and in the failure message.
+- Never log contents. The activity log shows `trace start`/`trace stop` only (**Decision:** `--categories`
+  is not logged: no `showFlags`).
 
 ### Permissions
 
