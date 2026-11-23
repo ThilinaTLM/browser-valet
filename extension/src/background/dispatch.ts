@@ -129,6 +129,9 @@ function splitCommand(argv: string[]): { name: string | undefined; rest: string[
     '--max-output',
     '--allowed-domains',
     '--confirm-actions',
+    '--screenshot-format',
+    '--screenshot-quality',
+    '--screenshot-dir',
   ]);
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i] ?? '';

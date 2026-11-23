@@ -126,6 +126,7 @@ export async function drawAnnotations(
   list: Annotation[],
   cssWidth: number,
   format: 'png' | 'jpeg',
+  quality?: number,
 ): Promise<Blob> {
   const bmp = await createImageBitmap(image);
   const scale = bmp.width / cssWidth;
@@ -152,5 +153,8 @@ export async function drawAnnotations(
     g.fillStyle = '#ffffff';
     g.fillText(label, x + 3 * scale, ty + h / 2);
   }
-  return canvas.convertToBlob({ type: `image/${format}` });
+  return canvas.convertToBlob({
+    type: `image/${format}`,
+    ...(quality !== undefined ? { quality: quality / 100 } : {}),
+  });
 }

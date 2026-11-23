@@ -430,13 +430,19 @@ export const inspectionCommands: Command[] = [
   {
     name: 'screenshot',
     details:
-      'Saves a PNG (or .jpg when the path ends in .jpg) of the visible page, or the whole scrollable page with --full. Without a path it writes to a temp file and prints the path.',
-    examples: ['bvl screenshot', 'bvl screenshot page.png --full'],
+      'Saves a PNG of the visible page, or the whole scrollable page with --full. The format is JPEG when the path ends in .jpg/.jpeg, else --screenshot-format (png default); --screenshot-quality 0-100 applies to JPEG. Without a path it writes to a temp file (or --screenshot-dir) and prints the path.',
+    examples: [
+      'bvl screenshot',
+      'bvl screenshot page.png --full',
+      'bvl screenshot --screenshot-format jpeg --screenshot-quality 60',
+    ],
     show: Infinity,
     group: 'Reading',
     showFlags: ['threshold'],
-    usage: 'screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]',
-    summary: 'Save a PNG (or .jpg) screenshot; without a path it goes to a temp file',
+    usage:
+      'screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>] [--screenshot-format png|jpeg] [--screenshot-quality <0-100>] [--screenshot-dir <dir>]',
+    summary:
+      'Save a PNG or JPEG screenshot (--screenshot-format); without a path it goes to a temp file',
     flags: [
       { name: 'full', type: 'bool', desc: 'Capture the full scrollable page' },
       {
@@ -469,30 +475,85 @@ export const inspectionCommands: Command[] = [
           'bad_args',
         );
       }
+      const formatArg = a.str('screenshot-format');
+      const wanted = formatArg?.toLowerCase();
+      if (a.has('screenshot-format') && wanted !== 'png' && wanted !== 'jpeg') {
+        throw new UserError(
+          `--screenshot-format must be png or jpeg, got '${formatArg ?? ''}'`,
+          'bad_args',
+        );
+      }
+      const qualityArg = a.str('screenshot-quality');
+      let quality: number | undefined;
+      if (a.has('screenshot-quality')) {
+        quality = /^\d+$/.test(qualityArg ?? '') ? Number(qualityArg) : NaN;
+        if (!(quality >= 0 && quality <= 100)) {
+          throw new UserError(
+            `--screenshot-quality must be an integer from 0 to 100, got '${qualityArg ?? ''}'`,
+            'bad_args',
+          );
+        }
+      }
+      const dirArg = a.str('screenshot-dir');
+      if (a.has('screenshot-dir') && !dirArg)
+        throw new UserError('--screenshot-dir needs a directory', 'bad_args');
       const id = await ctx.tab();
-      const path = a.pos[0]
-        ? ctx.path(a.pos[0])
-        : ctx.tmpPath('bvl', 'screenshots', `screenshot-${Date.now()}.png`);
-      const format = /\.jpe?g$/i.test(path) ? 'jpeg' : 'png';
+      // An explicit path extension wins over --screenshot-format; png is the default.
+      const explicit = a.pos[0] ? ctx.path(a.pos[0]) : undefined;
+      const flagFormat: Format = wanted === 'jpeg' ? 'jpeg' : 'png';
+      const extFormat: Format | undefined = !explicit
+        ? undefined
+        : /\.jpe?g$/i.test(explicit)
+          ? 'jpeg'
+          : /\.png$/i.test(explicit)
+            ? 'png'
+            : undefined;
+      const format: Format = extFormat ?? flagFormat;
+      const warnings: string[] = [];
+      if (wanted !== undefined && extFormat && extFormat !== flagFormat) {
+        warnings.push(
+          `--screenshot-format ${wanted} ignored: path ends in .${extFormat === 'jpeg' ? 'jpg/.jpeg' : 'png'}`,
+        );
+      }
+      if (dirArg && explicit) warnings.push('--screenshot-dir ignored: a path was given');
+      const fileName = `screenshot-${Date.now()}.${format === 'jpeg' ? 'jpg' : 'png'}`;
+      const path =
+        explicit ??
+        (dirArg
+          ? joinPath(ctx.path(dirArg), fileName, ctx.req.sep)
+          : ctx.tmpPath('bvl', 'screenshots', fileName));
+      if (quality !== undefined && format === 'png')
+        warnings.push('--screenshot-quality only applies to jpeg; ignored');
+      const q = format === 'jpeg' ? (quality ?? DEFAULT_JPEG_QUALITY) : undefined;
+      const enc: Encoding = { format, quality: q };
+      // With --annotate the capture is only an intermediate: lossless, encoded once at the end.
+      const capEnc: Encoding = annotate ? { format: 'png', quality: undefined } : enc;
 
       // Always the plain capture first; the comparison ignores annotations.
       let data: string;
       let truncated = false;
-      if (full) ({ data, truncated } = await fullPage(id, format));
-      else ({ data } = await viewport(id, format));
+      if (full) ({ data, truncated } = await fullPage(id, capEnc));
+      else ({ data } = await viewport(id, capEnc));
       // The plain capture is also the reference for a later `diff screenshot`. Only PNG is kept
-      // (JPEG noise would show up as changes), so a .jpg capture takes a PNG one as well.
+      // (JPEG noise would show up as changes), so a JPEG capture (from a .jpg path or
+      // --screenshot-format jpeg) takes a PNG one as well.
+      const png: Encoding = { format: 'png', quality: undefined };
       setDiffBaseline(
         captureKey(id, full ? 'diff:full' : 'diff:view'),
-        format === 'png' ? data : (await (full ? fullPage(id, 'png') : viewport(id, 'png'))).data,
+        capEnc.format === 'png'
+          ? data
+          : (await (full ? fullPage(id, png) : viewport(id, png))).data,
         truncated,
       );
 
       const extra: Record<string, unknown> = {};
       if (conditional) {
-        const key = captureKey(id, `${full ? 'full' : 'view'}${annotate ? '+annotate' : ''}`);
+        const key = captureKey(
+          id,
+          `${full ? 'full' : 'view'}${annotate ? '+annotate' : ''}:${format}${q !== undefined ? String(q) : ''}`,
+        );
         const prev = getCapture(key);
-        const pixels = await comparisonPixels(data, format);
+        const pixels = await comparisonPixels(data, capEnc.format);
         const ratio = prev ? changedRatio(prev.pixels, pixels) : 1;
         const revision = (prev?.revision ?? 0) + 1;
         if (prev && ratio <= threshold) {
@@ -527,10 +588,11 @@ export const inspectionCommands: Command[] = [
           full,
         });
         const drawn = await drawAnnotations(
-          await base64Blob(data, `image/${format}`),
+          await base64Blob(data, 'image/png'),
           list,
           full ? m.cssContentSize.width : v.clientWidth,
           format,
+          q,
         );
         data = toBase64(new Uint8Array(await drawn.arrayBuffer()));
       }
@@ -545,7 +607,10 @@ export const inspectionCommands: Command[] = [
           ...(list ? { annotations: list } : {}),
           ...extra,
         },
-        warning: truncated ? 'Very tall page: the full-page screenshot was truncated' : undefined,
+        warning: [
+          ...(truncated ? ['Very tall page: the full-page screenshot was truncated'] : []),
+          ...warnings,
+        ],
       };
     },
   },
@@ -665,6 +730,19 @@ export const inspectionCommands: Command[] = [
 const SLICE = 8000;
 const MAX_HEIGHT = 32000;
 
+type Format = 'png' | 'jpeg';
+/** JPEG quality when none is given, used for every encoder so all paths agree. */
+const DEFAULT_JPEG_QUALITY = 80;
+interface Encoding {
+  format: Format;
+  /** JPEG quality 0-100; undefined for png. */
+  quality: number | undefined;
+}
+
+function joinPath(dir: string, name: string, sep: string): string {
+  return dir.endsWith('/') || dir.endsWith('\\') ? dir + name : dir + sep + name;
+}
+
 export function toBase64(bytes: Uint8Array): string {
   let s = '';
   for (let i = 0; i < bytes.length; i += 0x8000) {
@@ -696,14 +774,16 @@ async function captureScreenshot(
  * capture the viewport's area of the page the way `--full` does (`captureBeyondViewport`), which
  * renders this tab's own frame.
  */
-export async function viewport(tabId: number, format: 'png' | 'jpeg'): Promise<{ data: string }> {
+export async function viewport(tabId: number, enc: Encoding): Promise<{ data: string }> {
+  const { format, quality } = enc;
+  const fmt = { format, ...(quality !== undefined ? { quality } : {}) };
   const hidden = (await evaluate(tabId, 'document.visibilityState')).value === 'hidden';
-  if (!hidden) return captureScreenshot(tabId, { format });
+  if (!hidden) return captureScreenshot(tabId, fmt);
   const { cssVisualViewport: v } = await cdp.send<{
     cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number };
   }>(tabId, 'Page.getLayoutMetrics');
   return captureScreenshot(tabId, {
-    format,
+    ...fmt,
     captureBeyondViewport: true,
     clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale: 1 },
   });
@@ -723,8 +803,9 @@ async function comparisonPixels(base64: string, format: 'png' | 'jpeg'): Promise
 /** Full-page screenshot; tall pages are captured in slices and stitched together. */
 export async function fullPage(
   tabId: number,
-  format: 'png' | 'jpeg',
+  enc: Encoding,
 ): Promise<{ data: string; truncated: boolean }> {
+  const { format, quality } = enc;
   const m = await cdp.send<{ cssContentSize: { width: number; height: number } }>(
     tabId,
     'Page.getLayoutMetrics',
@@ -734,29 +815,34 @@ export async function fullPage(
   const width = Math.ceil(m.cssContentSize.width);
   const fullHeight = Math.ceil(m.cssContentSize.height);
   const height = Math.min(fullHeight, Math.floor(MAX_HEIGHT / dpr));
-  const capture = (y: number, h: number) =>
+  const capture = (y: number, h: number, single: boolean) =>
     captureScreenshot(tabId, {
-      format: 'png',
+      // Slices are stitched losslessly; a single capture is encoded as requested.
+      format: single ? format : 'png',
+      ...(single && quality !== undefined ? { quality } : {}),
       captureBeyondViewport: true,
       clip: { x: 0, y, width, height: h, scale: 1 },
     });
 
-  if (height <= SLICE && format === 'png') {
-    return { data: (await capture(0, height)).data, truncated: false };
+  if (height <= SLICE) {
+    return { data: (await capture(0, height, true)).data, truncated: false };
   }
   const canvas = new OffscreenCanvas(Math.round(width * dpr), Math.round(height * dpr));
   const g = canvas.getContext('2d');
   if (!g) throw new Error('Canvas unavailable');
   for (let y = 0; y < height; y += SLICE) {
     const h = Math.min(SLICE, height - y);
-    const { data } = await capture(y, h);
+    const { data } = await capture(y, h, false);
     g.drawImage(
       await createImageBitmap(await base64Blob(data, 'image/png')),
       0,
       Math.round(y * dpr),
     );
   }
-  const out = await canvas.convertToBlob({ type: `image/${format}` });
+  const out = await canvas.convertToBlob({
+    type: `image/${format}`,
+    ...(quality !== undefined ? { quality: quality / 100 } : {}),
+  });
   return {
     data: toBase64(new Uint8Array(await out.arrayBuffer())),
     truncated: fullHeight > height,

@@ -117,6 +117,24 @@ describe('diff screenshot', () => {
     });
   });
 
+  it('--screenshot-format jpeg (with or without --annotate) is a clean baseline too', async () => {
+    await bvl('open', fixture('/form.html'));
+    for (const extra of [[], ['--annotate']]) {
+      await bvl(
+        'screenshot',
+        '--screenshot-format',
+        'jpeg',
+        '--screenshot-quality',
+        '40',
+        ...extra,
+      );
+      expect((await bvlJson('diff', 'screenshot', '-t', '0')).data).toMatchObject({
+        match: true,
+        differentPixels: 0,
+      });
+    }
+  });
+
   it('forgets the baseline when the tab is closed', async () => {
     await bvl('open', fixture('/form.html'));
     await bvl('screenshot', 'x.png');

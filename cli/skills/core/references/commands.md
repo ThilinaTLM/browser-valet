@@ -19,6 +19,7 @@ wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob |
 read [url] [--outline] [--filter <text>]
 vitals [url]   # TTFB/FCP/LCP/CLS/INP + ratings; --json: {url,ttfb,fcp,lcp,cls,inp,ratings,notMeasurable}
 screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
+   [--screenshot-format png|jpeg] [--screenshot-quality <0-100>] [--screenshot-dir <dir>]
 diff screenshot [-o <file>] [-t <0-1>] [-f|--full]   # pixel diff vs the last screenshot of this tab (grey baseline, changes red); first call records the baseline, kept in memory only; --baseline <file> unsupported
 eval <js> | eval -b <base64> | eval --stdin
 batch [--bail] [--omit-command] "<cmd>" "<cmd>" … | batch --stdin   # one command per line
@@ -36,7 +37,7 @@ network request <id>
 `mouse` is for canvases, maps and sliders; on a background tab `mouse wheel` scrolls by script.
 `--human` moves the pointer along a curved, eased path from its last position (use it for hover menus, sliders and drag libraries that need intermediate `mousemove`s); `--seed n` makes the path repeatable. Background tabs deliver about one move per frame, so fewer events arrive than were sent.
 Global flags: `--json`, `--session <name>`,
-`--timeout <ms>` (default 25000), `--max-output <chars>`, `--content-boundaries`, `--allowed-domains <list>`, `--confirm-actions <list>`. `bvl <command> --help` shows details and examples.
+`--timeout <ms>` (default 25000), `--max-output <chars>`, `--content-boundaries`, `--allowed-domains <list>`, `--confirm-actions <list>`, `--screenshot-format`, `--screenshot-quality`, `--screenshot-dir` (screenshot only). `bvl <command> --help` shows details and examples.
 
 `batch` runs the items in order (quotes and backslashes like a shell, nothing expanded). Text output is each item's output
 (empty outputs are skipped); errors and warnings go to stderr labelled with the step, e.g. `✗ [2/3] click @e9: Unknown ref…`,

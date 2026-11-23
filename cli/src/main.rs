@@ -468,7 +468,14 @@ fn command_name(args: &[String]) -> Option<&str> {
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--session" | "--timeout" | "--max-output" | "--allowed-domains" | "--confirm-actions" => {
+            "--session"
+            | "--timeout"
+            | "--max-output"
+            | "--allowed-domains"
+            | "--confirm-actions"
+            | "--screenshot-format"
+            | "--screenshot-quality"
+            | "--screenshot-dir" => {
                 it.next();
             }
             s if s.starts_with('-') => {}

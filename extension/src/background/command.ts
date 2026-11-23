@@ -77,6 +77,21 @@ export const GLOBAL_FLAGS: Flag[] = [
     type: 'string',
     desc: 'Truncate each output text to this many characters (default: the popup setting)',
   },
+  {
+    name: 'screenshot-format',
+    type: 'string',
+    desc: 'Screenshot image format: png (default) or jpeg (screenshot)',
+  },
+  {
+    name: 'screenshot-quality',
+    type: 'string',
+    desc: 'Screenshot JPEG quality 0-100, default 80 (screenshot)',
+  },
+  {
+    name: 'screenshot-dir',
+    type: 'string',
+    desc: 'Directory for generated screenshot file names (screenshot)',
+  },
   { name: 'help', short: 'h', type: 'bool', desc: 'Show help' },
 ];
 
