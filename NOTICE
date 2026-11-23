@@ -5,7 +5,7 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
 Third-party software
 
-The Chrome extension ships axe-core (https://github.com/dequelabs/axe-core), Copyright (c) Deque
+The Chrome extension ships axe-core (https://github.com/dequelabs/axe-core/tree/v4.14.1), Copyright (c) Deque
 Systems, Inc., licensed under the Mozilla Public License 2.0, unmodified, as `axe.min.js` for the
 `a11y` command. Its license text is in `licenses/axe-core-LICENSE.txt` and its own third-party
 notices in `licenses/axe-core-LICENSE-3RD-PARTY.txt`, next to it in the extension folder. The MPL

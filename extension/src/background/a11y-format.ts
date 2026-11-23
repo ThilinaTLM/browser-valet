@@ -37,7 +37,7 @@ export interface A11yNode {
 
 export interface A11yRule {
   id: string;
-  impact: string | null;
+  impact: string;
   help: string;
   helpUrl: string;
   tags: string[];
@@ -57,44 +57,48 @@ export interface A11yData {
 export const MAX_JSON_NODES = 10;
 /** Example targets printed per rule in the text output. */
 export const MAX_TEXT_NODES = 5;
+/** Characters of a node's HTML kept (as upstream). */
+export const MAX_HTML = 300;
 
 const IMPACTS = ['critical', 'serious', 'moderate', 'minor'];
-const rank = (impact: string | null): number => {
+const rank = (impact: string | null | undefined): number => {
   const i = impact ? IMPACTS.indexOf(impact) : -1;
   return i < 0 ? IMPACTS.length : i;
 };
 
 /** The rule's impact; axe leaves it empty on some `incomplete` rules, so use the worst node's. */
-function ruleImpact(r: AxeRuleRaw): string | null {
+function ruleImpact(r: AxeRuleRaw): string {
   if (r.impact) return r.impact;
   let best: string | null = null;
   for (const n of r.nodes ?? []) {
     if (n.impact && rank(n.impact) < rank(best)) best = n.impact;
   }
-  return best;
+  return best ?? 'unknown';
 }
 
-/** Most severe first, then by rule id. */
+/** The rules in axe's order (as upstream's `--json`). */
 export function shapeRules(rules: AxeRuleRaw[] | undefined): A11yRule[] {
-  return (rules ?? [])
-    .map((r): A11yRule => {
-      const nodes = r.nodes ?? [];
-      return {
-        id: r.id,
-        impact: ruleImpact(r),
-        help: r.help ?? '',
-        helpUrl: r.helpUrl ?? '',
-        tags: r.tags ?? [],
-        nodeCount: nodes.length,
-        nodes: nodes.slice(0, MAX_JSON_NODES).map((n) => ({
-          target: n.target ?? [],
-          html: n.html ?? '',
-          failureSummary: n.failureSummary ?? '',
-        })),
-      };
-    })
-    .sort((a, b) => rank(a.impact) - rank(b.impact) || a.id.localeCompare(b.id));
+  return (rules ?? []).map((r): A11yRule => {
+    const nodes = r.nodes ?? [];
+    return {
+      id: r.id,
+      impact: ruleImpact(r),
+      help: r.help ?? '',
+      helpUrl: r.helpUrl ?? '',
+      tags: r.tags ?? [],
+      nodeCount: nodes.length,
+      nodes: nodes.slice(0, MAX_JSON_NODES).map((n) => ({
+        target: n.target ?? [],
+        html: (n.html ?? '').slice(0, MAX_HTML),
+        failureSummary: n.failureSummary ?? '',
+      })),
+    };
+  });
 }
+
+/** Most severe first, then by rule id (the text output). */
+const bySeverity = (rules: A11yRule[]): A11yRule[] =>
+  [...rules].sort((a, b) => rank(a.impact) - rank(b.impact) || a.id.localeCompare(b.id));
 
 /**
  * A target as one line. Entries are separated by ` >> ` where the path crosses an iframe
@@ -107,7 +111,7 @@ export function targetText(target: TargetPart[]): string {
 function ruleText(r: A11yRule): string[] {
   const n = r.nodeCount;
   const lines = [
-    `[${r.impact ?? 'review'}] ${r.id}: ${r.help} (${String(n)} ${n === 1 ? 'node' : 'nodes'})`,
+    `[${r.impact}] ${r.id}: ${r.help} (${String(n)} ${n === 1 ? 'node' : 'nodes'})`,
     `  ${r.helpUrl}`,
   ];
   for (const node of r.nodes.slice(0, MAX_TEXT_NODES)) {
@@ -125,11 +129,11 @@ export function formatText(d: A11yData): string {
   ];
   if (d.violations.length) {
     out.push('');
-    for (const r of d.violations) out.push(...ruleText(r));
+    for (const r of bySeverity(d.violations)) out.push(...ruleText(r));
   }
   if (d.incomplete.length) {
     out.push('', 'incomplete (needs manual review):');
-    for (const r of d.incomplete) out.push(...ruleText(r));
+    for (const r of bySeverity(d.incomplete)) out.push(...ruleText(r));
   }
   return out.join('\n');
 }

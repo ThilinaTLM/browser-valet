@@ -61,10 +61,16 @@ describe('a11y', () => {
     expect(targets).toContainEqual(['#inner', '#inner-img']);
     expect(d.counts.violations).toBe(d.violations.length);
     expect(d.axeVersion).toMatch(/^\d+\.\d+/);
-    // violations come most severe first
-    const order = ['critical', 'serious', 'moderate', 'minor'];
-    const ranks = d.violations.map((v) => order.indexOf(v.impact));
-    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+  });
+
+  it('prints text most severe first', async () => {
+    await bvl('open', page());
+    const out = (await bvl('a11y')).stdout.split('incomplete (')[0] ?? '';
+    const impacts = [...out.matchAll(/^\[(\w+)\] /gm)].map((m) =>
+      ['critical', 'serious', 'moderate', 'minor'].indexOf(m[1] ?? ''),
+    );
+    expect(impacts.length).toBeGreaterThan(1);
+    expect(impacts).toEqual([...impacts].sort((a, b) => a - b));
   });
 
   it('prints text grouped by impact, with refs from the last snapshot', async () => {
@@ -90,6 +96,34 @@ describe('a11y', () => {
     expect(ref).toBeTruthy();
     expect(refd?.ref).toBe(ref);
     expect(r.stdout).toContain(`#unlabelled @${ref ?? ''}`);
+  });
+
+  it('also audits a same-process iframe', async () => {
+    await bvl('open', page(fixture('/a11y-inner.html')));
+    let out = '';
+    for (let i = 0; i < 20 && !out.includes('#inner >> #inner-img'); i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      out = (await bvl('a11y')).stdout;
+    }
+    expect(out).toContain('#inner >> #inner-img');
+  });
+
+  it('gives nodes inside an iframe their snapshot ref', async () => {
+    for (const inner of [crossFixture('/a11y-inner.html'), fixture('/a11y-inner.html')]) {
+      await bvl('open', page(inner));
+      let snap = '';
+      for (let i = 0; i < 20 && !snap.includes('Inner frame'); i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        snap = (await bvl('snapshot')).stdout;
+      }
+      const d = await audit();
+      const node = d.violations
+        .find((v) => v.id === 'label')
+        ?.nodes.find((n) => n.target[0] === '#inner' && n.target[1] === '#inner-input');
+      expect(node?.ref, inner).toMatch(/^e\d+$/);
+      // the ref is the iframe's textbox in the snapshot
+      expect(snap, inner).toMatch(new RegExp(`textbox.*\\[ref=${node?.ref ?? ''}\\]`));
+    }
   });
 
   it('--tags and --selector narrow the audit', async () => {

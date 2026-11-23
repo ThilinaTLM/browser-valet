@@ -54,7 +54,7 @@ interface FrameRef {
 }
 
 interface PartialRun {
-  partial: unknown;
+  partial: { frames?: { selector?: TargetPart[] }[] };
   frames: { frameSelector: TargetPart; frameContext: unknown }[];
 }
 
@@ -154,8 +154,8 @@ async function collect(
         `(async () => {
           const ctx = ${JSON.stringify(ctx ?? null)} ?? document;
           const opts = ${JSON.stringify(options)};
-          const partial = await axe.runPartial(ctx, opts);
           const frames = axe.utils.getFrameContexts(ctx, opts);
+          const partial = await axe.runPartial(ctx, opts);
           return JSON.stringify({ partial, frames });
         })()`,
       );
@@ -166,7 +166,14 @@ async function collect(
       return;
     }
     partials.push(run.partial);
-    for (const f of run.frames) {
+    // finishRun expects one entry per frame spec the partial lists; frames we cannot pair up
+    // reliably (the DOM changed between the two calls) are skipped.
+    const specs = run.partial.frames ?? [];
+    if (specs.length !== run.frames.length) {
+      partials.push(...specs.map(() => null));
+      return;
+    }
+    for (const [i, f] of run.frames.entries()) {
       let id: string | undefined;
       try {
         id = depth < MAX_DEPTH ? await childFrame(tabId, w, f.frameSelector) : undefined;
@@ -180,7 +187,8 @@ async function collect(
       const sid = cdp.childSessions(tabId).find((c) => c.targetId === id)?.sessionId ?? w.sessionId;
       await walk(
         { frameId: id, ...(sid ? { sessionId: sid } : {}) },
-        [...path, f.frameSelector],
+        // Keyed like the targets finishRun reports: the frame specs' own selectors, joined.
+        [...path, ...(specs[i]?.selector ?? [])],
         f.frameContext,
         depth + 1,
       );
@@ -224,15 +232,21 @@ async function addRefs(
         );
         const objectId = r.result.objectId;
         if (!objectId) continue;
-        const { node: n } = await cdp.send<{ node: { backendNodeId: number } }>(
-          tabId,
-          'DOM.describeNode',
-          { objectId },
-          w.sessionId,
-        );
-        void cdp.send(tabId, 'Runtime.releaseObject', { objectId }, w.sessionId).catch(() => 0);
+        let backendNodeId: number;
+        try {
+          ({
+            node: { backendNodeId },
+          } = await cdp.send<{ node: { backendNodeId: number } }>(
+            tabId,
+            'DOM.describeNode',
+            { objectId },
+            w.sessionId,
+          ));
+        } finally {
+          void cdp.send(tabId, 'Runtime.releaseObject', { objectId }, w.sessionId).catch(() => 0);
+        }
         const frameId = w.sessionId ? cdp.childSession(tabId, w.sessionId)?.targetId : undefined;
-        const ref = refs.get(nodeKey(n.backendNodeId, frameId));
+        const ref = refs.get(nodeKey(backendNodeId, frameId));
         if (ref) node.ref = ref;
       } catch {
         // not mappable: the selector is still printed

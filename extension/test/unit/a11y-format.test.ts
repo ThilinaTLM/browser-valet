@@ -12,14 +12,14 @@ import {
 const node = (sel: string) => ({ html: `<i id="${sel}">`, target: [`#${sel}`] });
 
 describe('shapeRules', () => {
-  it('sorts by impact then id, counts all nodes and keeps ten', () => {
+  it('keeps axe order, counts all nodes and keeps ten', () => {
     const rules = shapeRules([
       { id: 'b', impact: 'minor', nodes: [node('x')] },
       { id: 'z', impact: 'critical', nodes: Array.from({ length: 12 }, (_, i) => node(`n${i}`)) },
       { id: 'a', impact: 'critical', nodes: [] },
       { id: 'm', impact: 'serious', nodes: [] },
     ]);
-    expect(rules.map((r) => r.id)).toEqual(['a', 'z', 'm', 'b']);
+    expect(rules.map((r) => r.id)).toEqual(['b', 'z', 'a', 'm']);
     const z = rules.find((r) => r.id === 'z');
     expect(z?.nodeCount).toBe(12);
     expect(z?.nodes).toHaveLength(MAX_JSON_NODES);
@@ -37,6 +37,12 @@ describe('shapeRules', () => {
       },
     ]);
     expect(r?.impact).toBe('serious');
+    expect(shapeRules([{ id: 'x' }])[0]?.impact).toBe('unknown');
+  });
+
+  it('cuts html at 300 characters', () => {
+    const [r] = shapeRules([{ id: 'x', nodes: [{ html: 'a'.repeat(500), target: ['#x'] }] }]);
+    expect(r?.nodes[0]?.html).toHaveLength(300);
   });
 });
 
@@ -68,6 +74,17 @@ describe('formatText', () => {
     incomplete: shapeRules([{ id: 'color-contrast', impact: null, help: 'h', helpUrl: 'u' }]),
   };
 
+  it('prints most severe first', () => {
+    const mixed = shapeRules([
+      { id: 'b', impact: 'minor', help: 'h', helpUrl: 'u' },
+      { id: 'a', impact: 'critical', help: 'h', helpUrl: 'u' },
+    ]);
+    const t = formatText({ ...data, violations: mixed }).split('\n');
+    expect(t.findIndex((l) => l.startsWith('[critical]'))).toBeLessThan(
+      t.findIndex((l) => l.startsWith('[minor]')),
+    );
+  });
+
   it('prints header, rules, a ref marker and a "more" line', () => {
     const t = formatText(data).split('\n');
     expect(t[0]).toBe('url: http://x.test/');
@@ -77,7 +94,7 @@ describe('formatText', () => {
     expect(t.filter((l) => l.startsWith('  - #i'))).toHaveLength(MAX_TEXT_NODES);
     expect(t).toContain('  … 2 more (use --json)');
     expect(t).toContain('incomplete (needs manual review):');
-    expect(t).toContain('[review] color-contrast: h (0 nodes)');
+    expect(t).toContain('[unknown] color-contrast: h (0 nodes)');
   });
 });
 
