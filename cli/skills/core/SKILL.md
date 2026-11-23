@@ -115,6 +115,7 @@ snapshot: `--outline` lists headings, `--filter <text>` returns matching section
 `select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`, `frame`,
 `read`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 `screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
+`diff screenshot` compares the page with the last `screenshot` / `diff screenshot` of this tab and writes an image (grey baseline, changes red); the first call only records the baseline. Exit code is 0 even when pixels differ: read `match` / `mismatchPercentage`.
 Full list with arguments and global flags: `bvl skills get core --ref commands`.
 `bvl <command> --help` for details; `bvl --help` gives the overview and, once the extension is connected, the full command list.
 

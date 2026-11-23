@@ -56,4 +56,23 @@ export const setCapture = (key: string, e: Entry): void => void last.set(key, e)
 
 export function forgetCaptures(tabId: number): void {
   for (const k of [...last.keys()]) if (k.startsWith(`${String(tabId)}:`)) last.delete(k);
+  for (const k of [...baselines.keys()]) if (k.startsWith(`${String(tabId)}:`)) baselines.delete(k);
+}
+
+// Full-size baselines for `diff screenshot`: the last PNG capture per (tab, scope), in memory only
+// (lost when the service worker restarts or the tab is forgotten).
+export interface DiffBaseline {
+  /** Base64 PNG as captured. */
+  data: string;
+  format: 'png';
+}
+/** Largest baseline kept (base64 characters, about 12 MB of PNG). Bigger captures are not stored. */
+export const MAX_BASELINE_CHARS = 16_000_000;
+const baselines = new Map<string, DiffBaseline>();
+export const getDiffBaseline = (key: string): DiffBaseline | undefined => baselines.get(key);
+
+/** Keep `data` as the baseline of `key`, or drop the old one when it is too big to keep or truncated. */
+export function setDiffBaseline(key: string, data: string, truncated = false): void {
+  if (truncated || data.length > MAX_BASELINE_CHARS) baselines.delete(key);
+  else baselines.set(key, { data, format: 'png' });
 }

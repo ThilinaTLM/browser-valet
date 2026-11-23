@@ -20,7 +20,9 @@ import {
   getCapture,
   type Pixels,
   setCapture,
+  setDiffBaseline,
 } from '../capture-compare';
+import { base64Blob } from '../base64';
 import { snapshot } from '../snapshot';
 import { computedStyles } from './extra';
 import {
@@ -478,6 +480,13 @@ export const inspectionCommands: Command[] = [
       let truncated = false;
       if (full) ({ data, truncated } = await fullPage(id, format));
       else ({ data } = await viewport(id, format));
+      // The plain capture is also the reference for a later `diff screenshot`. Only PNG is kept
+      // (JPEG noise would show up as changes), so a .jpg capture takes a PNG one as well.
+      setDiffBaseline(
+        captureKey(id, full ? 'diff:full' : 'diff:view'),
+        format === 'png' ? data : (await (full ? fullPage(id, 'png') : viewport(id, 'png'))).data,
+        truncated,
+      );
 
       const extra: Record<string, unknown> = {};
       if (conditional) {
@@ -517,9 +526,8 @@ export const inspectionCommands: Command[] = [
           offsetY: full ? v.pageY : 0,
           full,
         });
-        const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
         const drawn = await drawAnnotations(
-          new Blob([bytes], { type: `image/${format}` }),
+          await base64Blob(data, `image/${format}`),
           list,
           full ? m.cssContentSize.width : v.clientWidth,
           format,
@@ -657,7 +665,7 @@ export const inspectionCommands: Command[] = [
 const SLICE = 8000;
 const MAX_HEIGHT = 32000;
 
-function toBase64(bytes: Uint8Array): string {
+export function toBase64(bytes: Uint8Array): string {
   let s = '';
   for (let i = 0; i < bytes.length; i += 0x8000) {
     s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -688,7 +696,7 @@ async function captureScreenshot(
  * capture the viewport's area of the page the way `--full` does (`captureBeyondViewport`), which
  * renders this tab's own frame.
  */
-async function viewport(tabId: number, format: 'png' | 'jpeg'): Promise<{ data: string }> {
+export async function viewport(tabId: number, format: 'png' | 'jpeg'): Promise<{ data: string }> {
   const hidden = (await evaluate(tabId, 'document.visibilityState')).value === 'hidden';
   if (!hidden) return captureScreenshot(tabId, { format });
   const { cssVisualViewport: v } = await cdp.send<{
@@ -703,8 +711,7 @@ async function viewport(tabId: number, format: 'png' | 'jpeg'): Promise<{ data: 
 
 /** The capture decoded and downscaled for comparison. */
 async function comparisonPixels(base64: string, format: 'png' | 'jpeg'): Promise<Pixels> {
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const bmp = await createImageBitmap(new Blob([bytes], { type: `image/${format}` }));
+  const bmp = await createImageBitmap(await base64Blob(base64, `image/${format}`));
   const size = comparisonSize(bmp.width, bmp.height);
   const canvas = new OffscreenCanvas(size.width, size.height);
   const g = canvas.getContext('2d', { willReadFrequently: true });
@@ -714,7 +721,7 @@ async function comparisonPixels(base64: string, format: 'png' | 'jpeg'): Promise
 }
 
 /** Full-page screenshot; tall pages are captured in slices and stitched together. */
-async function fullPage(
+export async function fullPage(
   tabId: number,
   format: 'png' | 'jpeg',
 ): Promise<{ data: string; truncated: boolean }> {
@@ -743,10 +750,11 @@ async function fullPage(
   for (let y = 0; y < height; y += SLICE) {
     const h = Math.min(SLICE, height - y);
     const { data } = await capture(y, h);
-    const blob = new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], {
-      type: 'image/png',
-    });
-    g.drawImage(await createImageBitmap(blob), 0, Math.round(y * dpr));
+    g.drawImage(
+      await createImageBitmap(await base64Blob(data, 'image/png')),
+      0,
+      Math.round(y * dpr),
+    );
   }
   const out = await canvas.convertToBlob({ type: `image/${format}` });
   return {

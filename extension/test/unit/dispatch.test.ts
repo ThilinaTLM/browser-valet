@@ -209,6 +209,15 @@ describe('activity log (describe)', () => {
     expect(lastCommand()).toBe('find role textbox select ••• --name Email');
   });
 
+  it('logs diff with its own redaction: output and threshold shown, anything else hidden', async () => {
+    await run('diff', 'screenshot', '-o', 'd.png', '-t', '0.2', '--full');
+    expect(lastCommand()).toBe('diff screenshot --output d.png --threshold 0.2 --full');
+    await run('diff', 'screenshot', '--baseline', 'secret.png');
+    expect(lastCommand()).toBe('diff screenshot --baseline •••');
+    await run('diff', 'secret');
+    expect(lastCommand()).toBe('diff •••');
+  });
+
   it('redacts the text of dialog accept', async () => {
     await run('dialog', 'accept', 'hunter2');
     expect(lastCommand()).toBe('dialog accept •••');
