@@ -123,6 +123,7 @@ measure a tab the user shared and has in front. `inp: -` means no slow interacti
 `read`, `vitals`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 `screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
 `diff screenshot` compares the page with the last `screenshot` / `diff screenshot` of this tab and writes an image (grey baseline, changes red); the first call only records the baseline. Exit code is 0 even when pixels differ: read `match` / `mismatchPercentage`.
+`screenshot --screenshot-format jpeg --screenshot-quality 60` writes a much smaller JPEG (cheaper to read into context); a `.jpg` path does the same, and an explicit path extension wins over the flag (with a warning). JPEG quality defaults to 80. The options are global flags (also valid before the command); only `png` and `jpeg` are accepted. `--screenshot-dir <dir>` sets the folder for path-less captures. The upstream `AGENT_BROWSER_SCREENSHOT_*` environment variables are not supported; use the flags.
 Full list with arguments and global flags: `bvl skills get core --ref commands`.
 `bvl <command> --help` for details; `bvl --help` gives the overview and, once the extension is connected, the full command list.
 

@@ -134,6 +134,9 @@ async function encodePng(img: Decoded): Promise<string> {
   return toBase64(new Uint8Array(await blob.arrayBuffer()));
 }
 
+/** The diff always works on lossless captures, whatever `--screenshot-format` says. */
+const PNG = { format: 'png', quality: undefined } as const;
+
 /** Upstream prints 0 as `0`, otherwise two decimals. */
 const percent = (p: number): string => (p === 0 ? '0' : p.toFixed(2));
 
@@ -173,8 +176,8 @@ async function diffScreenshot(ctx: Ctx, a: Args): Promise<Result> {
   }
   let data: string;
   let truncated = false;
-  if (full) ({ data, truncated } = await fullPage(id, 'png'));
-  else ({ data } = await viewport(id, 'png'));
+  if (full) ({ data, truncated } = await fullPage(id, PNG));
+  else ({ data } = await viewport(id, PNG));
   setDiffBaseline(key, data, truncated);
   const warning = truncated ? 'Very tall page: the full-page screenshot was truncated' : undefined;
 

@@ -217,6 +217,137 @@ describe('screenshot --if-changed / --threshold', () => {
   });
 });
 
+const isJpeg = (b: Buffer): boolean => b.subarray(0, 3).toString('hex') === 'ffd8ff';
+
+describe('screenshot format options', () => {
+  it('writes a smaller JPEG to the temp dir and to --screenshot-dir', async () => {
+    await bvl('open', fixture('/form.html'));
+    const png = await bvl('screenshot', 'f.png');
+    expect(png.code).toBe(0);
+    const j = (
+      await bvlJson('screenshot', '--screenshot-format', 'jpeg', '--screenshot-quality', '50')
+    ).data as { path: string };
+    expect(j.path).toMatch(/screenshot-\d+\.jpg$/);
+    const jpg = await readFile(j.path);
+    expect(jpg.subarray(0, 3).toString('hex')).toBe('ffd8ff');
+    expect(jpg.length).toBeLessThan((await readFile(join(workDir(), 'f.png'))).length);
+
+    const d = (
+      await bvlJson(
+        'screenshot',
+        '--full',
+        '--screenshot-format',
+        'jpeg',
+        '--screenshot-dir',
+        'shots/sub',
+      )
+    ).data as { path: string };
+    expect(d.path).toBe(join(workDir(), 'shots', 'sub', d.path.split(/[\\/]/).pop() ?? ''));
+    expect((await readFile(d.path)).subarray(0, 3).toString('hex')).toBe('ffd8ff');
+  });
+
+  it('lets the path extension win and says so', async () => {
+    await bvl('open', fixture('/form.html'));
+    const r = await bvl('screenshot', 'x.png', '--screenshot-format', 'jpeg');
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain('--screenshot-format jpeg ignored: path ends in .png');
+    expect((await readFile(join(workDir(), 'x.png'))).subarray(1, 4).toString()).toBe('PNG');
+  });
+
+  it('warns about --screenshot-dir with a path, and about quality with png', async () => {
+    await bvl('open', fixture('/form.html'));
+    const r = await bvl('screenshot', 'y.png', '--screenshot-dir', 'nowhere');
+    expect(r.stderr).toContain('--screenshot-dir ignored: a path was given');
+    const q = await bvl('screenshot', 'z.png', '--screenshot-quality', '40');
+    expect(q.code).toBe(0);
+    expect(q.stderr).toContain('--screenshot-quality only applies to jpeg; ignored');
+    expect((await readFile(join(workDir(), 'z.png'))).subarray(1, 4).toString()).toBe('PNG');
+  });
+
+  it('accepts the options before the command', async () => {
+    await bvl('open', fixture('/form.html'));
+    const r = await bvl('--screenshot-format', 'jpeg', 'screenshot', 'pre.jpg');
+    expect(r.code).toBe(0);
+    expect(isJpeg(await readFile(join(workDir(), 'pre.jpg')))).toBe(true);
+    const g = await bvl('--screenshot-format', 'jpeg', '--screenshot-quality', '30', 'screenshot');
+    expect(g.stdout).toMatch(/\.jpg/);
+  });
+
+  it.each([
+    [['--screenshot-format', 'gif'], 'must be png or jpeg'],
+    [['--screenshot-format', 'jpg'], 'must be png or jpeg'],
+    [['--screenshot-quality', '101'], 'integer from 0 to 100'],
+    [['--screenshot-quality', '-1'], 'integer from 0 to 100'],
+    [['--screenshot-quality', '50.5'], 'integer from 0 to 100'],
+    [['--screenshot-quality', 'abc'], 'integer from 0 to 100'],
+    [['--screenshot-dir', ''], 'needs a directory'],
+  ])('rejects %j with bad_args', async (flags, message) => {
+    const r = await bvl('screenshot', ...flags, '--json');
+    expect(r.code).not.toBe(0);
+    const j = JSON.parse(r.stdout) as { success: boolean; error: string; code: string };
+    expect(j.success).toBe(false);
+    expect(j.code).toBe('bad_args');
+    expect(j.error).toContain(message);
+  });
+
+  it('draws annotations onto a JPEG, encoded once', async () => {
+    await bvl('open', fixture('/form.html'));
+    const j = (await bvlJson('screenshot', '--annotate', '--screenshot-format', 'jpeg', 'ann.jpg'))
+      .data as { annotations: Annotation[] };
+    expect(isJpeg(await readFile(join(workDir(), 'ann.jpg')))).toBe(true);
+    const img = await decode('ann.jpg');
+    expect(j.annotations.length).toBeGreaterThan(0);
+    // Lossy encoding blurs the outline, but the strong red of the boxes and tags survives.
+    expect(img.red).toBeGreaterThan(50);
+  });
+
+  it('stitches a page taller than one slice into a JPEG', async () => {
+    await bvl('open', fixture('/solid.html?c=rgb(255,0,0)'));
+    await bvl('eval', "document.body.style.height = '9000px'");
+    const r = await bvl('screenshot', '--full', '--screenshot-format', 'jpeg', 'tall.jpg');
+    expect(r.code).toBe(0);
+    expect(isJpeg(await readFile(join(workDir(), 'tall.jpg')))).toBe(true);
+    // Decode in the browser but return only the size (the pixel array would be huge).
+    const b64 = (await readFile(join(workDir(), 'tall.jpg'))).toString('base64');
+    const page = await browser.current.newPage();
+    try {
+      const h = await page.evaluate(async (data) => {
+        const bin = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        return (await createImageBitmap(new Blob([bin]))).height;
+      }, b64);
+      expect(h).toBeGreaterThan(8000);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it('captures a JPEG of a hidden tab', async () => {
+    const other = ['--session', 'shot-jpg-other'];
+    await bvl('open', fixture('/solid.html?c=rgb(0,0,255)'), ...other);
+    await bvl('open', fixture('/solid.html?c=rgb(255,0,0)'));
+    expect((await bvl('eval', 'document.visibilityState')).stdout.trim()).toBe('"hidden"');
+    expect((await bvl('screenshot', '--screenshot-format', 'jpeg', 'bg.jpg')).code).toBe(0);
+    const img = await decode('bg.jpg');
+    expect(redAt(img, Math.floor(img.width / 2), Math.floor(img.height / 2))).toBe(true);
+    await bvl('close', ...other);
+  });
+
+  it('--if-changed works with jpeg and keeps separate history per format', async () => {
+    await bvl('open', fixture('/form.html'));
+    const first = (await bvlJson('screenshot', '--if-changed', '--screenshot-format', 'jpeg'))
+      .data as { changed: boolean; revision: number };
+    expect(first).toMatchObject({ changed: true, revision: 1 });
+    const again = (await bvlJson('screenshot', '--if-changed', '--screenshot-format', 'jpeg'))
+      .data as { changed: boolean };
+    expect(again.changed).toBe(false);
+    const png = (await bvlJson('screenshot', '--if-changed')).data as {
+      changed: boolean;
+      revision: number;
+    };
+    expect(png).toMatchObject({ changed: true, revision: 1 });
+  });
+});
+
 describe('screenshot of a background tab', () => {
   it('captures the session tab, not another tab', async () => {
     const other = ['--session', 'shot-other'];
