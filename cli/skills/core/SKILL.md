@@ -140,6 +140,7 @@ Load these when the task matches (`bvl skills list` shows all):
 | Task | Load |
 |---|---|
 | Explore an app for bugs and write a QA report with screenshots | `bvl skills get dogfood` |
+| Build an API client/CLI for a site from its observed JSON traffic | `bvl skills get derive-client` |
 
 ## Commands (summary)
 

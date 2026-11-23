@@ -610,6 +610,8 @@ fn skills_list_get_path_install() {
         .is_file());
     assert!(out(&["skills", "get", "dogfood", "--ref", "issue-taxonomy"]).contains("Severity"));
     assert!(out(&["skills", "get", "dogfood", "--ref", "report-template"]).contains("ISSUE-001"));
+    let dc = out(&["skills", "get", "derive-client"]);
+    assert!(dc.starts_with("---\nname: derive-client\n") && dc.contains("redacted"));
     assert!(!run_bvl(&cfg, &home, &["skills", "get", "nope"]).status.success());
     let path = out(&["skills", "path", "core"]);
     assert!(std::path::Path::new(path.trim()).join("SKILL.md").is_file());
