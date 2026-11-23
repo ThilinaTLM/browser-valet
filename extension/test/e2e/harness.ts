@@ -97,6 +97,7 @@ export function useBrowser(): { readonly current: Browser } {
   // foreground paths (real wheel, no prime) and breaks tests of hidden-tab behaviour. Start every
   // test with the anchor tab in front, so agent tabs in its window are hidden.
   beforeEach(async () => {
+    await ensureExtensionAlive();
     await activateAnchor();
   });
   afterAll(async () => {
@@ -109,6 +110,43 @@ export function useBrowser(): { readonly current: Browser } {
       return shared;
     },
   };
+}
+
+/**
+ * Chrome sometimes takes the extension's service worker down when a tab it controls closes (a test
+ * closing a shared tab). `bvl status` keeps saying "connected" for the dead socket, the next
+ * request is lost and fails after ~25 s with "extension disconnected" (#48), and nothing wakes the
+ * worker before the 30 s alarm. Start every test with a live worker: when its target is gone, wake
+ * it by opening an extension page (the popup pings the worker) and wait for a round trip.
+ */
+async function ensureExtensionAlive(): Promise<void> {
+  const alive = async (): Promise<boolean> => {
+    const session = await browser().target().createCDPSession();
+    try {
+      const { targetInfos } = await session.send('Target.getTargets');
+      return targetInfos.some(
+        (t) => t.type === 'service_worker' && t.url.startsWith(info().extensionOrigin),
+      );
+    } finally {
+      await session.detach().catch(() => undefined);
+    }
+  };
+  if (await alive()) return;
+  const page = await browser().newPage();
+  try {
+    await page.goto(`${info().extensionOrigin}/popup.html`);
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      if (await alive()) {
+        const r = await bvl('tab', '--timeout', '3000');
+        if (r.code === 0) return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error('the extension service worker did not come back');
+  } finally {
+    await page.close().catch(() => undefined);
+  }
 }
 
 async function activateAnchor(): Promise<void> {

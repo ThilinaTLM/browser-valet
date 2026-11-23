@@ -147,7 +147,15 @@ async function refusedError(tabId: number, cause: unknown, url: string | undefin
   return new UserError(`${detached}${msg}`, 'not_controllable', { cause });
 }
 
+/** Tabs whose revoke is waiting for Chrome to release the debugger: no command may use them. */
+const barred = new Set<number>();
+export function bar(tabId: number, on: boolean): void {
+  if (on) barred.add(tabId);
+  else barred.delete(tabId);
+}
+
 export async function attach(tabId: number): Promise<void> {
+  if (barred.has(tabId)) throw new UserError('Control of this tab was revoked', 'revoked');
   if (attached.has(tabId)) return;
   let alreadyAttached = false;
   try {

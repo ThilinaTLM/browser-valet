@@ -70,3 +70,28 @@ describe('focusTab', () => {
     expect(mock.chrome.windows.update).toHaveBeenCalledWith(1, { drawAttention: true });
   });
 });
+
+describe('revoke', () => {
+  it('publishes the revoke only after the debugger is released, and bars the tab meanwhile', async () => {
+    let release: () => void = () => undefined;
+    const detach = vi.fn(
+      () =>
+        new Promise<void>((r) => {
+          release = r;
+        }),
+    );
+    (mock.chrome.debugger as unknown as { detach: unknown }).detach = detach;
+    await tabs.grant(5, 'user');
+    const cdp = await import('../../src/background/cdp');
+    const done = tabs.revoke(5);
+    await mock.flush();
+    expect(detach).toHaveBeenCalled();
+    // still listed (the popup shows it, a test or user cannot close it "after" the revoke yet)
+    expect(stateMod.state.tabs[5]?.control).toBe('user');
+    await expect(cdp.attach(5)).rejects.toThrow(/revoked/);
+    release();
+    await done;
+    expect(stateMod.state.tabs[5]?.control).toBeUndefined();
+    expect(detach).toHaveBeenCalledTimes(1);
+  });
+});

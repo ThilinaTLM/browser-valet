@@ -22,6 +22,16 @@ export async function grant(tabId: number, control: Control, owner?: string): Pr
 }
 
 export async function revoke(tabId: number): Promise<void> {
+  // Publish (`save()`: the popup drops the tab's row, a caller learns the tab is free) only after
+  // Chrome has released the debugger. A tab closed while its detach is still in flight can take the
+  // extension's service worker down with it in Chrome. Meanwhile the tab is barred, so no command
+  // re-attaches it.
+  cdp.bar(tabId, true);
+  try {
+    await cdp.detach(tabId);
+  } finally {
+    cdp.bar(tabId, false);
+  }
   const m = state.tabs[tabId];
   if (m) {
     delete m.control;
@@ -31,7 +41,6 @@ export async function revoke(tabId: number): Promise<void> {
     forgetBaselines(tabId);
     save();
   }
-  await cdp.detach(tabId);
   await refreshBadge(tabId);
 }
 
