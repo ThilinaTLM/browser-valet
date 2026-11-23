@@ -147,15 +147,17 @@ async function refusedError(tabId: number, cause: unknown, url: string | undefin
   return new UserError(`${detached}${msg}`, 'not_controllable', { cause });
 }
 
-/** Tabs whose revoke is waiting for Chrome to release the debugger: no command may use them. */
-const barred = new Set<number>();
-export function bar(tabId: number, on: boolean): void {
-  if (on) barred.add(tabId);
-  else barred.delete(tabId);
-}
-
 export async function attach(tabId: number): Promise<void> {
-  if (barred.has(tabId)) throw new UserError('Control of this tab was revoked', 'revoked');
+  // Fail closed: only a controlled tab is ever attached. This also stops a command that was
+  // already running when the user revoked the tab from re-attaching it.
+  const m = state.tabs[tabId];
+  if (m?.control === undefined) {
+    const ask = m?.tid ? `\`bvl tab ${m.tid}\`` : '`bvl tab` (list) and then `bvl tab <tN>`';
+    throw new UserError(
+      `This tab is not under agent control (the user stopped it, or never allowed it). Ask the user again with ${ask}.`,
+      'revoked',
+    );
+  }
   if (attached.has(tabId)) return;
   let alreadyAttached = false;
   try {
@@ -316,6 +318,9 @@ export async function sessionForFrame(
 /** CDP error text for a session that no longer exists. */
 const GONE = /session with given id not found/i;
 
+/** Longest a revoke waits for Chrome to release the debugger. */
+export const DETACH_TIMEOUT_MS = 3000;
+
 export async function detach(tabId: number): Promise<void> {
   attached.delete(tabId);
   resumed.delete(tabId);
@@ -323,11 +328,44 @@ export async function detach(tabId: number): Promise<void> {
   dropChildren(tabId);
   delete state.frames[tabId];
   events.delete(tabId);
-  for (const fn of detachListeners) fn(tabId);
+  for (const fn of detachListeners) {
+    try {
+      fn(tabId);
+    } catch (e) {
+      console.warn('bvl: detach listener failed', e);
+    }
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await chrome.debugger.detach({ tabId });
+    await Promise.race([
+      chrome.debugger.detach({ tabId }),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, DETACH_TIMEOUT_MS);
+      }),
+    ]);
   } catch {
     // not attached
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * After a service-worker start: release debugger sessions of tabs that are no longer controlled
+ * (a revoke that was cut short by a restart or a self-update leaves the session attached).
+ */
+export async function releaseUncontrolled(): Promise<void> {
+  try {
+    const targets = await chrome.debugger.getTargets();
+    await Promise.all(
+      targets
+        .filter(
+          (t) => t.attached && t.tabId !== undefined && state.tabs[t.tabId]?.control === undefined,
+        )
+        .map((t) => chrome.debugger.detach({ tabId: t.tabId }).catch(() => undefined)),
+    );
+  } catch {
+    // best effort (the unit-test mock has no getTargets)
   }
 }
 

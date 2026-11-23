@@ -9,6 +9,8 @@ beforeEach(async () => {
   vi.resetModules();
   mock = installChromeMock();
   cdp = await import('../../src/background/cdp');
+  const st = await import('../../src/background/state');
+  st.meta(7).control = 'agent'; // attach only serves controlled tabs
 });
 
 describe('attach', () => {

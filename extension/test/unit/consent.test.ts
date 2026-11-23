@@ -71,8 +71,11 @@ describe('focusTab', () => {
   });
 });
 
-describe('revoke', () => {
-  it('publishes the revoke only after the debugger is released, and bars the tab meanwhile', async () => {
+describe('revoke (fail closed)', () => {
+  interface Stored {
+    state?: { tabs: Record<number, { control?: string }> };
+  }
+  const hang = () => {
     let release: () => void = () => undefined;
     const detach = vi.fn(
       () =>
@@ -81,17 +84,128 @@ describe('revoke', () => {
         }),
     );
     (mock.chrome.debugger as unknown as { detach: unknown }).detach = detach;
+    return {
+      detach,
+      release: () => {
+        release();
+      },
+    };
+  };
+  const persisted = (id: number) => (mock.session.data as Stored).state?.tabs[id]?.control;
+
+  it('drops the grant and saves it before the debugger is released', async () => {
+    const h = hang();
     await tabs.grant(5, 'user');
-    const cdp = await import('../../src/background/cdp');
     const done = tabs.revoke(5);
     await mock.flush();
-    expect(detach).toHaveBeenCalled();
-    // still listed (the popup shows it, a test or user cannot close it "after" the revoke yet)
-    expect(stateMod.state.tabs[5]?.control).toBe('user');
-    await expect(cdp.attach(5)).rejects.toThrow(/revoked/);
-    release();
+    expect(h.detach).toHaveBeenCalled();
+    expect(tabs.isControlled(5)).toBe(false);
+    expect(persisted(5)).toBeUndefined(); // a handoff or restart now keeps it revoked
+    h.release();
     await done;
-    expect(stateMod.state.tabs[5]?.control).toBeUndefined();
-    expect(detach).toHaveBeenCalledTimes(1);
+  });
+
+  it('a restart in the middle of a revoke restores the tab uncontrolled', async () => {
+    hang();
+    await tabs.grant(5, 'user');
+    void tabs.revoke(5);
+    await mock.flush();
+    vi.resetModules();
+    const again = await import('../../src/background/state');
+    await again.loadState();
+    expect(again.state.tabs[5]?.control).toBeUndefined();
+  });
+
+  it('a throwing detach listener does not keep the grant', async () => {
+    const cdp = await import('../../src/background/cdp');
+    cdp.onDetached(() => {
+      throw new Error('listener broke');
+    });
+    await tabs.grant(5, 'user');
+    await tabs.revoke(5);
+    expect(tabs.isControlled(5)).toBe(false);
+    expect(persisted(5)).toBeUndefined();
+  });
+
+  it('waits at most the detach timeout for a hanging detach', async () => {
+    vi.useFakeTimers();
+    try {
+      hang();
+      await tabs.grant(5, 'user');
+      let finished = false;
+      void tabs.revoke(5).then(() => {
+        finished = true;
+      });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(finished).toBe(false);
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(finished).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('overlapping revokes share one detach and both resolve', async () => {
+    const h = hang();
+    await tabs.grant(5, 'user');
+    const a = tabs.revoke(5);
+    const b = tabs.revoke(5);
+    await mock.flush();
+    expect(h.detach).toHaveBeenCalledTimes(1);
+    h.release();
+    await Promise.all([a, b]);
+    expect(h.detach).toHaveBeenCalledTimes(1);
+  });
+
+  it('switching off strips every grant at once and is not held up by a hanging detach', async () => {
+    vi.useFakeTimers();
+    try {
+      stateMod.meta(6);
+      hang();
+      await tabs.grant(5, 'user');
+      await tabs.grant(6, 'agent');
+      const sw = await import('../../src/background/switch');
+      let finished = false;
+      void sw.revokeAll().then(() => {
+        finished = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(tabs.isControlled(5) || tabs.isControlled(6)).toBe(false);
+      expect(finished).toBe(false);
+      await vi.advanceTimersByTimeAsync(3500);
+      expect(finished).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cdp.attach refuses a tab that is not controlled, and says how to ask again', async () => {
+    const cdp = await import('../../src/background/cdp');
+    await tabs.grant(5, 'user');
+    await tabs.revoke(5);
+    const err = await cdp.attach(5).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'revoked' });
+    expect((err as Error).message).toMatch(/bvl tab t\d+/);
+    expect(mock.chrome.debugger.attach).not.toHaveBeenCalled();
+  });
+
+  it('releaseUncontrolled detaches sessions left over from a cut-short revoke', async () => {
+    const cdp = await import('../../src/background/cdp');
+    await tabs.grant(5, 'user');
+    stateMod.meta(6);
+    Object.assign(mock.chrome.debugger, {
+      getTargets: vi.fn(() =>
+        Promise.resolve([
+          { tabId: 5, attached: true },
+          { tabId: 6, attached: true },
+          { tabId: 7, attached: false },
+        ]),
+      ),
+    });
+    await cdp.releaseUncontrolled();
+    const calls = vi.mocked(mock.chrome.debugger.detach).mock.calls as unknown as {
+      tabId: number;
+    }[][];
+    expect(calls.map((c) => c[0]?.tabId)).toEqual([6]);
   });
 });

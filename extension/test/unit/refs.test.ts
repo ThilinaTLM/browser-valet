@@ -10,6 +10,7 @@ beforeEach(async () => {
   mock = installChromeMock();
   s = await import('../../src/background/state');
   refs = await import('../../src/background/refs');
+  s.meta(5).control = 'agent'; // attach only serves controlled tabs
   s.state.refs[5] = { e1: { backendNodeId: 1, role: 'button', name: 'Go' } };
 });
 

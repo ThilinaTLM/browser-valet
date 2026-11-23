@@ -129,28 +129,8 @@ describe('diff screenshot', () => {
         ...extra,
       );
       const d = await bvlJson('diff', 'screenshot', '-t', '0', '-o', 'dbg-jpeg.png');
-      if (!(d.data as { match: boolean }).match) {
-        const vis = (await bvl('eval', 'document.visibilityState')).stdout;
-        const b64 = (await readFile(join(workDir(), 'dbg-jpeg.png'))).toString('base64');
-        const pg = await browser.current.newPage();
-        const where = await pg.evaluate(async (data) => {
-          const bmp = await createImageBitmap(
-            new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: 'image/png' }),
-          );
-          const c = new OffscreenCanvas(bmp.width, bmp.height);
-          const g = c.getContext('2d');
-          g?.drawImage(bmp, 0, 0);
-          const px = g?.getImageData(0, 0, bmp.width, bmp.height).data ?? [];
-          const out: string[] = [];
-          for (let i = 0; i < px.length; i += 4)
-            if (px[i] === 255 && px[i + 1] === 0 && px[i + 2] === 0)
-              out.push(`${(i / 4) % bmp.width},${Math.floor(i / 4 / bmp.width)}`);
-          return { size: `${bmp.width}x${bmp.height}`, out };
-        }, b64);
-        await pg.close();
-        console.log('DBG', JSON.stringify({ extra, vis, where }));
-      }
-      expect(d.data).toMatchObject({ match: true, differentPixels: 0 });
+      const vis = (await bvl('eval', 'document.visibilityState')).stdout;
+      expect({ d: d.data, extra, vis }).toMatchObject({ d: { match: true, differentPixels: 0 } });
     }
   });
 
