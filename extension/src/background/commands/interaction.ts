@@ -622,7 +622,7 @@ export const interactionCommands: Command[] = [
     usage: 'tap <target>',
     summary: 'Tap an element with touch events (@ref or CSS selector)',
     details:
-      'Like `click` (same targeting and checks) but dispatches touchstart/touchend instead of mouse events, for pages that only react to touch. Chrome then synthesizes the click, so links and buttons work (not inside a cross-origin iframe: use `click` there). Pages that detect touch at load (`ontouchstart in window`) need `set touch on` first (agent tabs only).',
+      'Like `click` (same targeting and checks) but dispatches touchstart/touchend instead of mouse events, for pages that only react to touch. Chrome then synthesizes the click, so links and buttons work (unreliable inside a cross-origin iframe: use `click` there). Pages that detect touch at load (`ontouchstart in window`) need `set touch on` first (agent tabs only).',
     examples: ['bvl tap @e3', 'bvl tap "#carousel .next"'],
     async run(ctx, a) {
       const h = await element(ctx, target(a));

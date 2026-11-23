@@ -108,7 +108,7 @@ describe('tap / swipe / set touch', () => {
     await bvl('set', 'touch', 'off');
   });
 
-  it('tap inside a cross-origin iframe sends touch events (no synthesized click)', async () => {
+  it('tap inside a cross-origin iframe receives the touch events', async () => {
     await bvl('open', framesPage());
     for (let i = 0; i < 40; i++) {
       if ((await bvl('snapshot', '-i')).stdout.includes('Pay')) break;
@@ -119,8 +119,9 @@ describe('tap / swipe / set touch', () => {
     const ref = /ref=(e\d+)/.exec(line ?? '')?.[1];
     expect((await bvl('tap', `@${ref}`)).code).toBe(0);
     expect((await bvl('frame', 'payment-frame')).code).toBe(0);
-    // Touch events arrive; Chrome does not synthesize a click for input sent to the child session.
-    expect((await bvl('get', 'text', '#out')).stdout.trim()).toBe('touched');
+    // The touch events arrive. Whether Chrome also synthesizes a click for input sent to a child
+    // session is not reliable (it differed between local and CI), so it is not asserted.
+    expect((await bvl('eval', 'document.body.dataset.touched')).stdout.trim()).toBe('"1"');
   });
 
   it('set touch on/off toggles touch detection', async () => {
