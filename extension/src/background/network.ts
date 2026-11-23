@@ -10,7 +10,12 @@ import * as cdp from './cdp';
 export const REDACTED = '[redacted]';
 export const MAX_ENTRIES = 500;
 export const MAX_BODY_CHARS = 32_768;
-const MAX_POST_DATA = 8192;
+export const MAX_POST_DATA = 8192;
+/** Larger request bodies are not kept at all: redacting them is not worth the time. */
+export const MAX_REDACT_INPUT = 1_000_000;
+
+/** Copy a slice so the (possibly large) parent string is not retained. */
+const flat = (s: string): string => new TextDecoder().decode(new TextEncoder().encode(s));
 
 export interface Entry {
   /** CDP requestId; redirect hops get `<requestId>~<n>`. */
@@ -25,6 +30,10 @@ export interface Entry {
   requestHeaders: Record<string, string>;
   responseHeaders: Record<string, string>;
   postData?: string;
+  /** The request body was longer than MAX_POST_DATA and cut after redaction. */
+  postDataTruncated?: boolean;
+  /** Why there is no `postData` (too large to redact). */
+  postDataNote?: string;
   /** Wall-clock ms at the start of the request. */
   startedAt?: number;
   /** Monotonic CDP seconds at the start (for the duration). */
@@ -58,34 +67,66 @@ export function isCredentialHeader(name: string): boolean {
   );
 }
 
+/** Headers whose value is a URL (or holds one): its query and fragment are redacted. */
+const URL_HEADERS = new Set(['location', 'referer', 'content-location', 'refresh', ':path']);
+
 export function redactHeaders(h: Record<string, unknown> | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(h ?? {})) {
-    out[k] = isCredentialHeader(k) ? REDACTED : String(v);
+    const name = k.toLowerCase();
+    out[k] = isCredentialHeader(k)
+      ? REDACTED
+      : URL_HEADERS.has(name)
+        ? redactUrl(String(v))
+        : String(v);
   }
   return out;
 }
 
 const norm = (k: string): string => k.toLowerCase().replace(/[-_.\s]/g, '');
 
-/** Keys whose values are secrets in a request (form, JSON or query string). */
+/**
+ * Keys whose values are secrets in a request (form, JSON, multipart or URL query). Matching is
+ * case- and separator-insensitive (`norm`). A bare `code` is deliberately not matched (too many
+ * harmless `code=US` / `code=404` fields); OAuth callback `code` values are single-use.
+ */
 export function isSecretKey(key: string): boolean {
-  return /passw|passcode|token|secret|apikey|credential|authorization|csrf|xsrf|^auth$|^pin$|^otp$|privatekey|sessionid/.test(
+  return /passw|passcode|token|secret|apikey|credential|authorization|csrf|xsrf|^auth$|^pin$|^otp$|privatekey|sessionid|sessionkey|accesskey|encryptionkey|signingkey|cookie|jwt|assertion|devicecode|authcode|authorizationcode|codeverifier|signature/.test(
     norm(key),
   );
 }
 
-const RESPONSE_SECRET_KEYS = new Set([
-  'accesstoken',
-  'refreshtoken',
-  'idtoken',
-  'token',
-  'secret',
-  'password',
-  'clientsecret',
-]);
+/** `*token` keys that are cursors, not credentials. */
+const HARMLESS_TOKEN = /^((next|prev|previous)?(page|continuation|sync|resume|cursor))token$/;
+
+/**
+ * Keys whose values are secrets in a response body (after `norm`): any key ending in `token`
+ * (except pagination/cursor tokens) or containing a secret-like word. `tokens_used`,
+ * `token_count`, `token_type`, `expires_in`, a bare `code` and `refresh` stay visible.
+ */
+export function isResponseSecretKey(key: string): boolean {
+  const n = norm(key);
+  if (HARMLESS_TOKEN.test(n)) return false;
+  return (
+    n.endsWith('token') ||
+    /secret|passw|apikey|accesskey|secretkey|privatekey|sessionkey|sessionid|encryptionkey|signingkey|credential|cookie|csrf|xsrf|jwt|assertion|devicecode|authcode|authorizationcode|codeverifier|signature|authorization/.test(
+      n,
+    )
+  );
+}
+
+const JWT_VALUE = /^eyJ[\w-]+\.[\w-]+\.[\w-]*$/;
+const URL_VALUE = /^https?:\/\//i;
+
+/** Redact a string value regardless of its key: JWT-shaped values and secret query/fragment in URLs. */
+function redactValue(v: string): string {
+  if (v.length < 2000 && JWT_VALUE.test(v)) return REDACTED;
+  if (URL_VALUE.test(v)) return redactUrl(v);
+  return v;
+}
 
 function redactJson(value: unknown, isSecret: (k: string) => boolean): unknown {
+  if (typeof value === 'string') return redactValue(value);
   if (Array.isArray(value)) return value.map((v) => redactJson(v, isSecret));
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
@@ -105,7 +146,7 @@ function tryJson(text: string): unknown {
   }
 }
 
-function redactForm(text: string): string {
+function redactForm(text: string, isSecret: (k: string) => boolean = isSecretKey): string {
   return text
     .split('&')
     .map((pair) => {
@@ -117,16 +158,40 @@ function redactForm(text: string): string {
       } catch {
         // keep raw key
       }
-      return isSecretKey(key) ? `${pair.slice(0, eq)}=${REDACTED}` : pair;
+      return isSecret(key) ? `${pair.slice(0, eq)}=${REDACTED}` : pair;
     })
     .join('&');
 }
 
-function redactMultipart(text: string): string {
-  return text.replace(
-    /(name="([^"]*)"[^\r\n]*\r?\n(?:[^\r\n]+\r?\n)*\r?\n)([^\r\n]*)/g,
-    (m, head: string, name: string) => (isSecretKey(name) ? `${head}${REDACTED}` : m),
-  );
+/** Linear multipart redaction: split on the boundary, then look at each part's own headers. */
+function redactMultipart(text: string, contentType: string): string {
+  let boundary = /boundary=("?)([^";\s]+)\1/i.exec(contentType)?.[2];
+  if (!boundary && text.startsWith('--')) {
+    const eol = text.search(/\r?\n/);
+    boundary = text.slice(2, eol === -1 ? undefined : eol).trim();
+  }
+  if (!boundary) return REDACTED;
+  const delim = `--${boundary}`;
+  const pieces = text.split(delim);
+  // Boundary mismatch (nothing to split): fail closed.
+  if (pieces.length < 3) return REDACTED;
+  return pieces
+    .map((part, i) => {
+      if (i === 0 || part.startsWith('--')) return part;
+      const crlf = part.indexOf('\r\n\r\n');
+      const lf = part.indexOf('\n\n');
+      const useCrlf = crlf !== -1 && (lf === -1 || crlf < lf);
+      const at = useCrlf ? crlf : lf;
+      if (at === -1) return part;
+      const sep = useCrlf ? '\r\n\r\n' : '\n\n';
+      const m = /(?:^|[\s;])name=(?:"([^"]*)"|([^\s;]+))/i.exec(part.slice(0, at));
+      const name = m?.[1] ?? m?.[2];
+      if (name === undefined || !isSecretKey(name)) return part;
+      const value = part.slice(at + sep.length);
+      const tail = value.endsWith('\r\n') ? '\r\n' : value.endsWith('\n') ? '\n' : '';
+      return `${part.slice(0, at + sep.length)}${REDACTED}${tail}`;
+    })
+    .join(delim);
 }
 
 /** Redact secret-like fields in a request body (JSON, urlencoded form or multipart). */
@@ -136,33 +201,137 @@ export function redactRequestBody(text: string, contentType = ''): string {
     return JSON.stringify(redactJson(json, isSecretKey));
   }
   if (/multipart\/form-data/i.test(contentType) || text.startsWith('--'))
-    return redactMultipart(text);
-  if (/x-www-form-urlencoded/i.test(contentType) || /^[^\s=&]+=/.test(text)) {
-    return redactForm(text);
+    return redactMultipart(text, contentType);
+  if (/x-www-form-urlencoded/i.test(contentType)) return redactForm(text);
+  if (JSONISH_MIME.test(contentType) || /^\s*[{[]/.test(text)) {
+    return redactJsonText(text, isSecretKey);
   }
+  if (/^[^\s=&]+=/.test(text)) return redactForm(text);
   return text;
 }
 
-/** Redact obvious token fields (access_token, password, …) in a JSON response body. */
-export function redactResponseBody(text: string): string {
-  const json = tryJson(text);
+const XSSI_PREFIX = /^(\)\]\}',?|while\s*\(1\);|for\s*\(;;\);|\{\}&&)[ \t]*\r?\n?/;
+const JSONISH_MIME = /json|event-stream|javascript|ecmascript/i;
+const WITHHELD = '[body withheld: could not be parsed for redaction]';
+
+/**
+ * End index (exclusive) of the JSON string starting at `start` (a `"`). A JSON string cannot hold a
+ * raw newline, so an unterminated string stops at the newline (or the end of the text) and the
+ * result is `-(position) - 1`: the caller resumes scanning at that position and treats it as no
+ * key and no value. This keeps one stray quote from shifting the pairing on later lines.
+ */
+function stringEnd(text: string, start: number): number {
+  for (let i = start + 1; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 92) i++;
+    else if (c === 34) return i + 1;
+    else if (c === 10 || c === 13) return -i - 1;
+  }
+  return -text.length - 1;
+}
+
+const isWs = (c: string | undefined): boolean =>
+  c === ' ' || c === '\t' || c === '\n' || c === '\r';
+
+/**
+ * Single-pass scanner for JSON-like text that is not one JSON document (NDJSON, SSE, JSONP):
+ * redacts the value of every `"key": value` pair whose key is secret, plus JWT-shaped and URL
+ * string values. Linear: every character is read a bounded number of times. A secret key holding
+ * an object or array cannot be cut out reliably, so the whole body is withheld then. Only double-
+ * quoted keys are recognised (single-quoted or unquoted JS keys are not).
+ */
+function redactJsonText(text: string, isSecret: (k: string) => boolean): string {
+  const out: string[] = [];
+  let last = 0;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    if (text[i] !== '"') {
+      i++;
+      continue;
+    }
+    const end = stringEnd(text, i);
+    if (end < 0) {
+      i = -end - 1;
+      continue;
+    }
+    let k = end;
+    while (isWs(text[k])) k++;
+    if (text[k] === ':') {
+      let key = text.slice(i + 1, end - 1);
+      try {
+        key = JSON.parse(text.slice(i, end)) as string;
+      } catch {
+        // keep raw key
+      }
+      let v = k + 1;
+      while (isWs(text[v])) v++;
+      if (isSecret(key)) {
+        const c = text[v];
+        if (c === '{' || c === '[') return WITHHELD;
+        let ve = v;
+        if (c === '"') {
+          const se = stringEnd(text, v);
+          ve = se < 0 ? -se - 1 : se;
+        } else while (ve < n && !isWs(text[ve]) && !/[,}\]]/.test(text[ve] ?? '')) ve++;
+        out.push(text.slice(last, v), `"${REDACTED}"`);
+        last = ve;
+        i = ve;
+      } else {
+        i = v;
+      }
+      continue;
+    }
+    // A string value (not a key).
+    const head = text.slice(i + 1, i + 9);
+    if (head.startsWith('eyJ') || /^https?:/i.test(head)) {
+      let val = text.slice(i + 1, end - 1);
+      try {
+        val = JSON.parse(text.slice(i, end)) as string;
+      } catch {
+        // keep raw
+      }
+      const r = redactValue(val);
+      if (r !== val) {
+        out.push(text.slice(last, i), JSON.stringify(r));
+        last = end;
+      }
+    }
+    i = end;
+  }
+  out.push(text.slice(last));
+  return out.join('');
+}
+
+/**
+ * Redact secret fields (`isResponseSecretKey`) in a response body: JSON (also behind an XSSI
+ * prefix), urlencoded (`access_token=...`), and JSON-like text (NDJSON, SSE, JSONP) by key/value
+ * pairs. Other content is returned as is.
+ */
+export function redactResponseBody(text: string, mimeType = ''): string {
+  const xssi = XSSI_PREFIX.exec(text)?.[0] ?? '';
+  const json = tryJson(text.slice(xssi.length));
   if (json !== undefined && typeof json === 'object' && json !== null) {
-    return JSON.stringify(
-      redactJson(json, (k) => RESPONSE_SECRET_KEYS.has(norm(k))),
-      null,
-      2,
-    );
+    return xssi + JSON.stringify(redactJson(json, isResponseSecretKey), null, 2);
   }
+  const trimmed = text.trim();
+  if (/x-www-form-urlencoded/i.test(mimeType) || /^[^\s=&<>{}[\]]+=\S*$/.test(trimmed)) {
+    const redacted = redactForm(trimmed, isResponseSecretKey);
+    return redacted === trimmed ? text : redacted;
+  }
+  if (JSONISH_MIME.test(mimeType) || /^[{[]/.test(trimmed))
+    return redactJsonText(text, isResponseSecretKey);
   return text;
 }
 
-/** Redact secret-like query parameter values in a URL. */
+/** Redact secret-like query and fragment values in a URL (OAuth implicit flow: `#access_token=`). */
 export function redactUrl(url: string): string {
-  const q = url.indexOf('?');
-  if (q === -1) return url;
-  const hash = url.indexOf('#', q);
-  const query = url.slice(q + 1, hash === -1 ? undefined : hash);
-  return `${url.slice(0, q + 1)}${redactForm(query)}${hash === -1 ? '' : url.slice(hash)}`;
+  const hash = url.indexOf('#');
+  const main = hash === -1 ? url : url.slice(0, hash);
+  const frag = hash === -1 ? '' : `#${redactForm(url.slice(hash + 1))}`;
+  const q = main.indexOf('?');
+  if (q === -1) return main + frag;
+  return `${main.slice(0, q + 1)}${redactForm(main.slice(q + 1))}${frag}`;
 }
 
 export function isTextMime(mime: string | undefined): boolean {
@@ -215,6 +384,7 @@ export async function startRecording(tabId: number): Promise<boolean> {
     await cdp.send(tabId, 'Network.enable', {
       maxTotalBufferSize: 10_000_000,
       maxResourceBufferSize: 2_000_000,
+      maxPostDataSize: MAX_REDACT_INPUT,
     });
   } catch (e) {
     logs.delete(tabId);
@@ -327,7 +497,23 @@ export function handleEvent(tabId: number, method: string, raw: unknown): void {
         const ct = Object.entries((req.headers ?? {}) as P).find(
           ([k]) => k.toLowerCase() === 'content-type',
         )?.[1];
-        e.postData = redactRequestBody(req.postData.slice(0, MAX_POST_DATA), str(ct, ''));
+        // Redact the whole body first: a cut JSON body no longer parses and would leak.
+        if (req.postData.length > MAX_REDACT_INPUT) {
+          // Fail closed: too large to redact, so keep nothing.
+          e.postData = undefined;
+          e.postDataTruncated = false;
+          e.postDataNote = 'body too large to redact';
+        } else {
+          const redacted = redactRequestBody(req.postData, str(ct, ''));
+          e.postDataNote = undefined;
+          e.postDataTruncated = redacted.length > MAX_POST_DATA;
+          e.postData = e.postDataTruncated ? flat(redacted.slice(0, MAX_POST_DATA)) : redacted;
+        }
+      } else if (req.hasPostData === true) {
+        // Chrome dropped it (over maxPostDataSize, counted in bytes): nothing to redact.
+        e.postData = undefined;
+        e.postDataTruncated = false;
+        e.postDataNote = 'body too large to redact';
       }
       e.startMono = Number(p.timestamp);
       e.startedAt = typeof p.wallTime === 'number' ? p.wallTime * 1000 : Date.now();
@@ -398,7 +584,8 @@ export async function responseBody(tabId: number, e: Entry): Promise<Body> {
     };
   }
   if (res.base64Encoded) return { note: `binary body not shown (${e.mimeType ?? 'unknown'})` };
-  let text = redactResponseBody(res.body);
+  if (res.body.length > MAX_REDACT_INPUT) return { note: 'body too large to redact' };
+  let text = redactResponseBody(res.body, e.mimeType);
   const truncated = text.length > MAX_BODY_CHARS;
   if (truncated) text = text.slice(0, MAX_BODY_CHARS);
   return { text, truncated };

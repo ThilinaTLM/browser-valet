@@ -22,6 +22,8 @@ function entryJson(e: net.Entry, body?: net.Body): Record<string, unknown> {
     headers: e.requestHeaders,
     responseHeaders: e.responseHeaders,
     postData: e.postData ?? null,
+    postDataTruncated: !!e.postDataTruncated,
+    postDataNote: e.postDataNote ?? null,
     ...(body
       ? { body: body.text ?? null, bodyNote: body.note ?? null, bodyTruncated: !!body.truncated }
       : {}),
@@ -37,7 +39,7 @@ export const networkCommands: Command[] = [
   {
     name: 'network',
     details:
-      'Observes requests the page made. Recording starts with the first `network` command on a tab (a warning says so), so reload or repeat the action afterwards. Credentials in URLs, headers and bodies are redacted.',
+      'Observes requests the page made. Recording starts with the first `network` command on a tab (a warning says so), so reload or repeat the action afterwards. Credentials in URLs, headers and bodies are redacted: secret-like fields in request bodies (JSON, form, multipart; redacted before the 8,192-character request-body cap) and token/secret/password/API-key/session-id/JWT/cookie/signature fields (matched case-insensitively; keys ending in `token` except pagination cursors) in JSON, NDJSON/SSE/JSONP and form-encoded response bodies, plus URL fragments and Location/Referer headers (other fields, e.g. token_type or tokens_used, and HTML/text stay visible). Response bodies are capped at 32,768 characters.',
     examples: [
       'bvl network requests --filter /api --status 4xx',
       'bvl network request <id>',
@@ -84,7 +86,11 @@ export const networkCommands: Command[] = [
           `Time: ${e.durationMs === undefined ? 'n/a' : `${e.durationMs} ms`}   Size: ${e.size ?? 'n/a'} bytes   MIME: ${e.mimeType ?? 'n/a'}`,
           `Request headers:\n${headerBlock(e.requestHeaders)}`,
         ];
-        if (e.postData !== undefined) parts.push(`Request body:\n${e.postData}`);
+        if (e.postDataNote) parts.push(`Request body: (${e.postDataNote})`);
+        else if (e.postData !== undefined)
+          parts.push(
+            `Request body:\n${e.postData}${e.postDataTruncated ? `\n… [truncated at ${net.MAX_POST_DATA} characters]` : ''}`,
+          );
         parts.push(`Response headers:\n${headerBlock(e.responseHeaders)}`);
         parts.push(
           body.text !== undefined

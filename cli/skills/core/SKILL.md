@@ -225,7 +225,11 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
 - `network requests [--filter --type --method --status 4xx --clear]` / `network request <id>` show what the
   page sent and received (read-only). Recording starts at the first `network` command on a tab, so
   reload or repeat the action afterwards. Cookie, Authorization and similar headers, secret fields in
-  request bodies and token fields in JSON responses are always shown as `[redacted]`.
+  request bodies (redacted before the 8,192-character request-body cap; `postDataTruncated` in `--json`) and
+  token/secret/password/API-key/session-id/JWT/cookie/signature fields in JSON (also XSSI-prefixed,
+  NDJSON, SSE, JSONP) and form-encoded response bodies, are always shown as `[redacted]`; in URLs, fragments and `Location`/`Referer`/`:path` headers only secret-like values are redacted. JWT-shaped strings are redacted under any key. Fields like `token_type`, `tokens_used`, `expires_in`
+  stay visible; response bodies are capped at 32,768 characters. A bare `code` and
+  `refresh` are not redacted.
 - `pdf <path> [--landscape] [--background]` works on any controlled tab (read-only).
 - `tap <t>` and `swipe <up|down|left|right> [px] [--selector t] [--duration ms]` send touch events
   (`swipe up` moves content up, i.e. scrolls down) for touch-only pages; they work on any controlled tab.
