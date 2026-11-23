@@ -3,3 +3,5 @@
 - The wire protocol contract is `docs/architecture/protocol.md`. Change it together with the CLI, the proxy and the extension.
 - New ideas and unbuilt work go in `docs/proposals/`. After implementing a proposal, decommission it into architecture.
 - Update affected architecture pages and `cli/skills/` in the same change when behaviour or rules change.
+- Create git worktrees under `.nerve/worktrees/<branch-name>` (git-ignored), e.g. `git worktree add .nerve/worktrees/feat-x -b feat-x origin/main`. Don't create worktrees elsewhere.
+- After opening or pushing to a PR, watch its checks until they pass (`gh pr checks <n> --watch --fail-fast`). If a check fails, read the logs (`gh run view <run-id> --log-failed`), fix, push and watch again. Don't report a PR as done while checks are pending or failing.
