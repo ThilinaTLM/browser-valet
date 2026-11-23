@@ -128,10 +128,9 @@ describe('diff screenshot', () => {
         '40',
         ...extra,
       );
-      expect((await bvlJson('diff', 'screenshot', '-t', '0')).data).toMatchObject({
-        match: true,
-        differentPixels: 0,
-      });
+      const d = await bvlJson('diff', 'screenshot', '-t', '0', '-o', 'dbg-jpeg.png');
+      const vis = (await bvl('eval', 'document.visibilityState')).stdout;
+      expect({ d: d.data, extra, vis }).toMatchObject({ d: { match: true, differentPixels: 0 } });
     }
   });
 

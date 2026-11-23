@@ -44,7 +44,8 @@ describe('mouse', () => {
     await bvl('open', fixture('/mouse.html'));
     await bvl('mouse', 'move', '50', '50');
     expect((await bvl('mouse', 'wheel', '300')).code).toBe(0);
-    expect(Number((await bvl('eval', 'window.scrollY')).stdout.trim())).toBe(300);
+    const st = (await bvl('eval', 'document.visibilityState + " " + window.scrollY')).stdout;
+    expect(st.trim(), 'visibility and scrollY').toBe('"hidden 300"');
   });
 
   it('rejects bad input', async () => {
