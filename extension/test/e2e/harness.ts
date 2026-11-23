@@ -13,7 +13,7 @@
 
 import { spawn } from 'node:child_process';
 import puppeteer, { type Browser, type Page } from 'puppeteer-core';
-import { afterAll, beforeAll, inject } from 'vitest';
+import { afterAll, beforeAll, beforeEach, inject } from 'vitest';
 
 export interface BvlResult {
   code: number;
@@ -92,6 +92,13 @@ export function useBrowser(): { readonly current: Browser } {
       defaultViewport: null,
     });
   });
+  // Chrome activates a neighbouring tab when the active one closes (a popup, a user tab, a
+  // puppeteer page), which can be an agent tab; an agent tab that is visible takes the
+  // foreground paths (real wheel, no prime) and breaks tests of hidden-tab behaviour. Start every
+  // test with the anchor tab in front, so agent tabs in its window are hidden.
+  beforeEach(async () => {
+    await activateAnchor();
+  });
   afterAll(async () => {
     await shared?.disconnect();
     shared = undefined;
@@ -102,6 +109,15 @@ export function useBrowser(): { readonly current: Browser } {
       return shared;
     },
   };
+}
+
+async function activateAnchor(): Promise<void> {
+  const session = await browser().target().createCDPSession();
+  try {
+    await session.send('Target.activateTarget', { targetId: info().anchorTargetId });
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
 }
 
 function browser(): Browser {

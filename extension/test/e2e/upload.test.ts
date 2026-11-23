@@ -20,7 +20,8 @@ describe('upload through a file chooser', () => {
     await bvl('open', fixture('/upload-dynamic.html'), ...S);
     await writeFile(join(workDir(), 'cv.txt'), 'hello');
     const r = await bvl('upload', '#up', 'cv.txt', ...S);
-    expect(r.code).toBe(0);
+    const vis = (await bvl('eval', 'document.visibilityState', ...S)).stdout;
+    expect(r.code, `${r.stderr} vis=${vis}`).toBe(0);
     expect((await bvl('get', 'text', '#name', ...S)).stdout.trim()).toBe('cv.txt');
   });
 

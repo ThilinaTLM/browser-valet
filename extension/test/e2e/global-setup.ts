@@ -25,6 +25,8 @@ export interface E2eInfo {
   fixtureUrl: string;
   /** Same server under another host name (`localhost`): a different site, so an iframe from it is out of process. */
   crossFixtureUrl: string;
+  /** Target id of the blank tab Chrome starts with: the foreground tab (see `useBrowser`). */
+  anchorTargetId: string;
   /** Scratch directory used as the CLI's cwd. */
   workDir: string;
 }
@@ -222,6 +224,15 @@ export default async function setup(project: TestProject): Promise<() => Promise
       (t) => t.type() === TargetType.SERVICE_WORKER && t.url().startsWith('chrome-extension://'),
       { timeout: 30_000 },
     );
+    // The tab Chrome opened at launch stays open for the whole run: it is what keeps agent tabs
+    // (opened inactive in the focused window) hidden. Tests re-activate it between tests.
+    const cdp = await browser.target().createCDPSession();
+    const { targetInfos } = await cdp.send('Target.getTargets');
+    await cdp.detach().catch(() => undefined);
+    const anchorTargetId = targetInfos.find(
+      (t) => t.type === 'page' && t.url === 'about:blank',
+    )?.targetId;
+    if (!anchorTargetId) throw new Error('no initial about:blank tab to use as the anchor');
     const extensionOrigin = /^chrome-extension:\/\/[^/]+/.exec(sw.url())?.[0] ?? '';
 
     // 4. The extension starts switched off: switch it on the way the popup does.
@@ -256,6 +267,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
       extensionOrigin,
       fixtureUrl: fixtures.url,
       crossFixtureUrl: fixtures.url.replace('127.0.0.1', 'localhost'),
+      anchorTargetId,
       workDir,
     });
   } catch (e) {
