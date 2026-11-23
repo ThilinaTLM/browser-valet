@@ -55,6 +55,7 @@ fn try_start(extra: &[&str]) -> Option<Proxy> {
         .args(extra)
         .env("BVL_CONFIG_DIR", &dir)
         .env("BVL_EXT_WAIT_MS", "400")
+        .env("BVL_EXT_WAKE_MS", "1500")
         .env_remove("BVL_PORT")
         .stderr(Stdio::null())
         .spawn()
@@ -361,6 +362,69 @@ fn newer_cli_does_not_restart_a_busy_proxy() {
     assert!(err.contains("busy with 1 request"), "{err}");
     assert_eq!(seen, ["status"]);
     std::fs::remove_dir_all(&d).ok();
+}
+
+/// A browser keeps the socket of a dead service worker open: it never answers, so `ping` finds it out.
+#[test]
+fn silent_extension_is_dropped_and_status_says_so() {
+    let p = start(&[]);
+    let mut e = ext(&p);
+    std::thread::sleep(Duration::from_millis(700)); // not heard from recently: status must probe
+    let t = Instant::now();
+    assert!(status(&p)["ext"].is_null());
+    assert!(t.elapsed() < Duration::from_secs(4));
+    assert_eq!(try_recv(&mut e, 500), Some(json!({"t":"ping"})));
+    // The proxy tells a live-but-slow worker to reconnect rather than switch itself off.
+    assert_eq!(try_recv(&mut e, 500), Some(json!({"t":"bye","reason":"restart"})));
+}
+
+#[test]
+fn answering_extension_stays_connected() {
+    let p = start(&[]);
+    let mut e = ext(&p);
+    std::thread::sleep(Duration::from_millis(700));
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"status"}));
+    assert_eq!(recv(&mut e), json!({"t":"ping"}));
+    send(&mut e, json!({"t":"pong"}));
+    assert_eq!(recv(&mut c)["ext"]["browser"], "Test Chrome 1");
+}
+
+#[test]
+fn request_waits_for_a_dead_extension_to_come_back() {
+    let p = start(&[]);
+    let _dead = ext(&p);
+    std::thread::sleep(Duration::from_millis(700));
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{"argv":["x"]}}));
+    // The worker "restarts" after the usual wait for an extension has passed.
+    std::thread::sleep(Duration::from_millis(3300));
+    let note = recv(&mut c);
+    assert_eq!(note["t"], "event");
+    assert!(note["stderr"].as_str().unwrap().contains("waiting for it to restart"));
+    let mut e = ext(&p);
+    let r = recv(&mut e);
+    assert_eq!(r["t"], "req");
+    send(
+        &mut e,
+        json!({"t":"res","id":r["id"],"res":{"exitCode":0,"stdout":"ok\n"}}),
+    );
+    assert_eq!(recv(&mut c)["res"]["stdout"], "ok\n");
+}
+
+#[test]
+fn request_fails_when_a_dead_extension_does_not_come_back() {
+    let p = start(&[]);
+    let _dead = ext(&p);
+    std::thread::sleep(Duration::from_millis(700));
+    let mut c = cli(&p);
+    let t = Instant::now();
+    send(&mut c, json!({"t":"req","req":{}}));
+    assert_eq!(recv(&mut c)["t"], "event");
+    let r = recv(&mut c);
+    assert!(t.elapsed() >= Duration::from_millis(1500));
+    assert_eq!(r["res"]["code"], "not_connected");
+    assert!(r["res"]["stderr"].as_str().unwrap().contains("stopped responding"));
 }
 
 #[test]

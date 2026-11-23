@@ -418,3 +418,16 @@ export async function openFromTab(openerUrlPart: string, url: string): Promise<P
   void page.goto(url).catch(() => undefined); // may be blocked on purpose
   return page;
 }
+
+/** Whether the extension's service worker is currently running (Chrome drops its target when it dies). */
+export async function extensionWorkerRunning(): Promise<boolean> {
+  const session = await browser().target().createCDPSession();
+  try {
+    const { targetInfos } = await session.send('Target.getTargets');
+    return targetInfos.some(
+      (t) => t.type === 'service_worker' && t.url.startsWith(info().extensionOrigin),
+    );
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
+}

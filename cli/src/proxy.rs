@@ -18,11 +18,25 @@ const EXT_ORIGIN: &str = "chrome-extension://fekhggniifjffgnkljlblgfcoolaonbm";
 
 type Ws = WebSocketStream<TcpStream>;
 
+/// A live extension sends something at least every 20 s (its `ping`). Silent for longer than this: dead.
+const EXT_SILENT: Duration = Duration::from_secs(50);
+/// Before `status` or a `req` trusts the extension connection, it must have been heard from this recently
+/// or answer a `ping` within `PROBE_WAIT`. A browser keeps a dead service worker's socket open.
+const FRESH: Duration = Duration::from_millis(500);
+const PROBE_WAIT: Duration = Duration::from_millis(2500);
+/// A dead worker restarts on the next browser event or at the latest on its 30 s alarm.
+const WAKE_WAIT_MS: u64 = 35_000;
+
 /// Shown to the agent when no extension is connected. The usual cause is the switch being off.
 pub const NOT_CONNECTED: &str =
     "browser extension is not connected. It is switched off by default, and switches itself off \
 when bvl stops or has been idle, and when the browser restarts. Ask the user to click the Browser Valet icon in their \
 browser and switch it on, then retry. If it was never installed, the user runs `bvl setup` first.";
+
+/// Shown when the extension stopped answering and did not come back in time.
+pub const WORKER_DEAD: &str = "browser extension stopped responding and did not restart in time. Its background worker was \
+terminated by the browser (this happens when a controlled tab is closed). Opening the Browser Valet popup or any browser \
+activity wakes it; then retry.";
 
 /// An in-flight request: which ext connection owns it, how to reach that ext, how to reach the CLI.
 struct Pending {
@@ -34,6 +48,8 @@ struct Ext {
     conn: u64,
     tx: mpsc::UnboundedSender<String>,
     info: Value,
+    /// When the last frame (any) arrived from the extension.
+    rx: Instant,
 }
 struct State {
     ext: Option<Ext>,
@@ -44,26 +60,30 @@ struct State {
     exts: usize,
     next: u64,
     last: Instant,
+    /// When the proxy last dropped an extension that stopped answering (cleared when one connects).
+    lost: Option<Instant>,
 }
 struct Shared {
     secret: String,
     port: u16,
     idle: u64,
     ext_wait: Duration,
+    /// How long a request waits for an extension whose worker died to restart.
+    wake_wait: Duration,
     st: Mutex<State>,
     stop: Notify,
 }
 
 pub fn run(secret: String, port: u16, idle: u64) -> Result<()> {
-    let ext_wait = std::env::var("BVL_EXT_WAIT_MS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(10_000);
+    let ms = |var: &str, default: u64| {
+        Duration::from_millis(std::env::var(var).ok().and_then(|v| v.parse().ok()).unwrap_or(default))
+    };
     let sh = Arc::new(Shared {
         secret,
         port,
         idle,
-        ext_wait: Duration::from_millis(ext_wait),
+        ext_wait: ms("BVL_EXT_WAIT_MS", 10_000),
+        wake_wait: ms("BVL_EXT_WAKE_MS", WAKE_WAIT_MS),
         st: Mutex::new(State {
             ext: None,
             pending: HashMap::new(),
@@ -71,6 +91,7 @@ pub fn run(secret: String, port: u16, idle: u64) -> Result<()> {
             exts: 0,
             next: 1,
             last: Instant::now(),
+            lost: None,
         }),
         stop: Notify::new(),
     });
@@ -102,7 +123,9 @@ async fn serve_all(sh: Arc<Shared>) -> Result<()> {
                 flush(&sh).await;
                 return Ok(());
             }
-            _ = tick.tick() => if sh.idle > 0 {
+            _ = tick.tick() => {
+                drop_if_silent(&sh, EXT_SILENT);
+                if sh.idle == 0 { continue; }
                 let idle = {
                     let mut st = sh.st.lock().unwrap();
                     let idle = st.pending.is_empty() && st.last.elapsed() >= Duration::from_secs(sh.idle);
@@ -116,9 +139,48 @@ async fn serve_all(sh: Arc<Shared>) -> Result<()> {
                     flush(&sh).await;
                     return Ok(());
                 }
-            },
+            }
         }
     }
+}
+
+/// Drop the extension connection if nothing arrived from it for `after`. Its pending requests fail
+/// (the connection loop ends) and `lost` records it. The `bye restart` is for a worker that is alive but
+/// slow: it reconnects instead of switching itself off; a dead one never reads it.
+fn drop_if_silent(sh: &Shared, after: Duration) -> bool {
+    let mut st = sh.st.lock().unwrap();
+    if st.ext.as_ref().is_some_and(|e| e.rx.elapsed() >= after) {
+        bye(&mut st, "restart");
+        st.lost = Some(Instant::now());
+        log("extension stopped answering, dropped its connection");
+        return true;
+    }
+    false
+}
+
+/// Make sure the extension connection is live: heard from just now, or answering a `ping`.
+/// Returns false (and drops the connection) when it is not. No-op without a connection.
+async fn probe_ext(sh: &Shared) -> bool {
+    let sent = Instant::now();
+    {
+        let st = sh.st.lock().unwrap();
+        let Some(e) = st.ext.as_ref() else { return true };
+        if e.rx.elapsed() < FRESH {
+            return true;
+        }
+        e.tx.send(json!({"t":"ping"}).to_string()).ok();
+    }
+    while sent.elapsed() < PROBE_WAIT {
+        sleep(Duration::from_millis(25)).await;
+        let st = sh.st.lock().unwrap();
+        match st.ext.as_ref() {
+            None => return true,
+            Some(e) if e.rx > sent => return true,
+            _ => {}
+        }
+    }
+    // Only drop what we probed: a newer connection may have replaced it meanwhile.
+    !drop_if_silent(sh, sent.elapsed().min(PROBE_WAIT))
 }
 
 /// Tell the extension why the proxy is going away and close its connection. `restart` keeps the
@@ -262,7 +324,13 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
         if let Some(v) = update {
             tx.send(json!({"t":"update","version":v}).to_string()).ok();
         }
-        st.ext = Some(Ext { conn: id, tx, info });
+        st.ext = Some(Ext {
+            conn: id,
+            tx,
+            info,
+            rx: Instant::now(),
+        });
+        st.lost = None;
         st.exts += 1;
         id
     };
@@ -274,11 +342,17 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
             },
             m = next_json(&mut ws) => match m {
                 None => break,
-                Some(v) => route(sh, &v),
+                Some(v) => {
+                    if let Some(e) = sh.st.lock().unwrap().ext.as_mut().filter(|e| e.conn == id) {
+                        e.rx = Instant::now();
+                    }
+                    route(sh, &v)
+                }
             },
         }
     }
-    ws.close(None).await.ok();
+    // A dead peer may never complete the close handshake.
+    timeout(Duration::from_secs(1), ws.close(None)).await.ok();
     let mut st = sh.st.lock().unwrap();
     st.exts -= 1;
     if st.ext.as_ref().is_some_and(|e| e.conn == id) {
@@ -324,6 +398,7 @@ async fn cli_conn(sh: &Shared, mut ws: Ws) -> Result<()> {
         .context("closed before request")?;
     match msg["t"].as_str() {
         Some("status") => {
+            probe_ext(sh).await;
             let ext = sh
                 .st
                 .lock()
@@ -364,14 +439,25 @@ async fn cli_conn(sh: &Shared, mut ws: Ws) -> Result<()> {
 }
 
 async fn request(sh: &Shared, ws: &mut Ws, req: Value) -> Result<()> {
+    probe_ext(sh).await;
     let start = Instant::now();
+    let mut told = false;
     let ext_tx = loop {
         let tx = sh.st.lock().unwrap().ext.as_ref().map(|e| (e.conn, e.tx.clone()));
         if let Some(t) = tx {
             break t;
         }
-        if start.elapsed() >= sh.ext_wait {
-            return send(ws, err_res(NOT_CONNECTED)).await;
+        // A worker that died restarts by itself: wait for it (until `wake_wait` after it was
+        // dropped, at least `ext_wait`), and say so.
+        let lost = sh.st.lock().unwrap().lost;
+        let waited = start.elapsed() >= sh.ext_wait;
+        if waited && lost.is_none_or(|t| t.elapsed() >= sh.wake_wait) {
+            return send(ws, err_res(lost.map_or(NOT_CONNECTED, |_| WORKER_DEAD))).await;
+        }
+        if lost.is_some() && !told {
+            told = true;
+            let note = "browser extension stopped responding; waiting for it to restart (up to 30 s) …\n";
+            send(ws, json!({"t":"event","stderr":note})).await?;
         }
         sleep(Duration::from_millis(50)).await;
     };

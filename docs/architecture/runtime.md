@@ -106,3 +106,15 @@ Request lifecycle rules (in the proxy):
 | Update/handoff flow | Medium | manual test of an old managed extension updating with an agent tab open |
 | `State` shape | Medium | defaults in `initial()`; test handoff from the previous version |
 | Idle timer, ext wait, retry intervals | Low | relay tests |
+
+## Dead service worker
+
+Closing a tab the agent controls (shared or agent tab, debugger attached or not) often leaves the extension's
+service worker unusable: its JavaScript and WebSocket still run, but every `chrome.*` call hangs, and Chrome
+terminates it some seconds later (about 15–30 s in E2E). It is not caused by our `debugger.detach` (skipping
+it changes nothing), and a minimal extension that attaches the debugger does not do it. Nothing wakes the
+terminated worker until the next browser event, the popup, or the 30 s alarm (`bvl-keepalive`; Chrome's
+minimum). The proxy therefore checks liveness (ping/pong gated on an extension API call, see
+[protocol.md](protocol.md#extension-connection)), reports `ext: null` for such a worker and makes requests
+wait for it to come back (up to 35 s) instead of losing them. The worker restores its state from
+`chrome.storage.session`, so a restart loses only in-flight requests.
