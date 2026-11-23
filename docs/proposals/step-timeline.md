@@ -27,8 +27,9 @@ timeline status
   switches to other controlled tabs. A tab the session has no grant for is never captured.
 - `stop` writes the sheet through `res.files` (default `ctx.tmpPath('bvl', 'timelines',
   'timeline-<ts>.png')`, like screenshots); `--frames <dir>` also writes each frame as JPEG.
-  Output cap: sheet ≤ 16000 px tall and encoded size ≤ 16 MiB (under the proxy's
-  tungstenite limits of 16 MiB frame / 64 MiB message); beyond that, tiles shrink and the sheet
+  Output cap: sheet ≤ 16000 px tall and encoded size ≤ 12 MiB (base64 ≈ 16 MiB, at the proxy's
+  tungstenite default frame limit of 16 MiB; the 64 MiB message limit is not the binding one; the
+  limit check is shared with the #24 spike); beyond that, tiles shrink and the sheet
   falls back to JPEG, with a warning.
 
 ### Capture
@@ -43,6 +44,9 @@ timeline status
   clip capture overlapping the next command's `prime` comes back blank. Capture **inside** the
   command's `execute`, before its `res` is returned, under a per-tab capture lock shared with
   `screenshot` and `prime`. The cost (~30–80 ms, measure) is paid only while a timeline runs.
+- Skip the capture while a dialog is open (`raceDialog`; a blocked page never answers
+  `captureScreenshot`) and race every capture against a short timeout (≈ 1 s); a skipped step
+  keeps its caption with `(no frame)`.
 - Downscale ≤ 800 px wide, JPEG q≈60.
 
 ### Keyframes
@@ -65,8 +69,9 @@ At `--max-frames`, evict the middle frame with the smallest change.
 `chrome.storage.session` shares its 10 MB quota with `state` (grants), and `save()` in `state.ts`
 ignores write failures, so a failed write could lose a revoke and resurrect a grant after a
 worker restart: a consent bypass. So frames **stay in worker memory**, like the
-`screenshot --if-changed` baselines (`capture-compare.ts`; automation.md). A worker restart ends
-the timeline: the next `timeline` command says "timeline lost (extension restarted)". Not
+`screenshot --if-changed` baselines (`capture-compare.ts`; automation.md). **Decision:** a worker restart ends
+the timeline (security over convenience), which replaces the issue's "survives a service-worker
+restart" criterion with "frames are lost on restart and the timeline reports it". The next command says the next `timeline` command says "timeline lost (extension restarted)". Not
 IndexedDB or `storage.local` (page content on disk, principle 6). Budget ≈ 32 MB in memory;
 drop middle frames when full.
 
@@ -96,4 +101,4 @@ Medium: reuses capture, compare and annotate code.
 
 ## Docs to update when built
 
-`cli/skills/core/SKILL.md`, `references/commands.md`, `automation.md`, `README.md`, `security.md`.
+`cli/skills/core/SKILL.md`, `references/commands.md`, `automation.md`, `README.md`, `security.md`, `ui.md` (recording indicator in the popup).
