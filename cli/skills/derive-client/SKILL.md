@@ -59,21 +59,21 @@ Inspired by the `derive-client` skill of [agent-browser](https://github.com/verc
 ## 1. Record
 
 ```bash
-export BVL_SESSION=derive-example
-bvl open https://app.example.com/            # your own agent tab; the user is logged in
-bvl network requests --clear                 # starts recording (the first `network` command starts recording)
-bvl open https://app.example.com/notes       # or reload: load-time calls are only seen now
-bvl snapshot -i
+# --session <name> goes on every command: an `export` may not survive between your shell calls
+bvl --session derive-example open https://app.example.com/            # your own agent tab; the user is logged in
+bvl --session derive-example network requests --clear                 # the first `network` command starts recording
+bvl --session derive-example open https://app.example.com/notes       # or reload: load-time calls are only seen now
+bvl --session derive-example snapshot -i
 ```
 
 Then drive **one flow at a time** (list, search, open item, create, edit, delete, paginate), and
 after each flow, before the next one, read what it produced:
 
 ```bash
-bvl network requests --type xhr,fetch                    # all API-looking calls
-bvl network requests --type xhr,fetch --method POST      # writes only
-bvl network requests --filter /api/ --status 400-599     # failures worth knowing about
-bvl network requests --type xhr,fetch --json   # structured; prefer it to text if --max-output cuts the text
+bvl --session derive-example network requests --type xhr,fetch                    # all API-looking calls
+bvl --session derive-example network requests --type xhr,fetch --method POST      # writes only
+bvl --session derive-example network requests --filter /api/ --status 400-599     # failures worth knowing about
+bvl --session derive-example network requests --type xhr,fetch --json   # structured; prefer it to text if --max-output cuts the text
 ```
 
 The user's popup may set a default `--max-output` that cuts long text; `--json` is more robust, and
@@ -111,8 +111,8 @@ From `network requests --type xhr,fetch`:
 For each endpoint, once:
 
 ```bash
-bvl network request <id>
-bvl network request <id> --json    # data.postData, data.body, data.responseHeaders, data.bodyTruncated
+bvl --session derive-example network request <id>
+bvl --session derive-example network request <id> --json    # data.postData, data.body, data.responseHeaders, data.bodyTruncated
 ```
 
 Record: path and query parameters (which vary between calls, which are fixed), request body
