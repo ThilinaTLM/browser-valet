@@ -1,6 +1,6 @@
 ---
 name: bvl
-description: Drive the user's real, logged-in Chrome with the `bvl` CLI (Browser Valet). Use when a task needs the user's actual browser session — their logins, cookies, open tabs — rather than a fresh test browser. Same snapshot/@ref workflow as agent-browser. Also for dogfooding/QA of a web app (`bvl skills get dogfood`).
+description: Drive the user's real, logged-in Chrome with the `bvl` CLI (Browser Valet). Use when a task needs the user's actual browser session — their logins, cookies, open tabs — rather than a fresh test browser. Same snapshot/@ref workflow as agent-browser. Also for dogfooding/QA of a web app (`bvl skills get dogfood`) or for deriving an API client from a site's observed traffic (`bvl skills get derive-client`).
 allowed-tools: Bash(bvl:*)
 ---
 
@@ -13,6 +13,7 @@ version:
 bvl skills get core           # the loop, consent rules, tips
 bvl skills get core --full    # plus the full command reference
 bvl skills list               # task skills, e.g. `bvl skills get dogfood` (exploratory QA report)
+bvl skills list               # task skills, e.g. `bvl skills get derive-client` (API client from traffic)
 ```
 
 If `bvl status` says `not connected`, the extension is probably switched off (it is off by default
