@@ -22,6 +22,8 @@
   mixed content.
 - **Accessibility**: unlabelled controls, missing alt text, focus order, keyboard traps,
   focus lost after a dialog, headings out of order, colour as the only signal.
+- **Performance**: slow loads or interactions, long spinners, large or repeated requests
+  (`network requests`), layout jumping while loading, unresponsive UI.
 - **Content**: typos, placeholder text, stale or contradictory copy, untranslated strings.
 
 ## Exploration checklist
@@ -36,10 +38,11 @@ Per page:
 - [ ] Controls have names in `snapshot -i` (nameless ones are suspicious)
 
 Per form:
-- [ ] Submit empty; submit invalid; over-long and special-character input
+- [ ] Client side only in a real account: required markers, labels, inline messages after `fill`
+- [ ] Staging/demo only (or user agreed): submit empty or invalid; over-long and special-character input
 - [ ] Required fields marked; errors say what to fix and appear near the field
 - [ ] Focus moves to the first error; Enter submits where expected
-- [ ] No real submit of the happy path unless the user asked for it
+- [ ] No submit in a real account unless the user asked for it
 
 Per flow: complete it on a staging/demo instance if one exists, otherwise stop before the
 final irreversible step and record that.

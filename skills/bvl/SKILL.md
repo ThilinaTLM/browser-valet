@@ -1,6 +1,6 @@
 ---
 name: bvl
-description: Drive the user's real, logged-in Chrome with the `bvl` CLI (Browser Valet). Use when a task needs the user's actual browser session — their logins, cookies, open tabs — rather than a fresh test browser. Same snapshot/@ref workflow as agent-browser.
+description: Drive the user's real, logged-in Chrome with the `bvl` CLI (Browser Valet). Use when a task needs the user's actual browser session — their logins, cookies, open tabs — rather than a fresh test browser. Same snapshot/@ref workflow as agent-browser. Also for dogfooding/QA of a web app (`bvl skills get dogfood`).
 allowed-tools: Bash(bvl:*)
 ---
 

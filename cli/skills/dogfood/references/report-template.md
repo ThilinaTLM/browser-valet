@@ -17,7 +17,7 @@
 | Low | 0 |
 | **Total** | 0 |
 
-By category: Functional 0 · UX 0 · Visual 0 · Console/network 0 · Accessibility 0 · Content 0
+By category: Functional 0 · UX 0 · Visual 0 · Console/network 0 · Accessibility 0 · Performance 0 · Content 0
 
 Not tested (and why): {e.g. happy-path submits that would create real data}
 
@@ -30,7 +30,7 @@ Not tested (and why): {e.g. happy-path submits that would create real data}
 | Field | Value |
 |---|---|
 | Severity | critical / high / medium / low |
-| Category | functional / ux / visual / console-network / accessibility / content |
+| Category | functional / ux / visual / console-network / accessibility / performance / content |
 | URL | {page where it happens} |
 
 **Description**: {What is wrong, what was expected.}
@@ -39,7 +39,7 @@ Not tested (and why): {e.g. happy-path submits that would create real data}
 
 1. Open {URL}
    ![Step 1](screenshots/issue-001-step-1.png)
-2. {Action}, e.g. click "Save" (`@e5`)
+2. {Action}, e.g. click the "Save" button
    ![Step 2](screenshots/issue-001-step-2.png)
 3. **Observe**: {what goes wrong}
    ![Result](screenshots/issue-001-result.png)

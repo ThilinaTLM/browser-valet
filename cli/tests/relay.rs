@@ -604,6 +604,10 @@ fn skills_list_get_path_install() {
     assert!(out(&["skills", "get", "core", "--full"]).contains(&r));
     let dog = out(&["skills", "get", "dogfood"]);
     assert!(dog.starts_with("---\nname: dogfood\n"));
+    assert!(out(&["skills", "list"]).lines().any(|l| l.starts_with("dogfood\t")));
+    assert!(std::path::Path::new(out(&["skills", "path", "dogfood"]).trim())
+        .join("SKILL.md")
+        .is_file());
     assert!(out(&["skills", "get", "dogfood", "--ref", "issue-taxonomy"]).contains("Severity"));
     assert!(out(&["skills", "get", "dogfood", "--ref", "report-template"]).contains("ISSUE-001"));
     assert!(!run_bvl(&cfg, &home, &["skills", "get", "nope"]).status.success());
