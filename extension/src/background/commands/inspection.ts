@@ -73,6 +73,21 @@ function urlMatches(url: string, pattern: string): boolean {
 /** How often `wait` forces a frame on a hidden tab (see `poll`). */
 const FRAME_EVERY_MS = 500;
 
+/** `networkidle`: the document has loaded and no new resource request started for 500 ms. */
+export async function waitNetworkIdle(ctx: Ctx, id: number): Promise<void> {
+  let last = -1;
+  let since = Date.now();
+  await poll(ctx, 'network idle', async () => {
+    if ((await evaluate(id, 'document.readyState')).value !== 'complete') return false;
+    const n = (await evaluate(id, "performance.getEntriesByType('resource').length")).value;
+    if (n !== last) {
+      last = n as number;
+      since = Date.now();
+    }
+    return Date.now() - since >= 500;
+  });
+}
+
 async function poll(ctx: Ctx, what: string, check: () => Promise<boolean>): Promise<void> {
   const deadline = Date.now() + ctx.timeout;
   let framed = Date.now();
@@ -412,18 +427,7 @@ export const inspectionCommands: Command[] = [
         } else if (load === 'load') {
           await poll(ctx, 'load', () => ready('complete'));
         } else if (load === 'networkidle') {
-          // No new resource requests for 500ms after load.
-          let last = -1;
-          let since = Date.now();
-          await poll(ctx, 'network idle', async () => {
-            if (!(await ready('complete'))) return false;
-            const n = (await evaluate(id, "performance.getEntriesByType('resource').length")).value;
-            if (n !== last) {
-              last = n as number;
-              since = Date.now();
-            }
-            return Date.now() - since >= 500;
-          });
+          await waitNetworkIdle(ctx, id);
         } else throw new UserError('--load must be load|domcontentloaded|networkidle', 'bad_args');
       } else {
         throw new UserError('Usage: wait <target|ms> | --text | --url | --load | --fn', 'bad_args');

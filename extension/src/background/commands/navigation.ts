@@ -14,7 +14,7 @@ import {
 import { findTab, meta, save, session, state } from '../state';
 import { focusTab, grant, isControlled, requestControl, revoke, sleep, waitForLoad } from '../tabs';
 
-function normalizeUrl(url: string): string {
+export function normalizeUrl(url: string): string {
   if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
   if (/^(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(url)) return `http://${url}`;
   return `https://${url}`;
