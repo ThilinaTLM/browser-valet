@@ -60,7 +60,7 @@ strings, or `postMessage` with transfer over a `MessageChannel`. Spike both.
 
 `--cursor` draws a pointer and click ripple from the per-tab pointer state. Today that state lives
 in `commands/extra.ts` and `click` doesn't update it; the pointer-state refactor (`pointer.ts`, PR
-#41) updates it on click. This feature depends on that, and needs a move/click event feed to the
+#41) updates it on click. This feature **depends on #41 being merged first**, and needs a move/click event feed to the
 offscreen document (time-stamped), not only the last position. Commands acting by script (hidden wheel)
 have no pointer; the cursor shows the target centre.
 
@@ -71,16 +71,18 @@ stop` says the recording was lost.
 
 ### Transport and size
 
-Videos go in `res.files` as base64 in one message. Cap the **encoded** size at 16 MiB, so the
-base64 `res` is ≤ ~22 MiB, under tungstenite's 64 MiB message / 16 MiB frame defaults (check
-the frame limit in the spike: a single frame may need raising or splitting). At the cap recording
+Videos go in `res.files` as base64 in one message. Cap the **encoded** size (16 MiB, or 12 MiB if frames can't be raised), so the
+base64 `res` is ≈ 22 MiB: **over** tungstenite's 16 MiB default frame limit (the 64 MiB message limit
+is fine). So either cap the encoded size at ≈ 12 MiB (≈ 16 MiB base64) or raise/split frames in the
+proxy, CLI and extension; the spike decides (shared with #20's output cap). At the cap recording
 ends with a warning. Longer videos need chunked file messages (a protocol change in the CLI,
 proxy and extension together, `protocol.md` and `cli/tests/relay.rs`); not in v1.
 
 ### Lifetime and privacy
 
 Ends on revoke, tab close, `close`, update reload, or `--max-duration` (default 60 s), discarding
-data unless stopped. Frames live only in offscreen memory. Frames show what the page shows, so
+data unless stopped. The offscreen document is created on demand at `start` and closed at `stop` and whenever no recording
+is active. Frames live only in its memory. Frames show what the page shows, so
 visible secrets are recorded (as with screenshots); the popup and badge show "recording".
 
 ### Manifest
