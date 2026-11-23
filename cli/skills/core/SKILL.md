@@ -116,6 +116,14 @@ a URL is opened like `open`). Agent tabs load in the background, where Chrome re
 `LCP: not measurable (page loaded in a background tab)` (`null` in `--json`, see `notMeasurable`), not 0. For real LCP
 measure a tab the user shared and has in front. `inp: -` means no slow interaction was recorded (Chrome buffers only ≥ 104 ms).
 
+## More skills
+
+Load these when the task matches (`bvl skills list` shows all):
+
+| Task | Load |
+|---|---|
+| Explore an app for bugs and write a QA report with screenshots | `bvl skills get dogfood` |
+
 ## Commands (summary)
 
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
