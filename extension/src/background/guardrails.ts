@@ -73,7 +73,7 @@ export function effectiveMaxOutput(a: Args, user: Guardrails = guardrails): numb
 }
 
 // Strings that identify the page rather than carry its content are never cut.
-const KEEP_WHOLE = new Set(['origin', 'url', 'title', 'selector']);
+const KEEP_WHOLE = new Set(['origin', 'url', 'url1', 'url2', 'title', 'selector']);
 
 function limitValue(v: unknown, max: number, key: string | undefined, hit: { n: number }): unknown {
   if (typeof v === 'string') {

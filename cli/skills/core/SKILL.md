@@ -103,7 +103,7 @@ warning). To compare with an older state, save it and pipe it back: `bvl snapsho
 opens both URLs in your agent tab (like `open`, so the allowed-domains policy and new-site confirmation apply and
 both URLs are checked before anything loads; never a tab the user shared), then prints `Snapshot diff:` and, with
 `--screenshot`, `Screenshot diff:`. The tab stays on `<u2>` and earlier refs are gone. `networkidle` also waits for
-500 ms without new requests. `--json`: `{diff, url1, url2, snapshot1, snapshot2, screenshot?}`.
+500 ms without a resource finishing loading (a request still in flight, e.g. a long poll, counts as idle; times out after `--timeout`). If `<u2>` fails to load the tab stays on `<u1>`. Empty URLs and flags of other `diff` subcommands are `bad_args`. `--json`: `{diff, url1, url2, snapshot1, snapshot2, screenshot?}`.
 
 Elements that act like buttons but have no interactive role (`<div onclick>`, `cursor: pointer`
 spans, `tabindex`) get a ref too, marked `clickable [cursor:pointer, onclick]` (or
@@ -151,7 +151,7 @@ Load these when the task matches (`bvl skills list` shows all):
 ## Commands (summary)
 
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
-`select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`, `frame`,
+`select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `diff` (`snapshot`, `screenshot`, `url`), `highlight`, `pushstate`, `session`, `frame`,
 `read`, `vitals`, `a11y`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 `screenshot @e3 card.png` (or a CSS/XPath target) captures just that element, much cheaper than a full shot (on a shared tab it scrolls the page only if the element is not already in view); a single argument is the path if it has an image extension or looks like one (`./x`, `dir/x`), else the target (a bare `out` is a target: write `out.png`); use two arguments for an XPath. Not with `--full`; `--annotate` then boxes only refs inside the element. `screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
 `diff screenshot` compares the page with the last `screenshot` / `diff screenshot` of this tab and writes an image (grey baseline, changes red); the first call only records the baseline. Exit code is 0 even when pixels differ: read `match` / `mismatchPercentage`.

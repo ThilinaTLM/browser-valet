@@ -20,7 +20,7 @@ import * as cdp from '../cdp';
 import { UserError } from '../errors';
 import { diffImages } from '../image-diff';
 import { fullPage, toBase64, viewport, waitNetworkIdle } from './inspection';
-import { assertNavigable } from '../guardrails';
+import { assertNavigable, guardNavigation } from '../guardrails';
 import { navigationCommands, normalizeUrl } from './navigation';
 
 /**
@@ -36,15 +36,30 @@ interface Subcommand {
   run(ctx: Ctx, a: Args): Promise<Result>;
 }
 
+const F_SELECTOR: Flag = {
+  name: 'selector',
+  short: 's',
+  type: 'string',
+  desc: 'Scope to an element (CSS or @ref)',
+};
+const F_COMPACT: Flag = {
+  name: 'compact',
+  short: 'c',
+  type: 'bool',
+  desc: 'Drop empty structural nodes',
+};
+const F_DEPTH: Flag = { name: 'depth', short: 'd', type: 'string', desc: 'Limit tree depth' };
+const F_FULL: Flag = { name: 'full', short: 'f', type: 'bool', desc: 'Full page screenshot' };
+
 const SUBCOMMANDS: Record<string, Subcommand> = {
   snapshot: {
     usage: 'diff snapshot [--stdin] [-s <selector>] [-c] [-d N]',
     flags: [
       { name: 'stdin', type: 'bool', desc: 'Read the baseline snapshot text from stdin' },
       { name: 'baseline', short: 'b', type: 'string', desc: 'Not supported (see details)' },
-      { name: 'selector', short: 's', type: 'string', desc: 'Scope to an element (CSS or @ref)' },
-      { name: 'compact', short: 'c', type: 'bool', desc: 'Drop empty structural nodes' },
-      { name: 'depth', short: 'd', type: 'string', desc: 'Limit tree depth' },
+      F_SELECTOR,
+      F_COMPACT,
+      F_DEPTH,
     ],
     // Like `snapshot`: the depth and selector are logged, a baseline never is.
     showFlags: ['depth', 'selector'],
@@ -66,7 +81,7 @@ const SUBCOMMANDS: Record<string, Subcommand> = {
         type: 'string',
         desc: 'Colour distance tolerated, 0-1 (default 0.1)',
       },
-      { name: 'full', short: 'f', type: 'bool', desc: 'Full page screenshot' },
+      F_FULL,
     ],
     showFlags: ['output', 'threshold'],
     run: diffScreenshot,
@@ -81,10 +96,14 @@ const SUBCOMMANDS: Record<string, Subcommand> = {
         type: 'string',
         desc: 'load | domcontentloaded | networkidle (default load)',
       },
+      F_FULL,
+      F_SELECTOR,
+      F_COMPACT,
+      F_DEPTH,
     ],
-    // Like `open`, both URLs are logged; selectors are page-derived text and are not.
+    // Like `open`, both URLs are logged; the selector and depth as for `diff snapshot`.
     show: 2,
-    showFlags: ['depth', 'wait-until'],
+    showFlags: ['depth', 'selector', 'wait-until'],
     run: diffUrl,
   },
 };
@@ -109,7 +128,7 @@ export const diffCommands: Command[] = [
     details:
       'diff snapshot takes a snapshot and prints a unified diff against the last snapshot taken on this tab with the same options (-c, -d, -s, and the frame); a snapshot taken with -i or -u is not a baseline. Refs are ignored when comparing, so a reload or navigation does not make every line differ; the printed lines keep their refs. Without an earlier snapshot the whole tree shows as added (with a warning). --stdin compares against a text baseline instead (`bvl snapshot > before.txt`, later `bvl diff snapshot --stdin < before.txt`); -b <file> is not supported because the extension cannot read files. The new snapshot becomes the baseline for the next diff. --json: {diff, additions, removals, unchanged, changed}. \n\n' +
       'diff screenshot compares the page with the last screenshot of the same scope (viewport or --full) taken in this tab by `screenshot` or `diff screenshot`, and writes a diff image: the baseline in grey, changed pixels in red. The first call only records the baseline. The baseline lives in memory: it is lost when the tab is closed or revoked and when the extension restarts, and captures over ~12 MB (PNG) are not kept. --baseline <file> is not supported: the extension cannot read local files. Exits 0 even when pixels differ; read the text or JSON (diffPath, differentPixels, totalPixels, mismatchPercentage, match, dimensionMismatch).\n\n' +
-      "diff url <u1> <u2> opens each URL in the session's agent tab exactly like `open` (never a tab the user shared; allowed-domains and new-site confirmation apply, and both URLs are checked before the first navigation), snapshots it, then diffs the two snapshots with refs ignored. --screenshot also compares PNG captures of the two pages (--full for the whole page) and writes a diff image when they differ. -s, -c and -d scope the snapshots. --wait-until: `load` and `domcontentloaded` wait for the load event (as `open` does); `networkidle` additionally waits until no new resource request started for 500 ms (the same heuristic as `wait --load networkidle`, bounded by --timeout per page). The tab stays on <u2>, so refs from before the command are gone. --json: {diff: {diff, additions, removals, unchanged, changed, identical, deletions}, url1, url2, snapshot1, snapshot2, screenshot?}.",
+      "diff url <u1> <u2> opens each URL in the session's agent tab exactly like `open` (never a tab the user shared; allowed-domains and new-site confirmation apply, and both URLs are checked before the first navigation), snapshots it, then diffs the two snapshots with refs ignored. --screenshot also compares PNG captures of the two pages (--full for the whole page) and writes a diff image when the sizes match and they differ (--full without --screenshot is ignored with a warning). -s, -c and -d scope the snapshots. --wait-until: `load` and `domcontentloaded` wait for the load event (as `open` does); `networkidle` additionally waits until no resource finished loading for 500 ms (the heuristic of `wait --load networkidle`: resource-timing entries, so a request still in flight, such as a long poll, counts as idle; fails with `timeout` after --timeout ms). --timeout applies to each page, so the command can take up to twice as long. Other flags (-t, -o, --stdin, --baseline) are rejected. The tab stays on <u2>, so refs from before the command are gone; if loading <u2> fails the tab stays on <u1>. Output is page content: with --content-boundaries the whole text is wrapped, labelled with <u2>'s URL as origin. --json: {diff: {diff, additions, removals, unchanged, changed, identical, deletions}, url1, url2, snapshot1, snapshot2, screenshot?}.",
     examples: [
       'bvl diff snapshot',
       'bvl diff snapshot --stdin < before.txt',
@@ -139,6 +158,15 @@ export const diffCommands: Command[] = [
             : `Unknown diff subcommand '${name}' (available: ${Object.keys(SUBCOMMANDS).join(', ')})`,
           'bad_args',
         );
+      }
+      const own = new Set(sub.flags.map((f) => f.name));
+      for (const [n] of a.given()) {
+        if (!own.has(n)) {
+          throw new UserError(
+            `Unknown flag --${n} for diff ${String(name)}. Usage: ${sub.usage}`,
+            'bad_args',
+          );
+        }
       }
       return sub.run(ctx, a);
     },
@@ -369,7 +397,8 @@ const WAIT_UNTIL = ['load', 'domcontentloaded', 'networkidle'];
 /** Navigate the session's agent tab like `open` does (policy, confirmation, timeout, warnings). */
 async function openAgentTab(ctx: Ctx, url: string, waitUntil: string): Promise<string[]> {
   const open = navigationCommands.find((c) => c.name === 'open');
-  const r = await open?.run(ctx, new Args([url], new Map()));
+  if (!open) throw new Error('open command missing');
+  const r = await open.run(ctx, new Args([url], new Map()));
   // `open` waits for the load event, which covers `load` and `domcontentloaded`.
   if (waitUntil === 'networkidle') await waitNetworkIdle(ctx, await ctx.tab());
   return [r?.warning ?? []].flat();
@@ -392,12 +421,24 @@ async function diffUrl(ctx: Ctx, a: Args): Promise<Result> {
   if (depth !== undefined && (!Number.isInteger(depth) || depth < 0)) {
     throw new UserError('Depth must be a non-negative integer', 'bad_args');
   }
-  // Both URLs are checked before anything navigates, so a blocked second URL costs no request.
-  assertNavigable(ctx, normalizeUrl(url1));
-  assertNavigable(ctx, normalizeUrl(url2));
+  // `open` does not navigate on an empty URL, which would diff whatever tab is current.
+  for (const u of [url1, url2]) {
+    if (u.trim() === '') {
+      throw new UserError('URL must not be empty (is a shell variable unset?)', 'bad_args');
+    }
+  }
+  const [n1, n2] = [normalizeUrl(url1.trim()), normalizeUrl(url2.trim())];
+  // Policy and confirmation for both URLs up front: a blocked or denied <u2> must not leave the
+  // tab on <u1>. Both are recorded as visited, so `open` does not ask again.
+  assertNavigable(ctx, n1);
+  assertNavigable(ctx, n2);
+  await guardNavigation(ctx, n1);
+  await guardNavigation(ctx, n2);
 
   const withShot = a.has('screenshot');
   const full = a.has('full');
+  const warnings: string[] = [];
+  if (full && !withShot) warnings.push('--full has no effect without --screenshot');
   const opts = {
     interactive: false,
     compact: a.has('compact'),
@@ -405,10 +446,9 @@ async function diffUrl(ctx: Ctx, a: Args): Promise<Result> {
     scope: a.str('selector'),
     urls: false,
   };
-  const warnings: string[] = [];
 
   const visit = async (url: string) => {
-    warnings.push(...(await openAgentTab(ctx, url, waitUntil)));
+    warnings.push(...(await openAgentTab(ctx, url.trim(), waitUntil)));
     const id = await ctx.tab(); // `open` set it: an agent tab, never the user's shared one
     const snap = await snapshot(id, { ...opts, session: ctx.session });
     const shot = withShot ? await capture(id, full) : undefined;

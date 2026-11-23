@@ -73,12 +73,27 @@ function urlMatches(url: string, pattern: string): boolean {
 /** How often `wait` forces a frame on a hidden tab (see `poll`). */
 const FRAME_EVERY_MS = 500;
 
-/** `networkidle`: the document has loaded and no new resource request started for 500 ms. */
+/**
+ * `networkidle`: the document has loaded and no resource finished loading for 500 ms. This counts
+ * resource-timing entries (no `Network.enable`), so it is blind to a request still in flight (a
+ * long poll, an event stream counts as idle) and to anything the page does not report there.
+ * The page's buffer holds 250 entries by default and then drops new ones, which would look idle
+ * forever: the first poll raises the limit and clears the entries, so only what finishes during
+ * the wait is counted (`performance.getEntriesByType('resource')` of the page is emptied once).
+ */
 export async function waitNetworkIdle(ctx: Ctx, id: number): Promise<void> {
   let last = -1;
+  let primed = false;
   let since = Date.now();
   await poll(ctx, 'network idle', async () => {
     if ((await evaluate(id, 'document.readyState')).value !== 'complete') return false;
+    if (!primed) {
+      await evaluate(
+        id,
+        'performance.setResourceTimingBufferSize(100000), performance.clearResourceTimings()',
+      );
+      primed = true;
+    }
     const n = (await evaluate(id, "performance.getEntriesByType('resource').length")).value;
     if (n !== last) {
       last = n as number;

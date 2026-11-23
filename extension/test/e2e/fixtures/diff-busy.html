@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Diff Busy</title>
+  </head>
+  <body>
+    <h1>Busy</h1>
+    <script>
+      // A request every 100 ms, so the network is never quiet (networkidle never settles).
+      let n = 0;
+      setInterval(() => fetch(`/diff-a.html?n=${n++}`).then((r) => r.text()), 100);
+    </script>
+  </body>
+</html>

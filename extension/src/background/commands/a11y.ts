@@ -283,7 +283,8 @@ export const a11yCommands: Command[] = [
       if (url) {
         // Same rules as `open <url>`: never navigates a tab the user shared.
         const open = navigationCommands.find((c) => c.name === 'open');
-        await open?.run(ctx, new Args([url], new Map()));
+        if (!open) throw new Error('open command missing');
+        await open.run(ctx, new Args([url], new Map()));
       }
       const tabId = await ctx.tab();
       const selector = a.str('selector');
