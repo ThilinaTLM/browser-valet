@@ -1,136 +1,101 @@
-# React inspection: `react tree|inspect|renders|suspense`
+# React inspection: `react tree|inspect|renders|suspense|disable`
 
-**Status:** Draft · **Labels:** feature, automation · **Issue:** #26
+**Status:** Draft; the exception below is accepted · **Labels:** feature, automation · **Issue:** #26
+
+**Decision (user sign-off):** a narrow exception to "no init scripts" is accepted: one built-in,
+vetted React DevTools hook script, installed only on agent tabs opened with `--enable
+react-devtools`. `addinitscript`/`--init-script` stay excluded. The implementation PR updates
+Settled directions.
 
 ## Problem
 
-Developers using agents on React apps (dev servers, staging) want component-level answers: the
-tree, a component's props/hooks/state, what re-rendered, which Suspense boundaries are dynamic.
-agent-browser (0.41.2) provides them behind `open --enable react-devtools <url>`, which installs the
-React DevTools global hook before page scripts run:
+agent-browser 0.41.2 prints the React tree, inspects a fiber, records re-renders and classifies
+Suspense boundaries, but needs `open --enable react-devtools <url>` so the DevTools global hook
+exists before React loads:
 
 ```
 open --enable react-devtools <url>
-react tree | react inspect <fiberId> | react renders start | react renders stop [--json]
+react tree | react inspect <fiberId> | react renders start|stop [--json]
 react suspense [--only-dynamic] [--json]
 ```
 
-bvl lists `react *` in Settled directions because the hook has to exist **before** the page
-loads, which needs an init script, and init scripts (`addinitscript`) are excluded. This proposal
-asks for one narrow exception.
-
 ## Design
 
-### Hook installation
+### Installing the hook
 
-- `open --enable react-devtools <url>` (same flag name and `AGENT_BROWSER_ENABLE`-style
-  spelling as upstream; env var `BVL_ENABLE`) on **agent tabs only**. The extension calls
-  `Page.addScriptToEvaluateOnNewDocument` (`runImmediately: true`) with the **built-in, vetted** hook
-  script bundled in the extension, then navigates. A shared tab, or a tab the agent did not open
-  in this call, is refused: `--enable` on a shared tab fails with "react-devtools needs a new
-  agent tab" because we would need to reload a page the user is using, and `open <url>` never
-  navigates a shared tab anyway.
-- The script identifier is stored per tab and **removed** (`Page.removeScriptToEvaluateOnNewDocument`)
-  on revoke, tab close, `close`, debugger detach, or `react disable`. The hook only exists while
-  bvl's debugger session is attached; the page's next load after detach has no hook. If the
-  worker restarts, the identifier is lost with the session; Chrome removes the script when the
-  debugger detaches, so nothing persists in the profile.
-- The script is not user-provided: no argument can alter it. `addinitscript`/`--init-script`
-  stay excluded.
-- Without the hook the commands answer: `react: no React hook on this page. Reopen it with
-  open --enable react-devtools <url> (agent tab).`
+- `open --enable react-devtools <url>` **always opens a fresh agent tab** (never navigates a
+  shared tab or an existing one; `open <url>` already refuses shared tabs). It registers the bundled script with
+  `Page.addScriptToEvaluateOnNewDocument` (`runImmediately`), then navigates. `--enable` needs
+  `showFlags` for the activity log. Env `BVL_ENABLE` is **dropped**: the CLI forwards only
+  `BVL_SESSION` (`main.rs`), and it would need CLI and protocol changes.
+- **The hook may never install** unless handled: a new tab's first URL loads via `chrome.tabs.create`
+  before the debugger attaches, and a cross-site navigation swaps the renderer and detaches the
+  debugger (`navigation.ts`), dropping the script. So the tab is opened on `about:blank`, attached,
+  the script registered, then navigated. For hook-enabled tabs the extension **re-registers after every
+  attach** (persisted flag) and reloads if the hook is missing. A spike must show this on a
+  cross-site fixture.
+- **Scope:** the hook applies only to the origin given to `--enable`. On a cross-origin main-frame
+  navigation the script is removed (and the flag cleared), so it doesn't follow the tab to other sites.
+- **Persisted state:** the script identifier is stored per tab in `state` (with a default).
+  A worker restart does **not** drop the attachment (`cdp.ts`), so without it `react disable`
+  could not remove the script. `react disable` (new, not upstream) removes it with
+  `Page.removeScriptToEvaluateOnNewDocument`; revoke, tab close, `close` and detach do too.
+  Auto-stop timers for `renders` are persisted as a deadline, not an in-memory timer.
+- Without a hook: `react: no React hook on this page. Reopen it with open --enable
+  react-devtools <url>.`
 
-### Reusing an existing hook (React DevTools extension)
+### Coexisting with the React DevTools extension
 
-If the user has the React DevTools browser extension, `__REACT_DEVTOOLS_GLOBAL_HOOK__` already exists
-in every page. Reading it with `Runtime.evaluate` would need no injection and would work on shared
-tabs. **Recommendation: not in the first version.** Reasons: (1) walking fibers on a shared tab
-exposes component props and state, which hold app data beyond what snapshot and `read` show
-(auth tokens in context, form state); it is a new read capability and needs the security review
-and user sign-off required for relaxing consent; (2) the hook's shape differs by DevTools version.
-Revisit later as a separate, opt-in step: allowed only on tabs with an existing grant (so no
-new consent bypass), with the same redaction rules as below.
+Its hook is installed at `document_start`, before ours. Our script **never overwrites an existing
+hook**: if `__REACT_DEVTOOLS_GLOBAL_HOOK__` exists, we read through it and register our listeners on it, and
+`renders` wraps `onCommitFiberRoot` and restores the previous one at stop. Reading an existing hook
+on **shared** tabs is not in v1: it exposes props and state beyond what `snapshot`/`read` show and needs a
+separate security review and sign-off.
 
-### Reading the tree
+### Reading
 
-- Evaluate in the page's main world (where the hook lives) with `Runtime.evaluate`; return plain
-  JSON. Walk fibers from `hook.getFiberRoots(rendererId)` for every renderer.
-- `react tree`: indented component list with fiber ids, as upstream. Verify text and ids
-  against the binary on a fixture. Host elements are skipped as upstream does; ids are stable
-  within one page load (assigned by a WeakMap in the hook, not by order).
-- `react inspect <id>`: props, hooks (with names where available), state, source location.
-  Serialisation has depth ≤ 4, string ≤ 500 chars, array/object entries ≤ 50, functions as
-  `ƒ name`, DOM nodes and cycles as markers, and a total cap (≈ 64 KB, then `truncated`).
-- `react renders start|stop [--json]`: wrap `onCommitFiberRoot` and count renders per component with
-  durations and "why" (props/state/hooks/parent). Wrapping happens on the hook object we installed
-  (never on a page-owned object). Stop restores it. Auto-stop after 60 s.
-- `react suspense [--only-dynamic] [--json]`: classify boundaries as upstream does.
+Run in the main world with `Runtime.evaluate`; return plain JSON. Fiber ids come from a WeakMap in
+the hook that maps both a fiber and its `alternate` to one id. `react tree` prints components with
+ids, `inspect` props, hooks, state and source; `renders` counts renders with causes; `suspense`
+classifies boundaries. Match upstream text and JSON on a fixture and note deviations.
+Serialisation limits: depth 4, strings 500 chars, 50 entries, total ≈ 64 KB then `truncated`.
+Roots in iframes are out of scope in v1.
 
-### Redaction (needed because of props and state)
+### Redaction (best effort)
 
-`react inspect` and `renders` can surface secrets held in props/state. Rules:
-
-- Values under keys that match `password|passwd|secret|token|authorization|cookie|api[-_]?key|
-  credential` are replaced by `[redacted]` (same list as the network observation redaction in
-  [security.md](../architecture/security.md); reuse it).
-- `<input type=password>` values are never read.
-- The activity log records the command and the fiber id, not output.
-- This is best effort. Agents that need exact values can use `eval` as today.
+Object keys are checked with `isSecretKey` (`network.ts`: password, token, secret, API key,
+credential, session, csrf, PIN, OTP, private key) and replaced by `[redacted]`, and `type=password`
+values are never read. `useState` values have no keys, so a bare token string in state can't
+be detected: the doc and skill say output may contain app data and is **not** guaranteed redacted.
+The activity log keeps the command and fiber id, not output.
 
 ### Code source
 
-- The hook: write a minimal one (`renderers` map, `supportsFiber`, `inject`, `onCommitFiberRoot`,
-  `getFiberRoots`, `checkDCE`) following the public contract. React DevTools' `installHook`
-  (react-devtools-shared, MIT) is the reference; copy only with the license notice kept in
-  `THIRD_PARTY`.
-- Upstream agent-browser's own implementation: check its license before reading or reusing
-  (the binary is distributed by Vercel; do not copy from it unless licensed permissively).
-  Recommendation: clean-room from React's public hook contract and MIT DevTools.
-- Size: a small hook plus the fiber walker, expected < 30 KB, loaded from the extension package
-  on demand like `read-extractor.js`, so it stays out of the service-worker bundle.
+Clean-room hook from React's public hook contract, with MIT react-devtools-shared (`installHook`) as
+reference and its notice kept in `NOTICE`. agent-browser is Apache-2.0 (vercel-labs/agent-browser): if
+anything is reused from it, keep its notice and license text too; the default is not to copy it.
+The script loads from the extension package on demand (like `read-extractor.js`), < 30 KB.
 
 ### Risks
 
-- Page behaviour changes: React sees a DevTools hook and switches on development-time
-  profiling/`__REACT_DEVTOOLS_GLOBAL_HOOK__` code paths (e.g. `isDisabled`, extra warnings). The
-  same applies to any user with DevTools, but only agent tabs are affected.
-- Production builds don't expose component names (minified) or `onCommitFiberRoot` timing;
-  commands print what exists and a hint.
-- Hidden tab: no rendering without frames; React work scheduled with `requestAnimationFrame` or
-  `MessageChannel` may lag; use `prime` as `wait` does.
-- Next.js/RSC and multiple roots/renderers: walk all renderers; roots inside iframes need the
-  child session (out of scope for v1, say so in the output).
-
-## Answers to the issue's questions
-
-- *Is a vetted built-in pre-load script on agent tabs an acceptable exception to "no init
-  scripts"?* Yes, narrowly: agent tabs only, one bundled script, not user-supplied, removed on
-  detach/revoke, listed in Settled directions as the single exception ("`--enable react-devtools`
-  installs the built-in hook; no arbitrary init scripts"). It does not touch the profile and does
-  not change what servers see (no network or storage change). Needs user sign-off since it
-  relaxes a Settled direction.
-- *Reuse an existing DevTools hook on shared tabs?* Not in v1 (security review needed, above).
-  Possibly later as an opt-in, grant-gated read.
+A hook makes React take its DevTools code paths (extra dev warnings, profiling), on agent tabs
+only. Production builds are minified, so names are missing. Hidden tabs throttle rAF and
+`MessageChannel`, so `wait` uses `prime`.
 
 ## Test plan
 
-- Unit: serialiser limits and redaction, fiber id stability, error text without hook.
-- E2E: a fixture React app (a vendored production-free React build under
-  `extension/test/e2e/fixtures/`, no CDN) opened with `--enable react-devtools` on a hidden agent
-  tab: `react tree` lists components with ids; `react inspect <id>` shows props and state, with a
-  `token` prop redacted; `react renders start/stop` after a click reports the re-rendered
-  component; on a shared tab `--enable` is refused; after `close`/revoke the script is removed
-  (a reload shows no hook).
-- Compare tree and inspect text against `agent-browser 0.41.2` on the same fixture and note
-  deviations in the PR.
+Unit: serializer limits and redaction, alternate id mapping, deadline persistence. E2E: a fixture
+app using a vendored React **development** build (component names need it; no CDN): `--enable`
+opens an agent tab and `tree` lists ids even after a cross-site first navigation; `inspect` shows
+props and state with `token` redacted; `renders` after a click reports the component; after
+`react disable` or revoke a reload has no hook; the hook is gone after a cross-origin navigation;
+an existing hook isn't overwritten.
 
 ## Priority
 
-Low to medium; useful to web developers only. Large effort; ship `tree` and `inspect` first,
-`renders` and `suspense` after.
+Low to medium, large effort. Ship `tree`/`inspect`/`disable` first, then `renders` and `suspense`.
 
 ## Docs to update when built
 
 `cli/skills/core/SKILL.md`, `references/commands.md`, `automation.md`, `README.md` (Settled
-directions: narrow the `react *` and init-script entries), `security.md` (the exception and
-redaction).
+directions), `security.md` (the exception, redaction).
