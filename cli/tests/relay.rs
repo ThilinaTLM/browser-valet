@@ -612,6 +612,12 @@ fn skills_list_get_path_install() {
     assert!(out(&["skills", "get", "dogfood", "--ref", "report-template"]).contains("ISSUE-001"));
     let dc = out(&["skills", "get", "derive-client"]);
     assert!(dc.starts_with("---\nname: derive-client\n") && dc.contains("redacted"));
+    assert!(out(&["skills", "list"])
+        .lines()
+        .any(|l| l.starts_with("derive-client\t")));
+    assert!(std::path::Path::new(out(&["skills", "path", "derive-client"]).trim())
+        .join("SKILL.md")
+        .is_file());
     assert!(!run_bvl(&cfg, &home, &["skills", "get", "nope"]).status.success());
     let path = out(&["skills", "path", "core"]);
     assert!(std::path::Path::new(path.trim()).join("SKILL.md").is_file());
