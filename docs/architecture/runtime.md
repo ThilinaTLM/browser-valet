@@ -23,7 +23,7 @@ Message formats: [protocol.md](protocol.md).
 | First install, browser start, extension reloaded or re-enabled in Chrome (no `chrome.storage.session` `state` and no handoff) | forced **off** in `loadState` |
 | Service-worker restart (session `state` exists), self-update reload (handoff restored) | unchanged |
 | Authenticated connection ends after `bye` `idle` / `stop`, or with no `bye` (proxy crashed or was killed, or another extension replaced this one) | **off**, `conn.offReason` = `idle` / `stopped` / `lost` |
-| Connection ends after `bye` `restart` (CLI version restart, `bvl pair`, `doctor --fix`) | unchanged; reconnects |
+| Connection ends after `bye` `restart` (CLI version restart, `bvl pair`, `doctor --fix`, or the proxy dropping an extension that failed its liveness probe) | unchanged; reconnects |
 | The extension closes the socket itself (`disconnect()`), or is reloading for a self-update | unchanged |
 | Never authenticated (no proxy listening, auth failed) | unchanged; keeps retrying (every 1 s, 5 s after an auth failure) |
 | User flips the switch | as set; switching on clears `offReason` |
@@ -109,12 +109,16 @@ Request lifecycle rules (in the proxy):
 
 ## Dead service worker
 
-Closing a tab the agent controls (shared or agent tab, debugger attached or not) often leaves the extension's
-service worker unusable: its JavaScript and WebSocket still run, but every `chrome.*` call hangs, and Chrome
-terminates it some seconds later (about 15–30 s in E2E). It is not caused by our `debugger.detach` (skipping
-it changes nothing), and a minimal extension that attaches the debugger does not do it. Nothing wakes the
-terminated worker until the next browser event, the popup, or the 30 s alarm (`bvl-keepalive`; Chrome's
-minimum). The proxy therefore checks liveness (ping/pong gated on an extension API call, see
-[protocol.md](protocol.md#extension-connection)), reports `ext: null` for such a worker and makes requests
-wait for it to come back (up to 35 s) instead of losing them. The worker restores its state from
-`chrome.storage.session`, so a restart loses only in-flight requests.
+Closing a tab the extension knows about (shared or agent tab; debugger attached or not; also a denied one)
+often wedges the extension's service worker: its JavaScript, timers and WebSocket still run, but every
+`chrome.*` call hangs; Chrome ends it about 15–30 s later and nothing restarts it until the next browser event,
+the popup or the 30 s alarm (`bvl-keepalive`; Chrome's minimum). Recovery takes about 30 s in E2E. It is not
+caused by our `debugger.detach` (skipping it changes nothing), and a minimal extension that attaches the
+debugger does not do it, so it is treated as a Chrome behaviour to live with. Measures:
+
+- The proxy checks liveness with `ping`/`pong`, answered only after an extension API call has returned, and
+  reports `ext: null` plus `extLost` for such a worker ([protocol.md](protocol.md#extension-connection)).
+  Requests wait up to 65 s for it to come back instead of being lost.
+- `connect()` in the extension calls an extension API first (5 s limit), so a wedged worker never reconnects
+  looking healthy, and `connecting` cannot stay set.
+- The worker restores its state from `chrome.storage.session`, so a restart loses only requests in flight.

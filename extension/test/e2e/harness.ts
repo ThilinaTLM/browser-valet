@@ -12,7 +12,7 @@
 // global-setup.ts, never against the developer's real bvl or browser.
 
 import { spawn } from 'node:child_process';
-import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import puppeteer, { type Browser, type Page, TargetType } from 'puppeteer-core';
 import { afterAll, beforeAll, beforeEach, expect, inject } from 'vitest';
 
 export interface BvlResult {
@@ -123,18 +123,7 @@ let wakes = 0;
  * Every wake is reported loudly with the test that was running before, so the flake stays visible.
  */
 async function ensureExtensionAlive(previous: string | undefined): Promise<void> {
-  const alive = async (): Promise<boolean> => {
-    const session = await browser().target().createCDPSession();
-    try {
-      const { targetInfos } = await session.send('Target.getTargets');
-      return targetInfos.some(
-        (t) => t.type === 'service_worker' && t.url.startsWith(info().extensionOrigin),
-      );
-    } finally {
-      await session.detach().catch(() => undefined);
-    }
-  };
-  if (await alive()) return;
+  if (await extensionWorkerRunning()) return;
   wakes++;
   console.warn(
     `[e2e] extension service worker was dead before this test (wake #${String(wakes)} in this file; ` +
@@ -145,7 +134,7 @@ async function ensureExtensionAlive(previous: string | undefined): Promise<void>
     await page.goto(`${info().extensionOrigin}/popup.html`);
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
-      if (await alive()) {
+      if (await extensionWorkerRunning()) {
         const r = await bvl('wait', '1', '--timeout', '3000');
         if (r.code === 0) return;
       }
@@ -419,7 +408,7 @@ export async function openFromTab(openerUrlPart: string, url: string): Promise<P
   return page;
 }
 
-/** Whether the extension's service worker is currently running (Chrome drops its target when it dies). */
+/** Whether the extension's service worker has a DevTools target (Chrome drops it when the worker dies or wedges). */
 export async function extensionWorkerRunning(): Promise<boolean> {
   const session = await browser().target().createCDPSession();
   try {
@@ -430,4 +419,29 @@ export async function extensionWorkerRunning(): Promise<boolean> {
   } finally {
     await session.detach().catch(() => undefined);
   }
+}
+
+/**
+ * `dead`: no worker target. `wedged`: a worker exists but `chrome.runtime.getPlatformInfo()` does not
+ * return within 2 s (after a controlled tab closes Chrome can leave the worker running JavaScript while
+ * every extension API call hangs, #51). `healthy` otherwise. Inspecting attaches DevTools briefly.
+ */
+export async function extensionWorkerState(): Promise<'dead' | 'wedged' | 'healthy'> {
+  const target = browser()
+    .targets()
+    .find(
+      (t) => t.type() === TargetType.SERVICE_WORKER && t.url().startsWith(info().extensionOrigin),
+    );
+  if (!target || !(await extensionWorkerRunning())) return 'dead';
+  const worker = await target.worker();
+  if (!worker) return 'dead';
+  const answered = await Promise.race([
+    worker.evaluate(() => chrome.runtime.getPlatformInfo().then(() => true)).catch(() => false),
+    new Promise<boolean>((resolve) =>
+      setTimeout(() => {
+        resolve(false);
+      }, 2000),
+    ),
+  ]);
+  return answered ? 'healthy' : 'wedged';
 }

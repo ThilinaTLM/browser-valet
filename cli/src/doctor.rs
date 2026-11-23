@@ -189,6 +189,7 @@ struct Proxy {
     version: String,
     pending: u64,
     ext: Value,
+    ext_lost: Value,
 }
 
 /// Connect, authenticate and read `status`. Err = (message, port reachable).
@@ -204,6 +205,7 @@ fn probe(c: &Config) -> Result<Proxy, (String, bool)> {
         version,
         pending: s["proxy"]["pending"].as_u64().unwrap_or(0),
         ext: s["ext"].clone(),
+        ext_lost: s["extLost"].clone(),
     })
 }
 
@@ -305,6 +307,15 @@ fn proxy_and_ext(r: &mut Report, c: &Config, o: &Opts) -> Option<Proxy> {
 
 fn extension(r: &mut Report, p: &Proxy) {
     let Some(e) = p.ext.as_object() else {
+        if p.ext_lost.is_object() {
+            r.add(
+                "extension",
+                St::Fail,
+                "connected, but its background worker stopped responding",
+                Some("the browser terminated it (usually after a controlled tab was closed); it restarts by itself within about a minute, or at once when you open the Browser Valet popup. Run `bvl doctor` again"),
+            );
+            return;
+        }
         r.add(
             "extension",
             St::Fail,

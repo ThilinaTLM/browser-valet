@@ -96,7 +96,7 @@ fn clipboard(text: &str) -> bool {
 /// Extension info from a running proxy (does not start one).
 fn ext_info(c: &Config) -> Option<Value> {
     let mut ws = connect(c).ok()?;
-    send(&mut ws, json!({"t":"status"})).ok()?;
+    send(&mut ws, json!({"t":"status","probe":false})).ok()?;
     let v = recv(&mut ws).ok()?;
     v["ext"].is_object().then(|| v["ext"].clone())
 }

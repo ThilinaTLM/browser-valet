@@ -82,13 +82,25 @@ export function connect(): void {
   }
   if (ws || connecting) return;
   connecting = true;
-  // Re-read pairing.json first so re-pairing (`bvl setup`) needs no extension reload.
-  void refreshPairing()
+  // Re-read pairing.json first so re-pairing (`bvl setup`) needs no extension reload. Then make sure
+  // extension API calls return at all: a wedged worker (see `alive`) must not connect, or the proxy
+  // would take it for a healthy one. It gives up after 5 s and retries (the browser will end it).
+  const ready = refreshPairing()
     .catch(() => undefined)
-    .then(() => {
-      connecting = false;
-      if (!ws && settings.enabled) open();
-    });
+    .then(alive)
+    .catch(() => undefined)
+    .then(() => true);
+  const timeout = new Promise<boolean>((resolve) =>
+    setTimeout(() => {
+      resolve(false);
+    }, 5000),
+  );
+  void Promise.race([ready, timeout]).then((ok) => {
+    connecting = false;
+    if (!settings.enabled) return;
+    if (!ok) scheduleRetry();
+    else if (!ws) open();
+  });
 }
 
 /** Wait for in-flight requests, hand the state over, and reload into the new version. */
