@@ -25,6 +25,7 @@ beforeEach(async () => {
   vi.resetModules();
   installChromeMock();
   stateMod = await import('../../src/background/state');
+  await stateMod.updateSettings({ enabled: true }); // `execute` refuses while the switch is off
   ({ execute, formatJsonError, formatWarnings, withUsage } =
     await import('../../src/background/dispatch'));
   ({ UserError } = await import('../../src/background/errors'));
@@ -318,5 +319,48 @@ describe('activity log (describe)', () => {
     expect(e?.error).toBeTruthy();
     for (let i = 0; i < 60; i++) await run('click');
     expect(stateMod.state.log).toHaveLength(50);
+  });
+});
+
+describe('the switch', () => {
+  it('refuses every command while it is off (no new grant can outlive a switch-off)', async () => {
+    await stateMod.updateSettings({ enabled: false });
+    const text = await run('open', 'https://example.com');
+    expect(text.exitCode).toBe(1);
+    expect(text.stderr).toMatch(/browser extension is not connected.*switch it on/);
+    const json = JSON.parse((await run('open', 'https://example.com', '--json')).stdout) as {
+      success: boolean;
+      code: string;
+    };
+    expect(json).toMatchObject({ success: false, code: 'not_connected' });
+    expect(Object.keys(stateMod.state.tabs)).toEqual([]);
+    await stateMod.updateSettings({ enabled: true });
+    expect((await run('help')).exitCode).toBe(0);
+  });
+
+  it('a manual switch-off disconnects before it revokes', async () => {
+    const order: string[] = [];
+    const conn = await import('../../src/background/connection');
+    vi.spyOn(conn, 'disconnect').mockImplementation(() => void order.push('disconnect'));
+    const tabs = await import('../../src/background/tabs');
+    await tabs.grant(5, 'user');
+    vi.spyOn(tabs, 'revoke').mockImplementation(() => {
+      order.push('revoke');
+      return Promise.resolve();
+    });
+    await import('../../src/background/index');
+    const msg = { type: 'settings', settings: { enabled: false } };
+    const listeners = [
+      ...(
+        chrome.runtime.onMessage as unknown as {
+          listeners: Set<(m: unknown, s: unknown, r: () => void) => unknown>;
+        }
+      ).listeners,
+    ];
+    await new Promise<void>((resolve) => {
+      for (const l of listeners) l(msg, {}, resolve);
+    });
+    expect(order[0]).toBe('disconnect');
+    expect(order).toContain('revoke');
   });
 });

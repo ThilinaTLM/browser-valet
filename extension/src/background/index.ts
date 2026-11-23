@@ -6,6 +6,7 @@ import { connect, disconnect, startKeepAlive } from './connection';
 import { loadState, regenerateSecret, save, state, updateSettings } from './state';
 import { setReady, syncAll } from './navigation-guard';
 import { loadGuardrails, updateGuardrails } from './guardrails';
+import * as cdp from './cdp';
 import { refreshIcon, revokeAll, setEnabled } from './switch';
 import {
   decide,
@@ -24,6 +25,7 @@ const ready = loadState().then(async () => {
   for (const id of Object.keys(state.tabs)) await refreshBadge(Number(id));
   await refreshGlobalBadge();
   await refreshIcon();
+  await cdp.releaseUncontrolled();
   connect();
 });
 
@@ -58,6 +60,9 @@ async function handle(msg: PopupMessage): Promise<void> {
       break;
     case 'settings': {
       const { enabled, ...rest } = msg.settings;
+      // Switching off: cut the connection first, so no request is accepted while the grants are
+      // being revoked (`execute` also refuses once `settings.enabled` is false).
+      if (enabled === false) disconnect();
       if (Object.keys(rest).length) await updateSettings(rest);
       // Turning the extension off ends all agent control; turning it on again starts from scratch.
       if (enabled !== undefined) await setEnabled(enabled);

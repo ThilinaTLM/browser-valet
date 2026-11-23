@@ -21,17 +21,43 @@ export async function grant(tabId: number, control: Control, owner?: string): Pr
   await refreshBadge(tabId);
 }
 
-export async function revoke(tabId: number): Promise<void> {
+/** Take away the grant and everything derived from it, and publish that. Synchronous: fail closed. */
+export function clearControl(tabId: number): void {
   const m = state.tabs[tabId];
   if (m) {
     delete m.control;
     delete m.owner;
-    delete state.refs[tabId];
-    delete state.refDocs[tabId];
-    forgetBaselines(tabId);
-    save();
   }
-  await cdp.detach(tabId);
+  delete state.refs[tabId];
+  delete state.refDocs[tabId];
+  forgetBaselines(tabId);
+  save();
+}
+
+/** One release of the debugger per tab at a time; overlapping revokes share it. */
+const releasing = new Map<number, Promise<void>>();
+
+/**
+ * Revoke control of a tab. The grant is gone (and saved) before anything is awaited, so a worker
+ * restart, a handoff or a command running meanwhile sees an uncontrolled tab (`cdp.attach` refuses
+ * it). Then the debugger is released, waiting at most `cdp.DETACH_TIMEOUT_MS`: a caller (the
+ * popup's Stop, the switch) learns the tab is free only once Chrome let go, because closing a tab
+ * whose detach is still in flight can take the extension's service worker down (#48).
+ */
+export async function revoke(tabId: number): Promise<void> {
+  clearControl(tabId);
+  let release = releasing.get(tabId);
+  if (!release) {
+    release = cdp.detach(tabId).finally(() => {
+      releasing.delete(tabId);
+    });
+    releasing.set(tabId, release);
+  }
+  try {
+    await release;
+  } catch (e) {
+    console.warn('bvl: releasing the debugger failed', e);
+  }
   await refreshBadge(tabId);
 }
 

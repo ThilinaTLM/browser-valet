@@ -34,7 +34,7 @@ import {
   parseConfirmList,
   parseDomainList,
 } from './guardrails';
-import { log, meta, peekSession, pruneSession } from './state';
+import { log, meta, peekSession, pruneSession, settings } from './state';
 
 const DEFAULT_TIMEOUT = 25_000;
 
@@ -192,6 +192,10 @@ async function raceDialog(ctx: Ctx, run: Promise<Result | undefined>): Promise<R
   }
 }
 
+/** The proxy's `NOT_CONNECTED` text (cli/src/proxy.rs): what an agent sees while the switch is off. */
+export const SWITCHED_OFF =
+  'browser extension is not connected. It is switched off by default, and switches itself off when bvl stops or has been idle, and when the browser restarts. Ask the user to click the Browser Valet icon in their browser and switch it on, then retry. If it was never installed, the user runs `bvl setup` first.';
+
 export async function execute(
   req: CliRequest,
   signal: AbortSignal,
@@ -239,6 +243,11 @@ export async function execute(
       stderr: json ? '' : `✗ ${error}\n`,
     };
   };
+
+  // The switch is the user's emergency stop: once it is off (a manual switch-off is still revoking
+  // grants and letting go of debuggers), nothing may run, or a command could create a new grant
+  // that outlives the switch-off. Same wording and code as the proxy's no-extension error.
+  if (!settings.enabled) return fail(SWITCHED_OFF, 'not_connected');
 
   if (name === undefined || name === 'help') {
     const c = rest[0] ? lookup(rest[0]) : undefined;

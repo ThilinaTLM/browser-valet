@@ -13,7 +13,7 @@
 
 import { spawn } from 'node:child_process';
 import puppeteer, { type Browser, type Page } from 'puppeteer-core';
-import { afterAll, beforeAll, beforeEach, inject } from 'vitest';
+import { afterAll, beforeAll, beforeEach, expect, inject } from 'vitest';
 
 export interface BvlResult {
   code: number;
@@ -96,8 +96,11 @@ export function useBrowser(): { readonly current: Browser } {
   // puppeteer page), which can be an agent tab; an agent tab that is visible takes the
   // foreground paths (real wheel, no prime) and breaks tests of hidden-tab behaviour. Start every
   // test with the anchor tab in front, so agent tabs in its window are hidden.
+  let previousTest: string | undefined;
   beforeEach(async () => {
+    await ensureExtensionAlive(previousTest);
     await activateAnchor();
+    previousTest = expect.getState().currentTestName;
   });
   afterAll(async () => {
     await shared?.disconnect();
@@ -109,6 +112,49 @@ export function useBrowser(): { readonly current: Browser } {
       return shared;
     },
   };
+}
+
+let wakes = 0;
+
+/**
+ * Safety net for #51 (the extension's service worker dying, and the proxy keeping its dead socket):
+ * start each test with a live worker. When its target is gone, wake it by opening an extension
+ * page (the popup pings the worker) and wait for a round trip that touches no tab state (`wait 1`).
+ * Every wake is reported loudly with the test that was running before, so the flake stays visible.
+ */
+async function ensureExtensionAlive(previous: string | undefined): Promise<void> {
+  const alive = async (): Promise<boolean> => {
+    const session = await browser().target().createCDPSession();
+    try {
+      const { targetInfos } = await session.send('Target.getTargets');
+      return targetInfos.some(
+        (t) => t.type === 'service_worker' && t.url.startsWith(info().extensionOrigin),
+      );
+    } finally {
+      await session.detach().catch(() => undefined);
+    }
+  };
+  if (await alive()) return;
+  wakes++;
+  console.warn(
+    `[e2e] extension service worker was dead before this test (wake #${String(wakes)} in this file; ` +
+      `the test before: ${previous ?? 'none in this file'}). Waking it. See #51.`,
+  );
+  const page = await browser().newPage();
+  try {
+    await page.goto(`${info().extensionOrigin}/popup.html`);
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      if (await alive()) {
+        const r = await bvl('wait', '1', '--timeout', '3000');
+        if (r.code === 0) return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error('the extension service worker did not come back (#51)');
+  } finally {
+    await page.close().catch(() => undefined);
+  }
 }
 
 async function activateAnchor(): Promise<void> {
@@ -225,7 +271,19 @@ export async function stopTabInPopup(tid: string): Promise<void> {
       { timeout: 15_000 },
       tid,
     );
-    await (handle.asElement() as unknown as { click(): Promise<void> }).click();
+    const button = handle.asElement() as unknown as {
+      click(): Promise<void>;
+      evaluate<T>(fn: (el: Element) => T): Promise<T>;
+    };
+    const tabId = Number(await button.evaluate((el) => el.getAttribute('data-tab')));
+    await button.click();
+    // The click is fire-and-forget; this message waits until the revoke has finished, including the
+    // debugger's detach. Closing the tab while a detach is in flight can take the extension's
+    // service worker down with it (#48, #51), and the row vanishes before the detach is done.
+    await page.evaluate(
+      (id: number) => chrome.runtime.sendMessage({ type: 'revoke', tabId: id }),
+      tabId,
+    );
     await page.waitForFunction(
       (id: string) =>
         ![...document.querySelectorAll('.tab .tid')].some(
