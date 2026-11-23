@@ -129,7 +129,7 @@ describe('diff screenshot', () => {
         ...extra,
       );
       const d = await bvlJson('diff', 'screenshot', '-t', '0', '-o', 'dbg-jpeg.png');
-      if ((d.data as { match: boolean }).match !== true) {
+      if (!(d.data as { match: boolean }).match) {
         const vis = (await bvl('eval', 'document.visibilityState')).stdout;
         const b64 = (await readFile(join(workDir(), 'dbg-jpeg.png'))).toString('base64');
         const pg = await browser.current.newPage();
