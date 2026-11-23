@@ -10,7 +10,7 @@ import * as cdp from './cdp';
 export const REDACTED = '[redacted]';
 export const MAX_ENTRIES = 500;
 export const MAX_BODY_CHARS = 32_768;
-const MAX_POST_DATA = 8192;
+export const MAX_POST_DATA = 8192;
 
 export interface Entry {
   /** CDP requestId; redirect hops get `<requestId>~<n>`. */
@@ -25,6 +25,8 @@ export interface Entry {
   requestHeaders: Record<string, string>;
   responseHeaders: Record<string, string>;
   postData?: string;
+  /** The request body was longer than MAX_POST_DATA and cut after redaction. */
+  postDataTruncated?: boolean;
   /** Wall-clock ms at the start of the request. */
   startedAt?: number;
   /** Monotonic CDP seconds at the start (for the duration). */
@@ -75,15 +77,22 @@ export function isSecretKey(key: string): boolean {
   );
 }
 
-const RESPONSE_SECRET_KEYS = new Set([
-  'accesstoken',
-  'refreshtoken',
-  'idtoken',
-  'token',
-  'secret',
-  'password',
-  'clientsecret',
-]);
+/**
+ * Keys whose values are secrets in a response body (compared after `norm`). Narrower than
+ * `isSecretKey`: `token` only counts alone or after a credential word, so `tokens_used`,
+ * `token_count`, `token_type`, `expires_in` and `nextPageToken` stay visible.
+ */
+export function isResponseSecretKey(key: string): boolean {
+  const n = norm(key);
+  return (
+    /^(access|refresh|id|auth|session|csrf|xsrf|api|bearer|oauth|sso|login|device|user|client|private)?token$/.test(
+      n,
+    ) ||
+    /secret$|^passw(or)?d$|^passcode$|^apikey$|^privatekey$|^sessionid$|^jwt$|^authorization$/.test(
+      n,
+    )
+  );
+}
 
 function redactJson(value: unknown, isSecret: (k: string) => boolean): unknown {
   if (Array.isArray(value)) return value.map((v) => redactJson(v, isSecret));
@@ -105,7 +114,7 @@ function tryJson(text: string): unknown {
   }
 }
 
-function redactForm(text: string): string {
+function redactForm(text: string, isSecret: (k: string) => boolean = isSecretKey): string {
   return text
     .split('&')
     .map((pair) => {
@@ -117,7 +126,7 @@ function redactForm(text: string): string {
       } catch {
         // keep raw key
       }
-      return isSecretKey(key) ? `${pair.slice(0, eq)}=${REDACTED}` : pair;
+      return isSecret(key) ? `${pair.slice(0, eq)}=${REDACTED}` : pair;
     })
     .join('&');
 }
@@ -143,15 +152,24 @@ export function redactRequestBody(text: string, contentType = ''): string {
   return text;
 }
 
-/** Redact obvious token fields (access_token, password, …) in a JSON response body. */
-export function redactResponseBody(text: string): string {
-  const json = tryJson(text);
+const XSSI_PREFIX = /^\)\]\}',?[ \t]*\r?\n?/;
+
+/**
+ * Redact token fields (`isResponseSecretKey`) in a JSON response body (also behind an XSSI prefix
+ * `)]}'`) or a urlencoded one (e.g. OAuth `access_token=...`). Other content is returned as is.
+ */
+export function redactResponseBody(text: string, mimeType = ''): string {
+  const xssi = XSSI_PREFIX.exec(text)?.[0] ?? '';
+  const json = tryJson(text.slice(xssi.length));
   if (json !== undefined && typeof json === 'object' && json !== null) {
-    return JSON.stringify(
-      redactJson(json, (k) => RESPONSE_SECRET_KEYS.has(norm(k))),
-      null,
-      2,
-    );
+    return xssi + JSON.stringify(redactJson(json, isResponseSecretKey), null, 2);
+  }
+  const trimmed = text.trim();
+  if (
+    /x-www-form-urlencoded/i.test(mimeType) ||
+    /^[^\s=&<>{}[\]]+=[^\s]*(&[^\s=&]+=[^\s]*)*$/.test(trimmed)
+  ) {
+    return redactForm(trimmed, isResponseSecretKey);
   }
   return text;
 }
@@ -327,7 +345,10 @@ export function handleEvent(tabId: number, method: string, raw: unknown): void {
         const ct = Object.entries((req.headers ?? {}) as P).find(
           ([k]) => k.toLowerCase() === 'content-type',
         )?.[1];
-        e.postData = redactRequestBody(req.postData.slice(0, MAX_POST_DATA), str(ct, ''));
+        // Redact the whole body first: a cut JSON body no longer parses and would leak.
+        const redacted = redactRequestBody(req.postData, str(ct, ''));
+        e.postDataTruncated = redacted.length > MAX_POST_DATA;
+        e.postData = e.postDataTruncated ? redacted.slice(0, MAX_POST_DATA) : redacted;
       }
       e.startMono = Number(p.timestamp);
       e.startedAt = typeof p.wallTime === 'number' ? p.wallTime * 1000 : Date.now();
@@ -398,7 +419,7 @@ export async function responseBody(tabId: number, e: Entry): Promise<Body> {
     };
   }
   if (res.base64Encoded) return { note: `binary body not shown (${e.mimeType ?? 'unknown'})` };
-  let text = redactResponseBody(res.body);
+  let text = redactResponseBody(res.body, e.mimeType);
   const truncated = text.length > MAX_BODY_CHARS;
   if (truncated) text = text.slice(0, MAX_BODY_CHARS);
   return { text, truncated };

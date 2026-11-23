@@ -103,6 +103,96 @@ describe('redaction', () => {
     expect(net.redactResponseBody('<html>token</html>')).toBe('<html>token</html>');
   });
 
+  it('redacts wider response token keys but keeps harmless ones', () => {
+    const out = JSON.parse(
+      net.redactResponseBody(
+        JSON.stringify({
+          api_token: 1,
+          auth_token: 1,
+          session_token: 1,
+          csrf_token: 1,
+          apiKey: 1,
+          api_key: 1,
+          private_key: 1,
+          sessionId: 1,
+          session_id: 1,
+          jwt: 1,
+          app_secret: 1,
+          clientSecret: 1,
+          tokens_used: 5,
+          token_count: 6,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          nextPageToken: 'n',
+          deep: [{ jwt: 'x', keep: 1 }],
+        }),
+      ),
+    ) as Record<string, unknown>;
+    for (const k of [
+      'api_token',
+      'auth_token',
+      'session_token',
+      'csrf_token',
+      'apiKey',
+      'api_key',
+      'private_key',
+      'sessionId',
+      'session_id',
+      'jwt',
+      'app_secret',
+      'clientSecret',
+    ])
+      expect(out[k]).toBe(net.REDACTED);
+    expect(out).toMatchObject({
+      tokens_used: 5,
+      token_count: 6,
+      token_type: 'Bearer',
+      expires_in: 3600,
+      nextPageToken: 'n',
+    });
+    expect(out.deep).toEqual([{ jwt: net.REDACTED, keep: 1 }]);
+  });
+
+  it('redacts form-encoded response bodies', () => {
+    const body = 'access_token=SECRET&token_type=bearer&expires_in=3600&refresh_token=R%2F1';
+    const out = net.redactResponseBody(body, 'application/x-www-form-urlencoded');
+    expect(out).toBe(
+      `access_token=${net.REDACTED}&token_type=bearer&expires_in=3600&refresh_token=${net.REDACTED}`,
+    );
+    expect(net.redactResponseBody(body, 'text/plain')).not.toContain('SECRET');
+    expect(net.redactResponseBody('a sentence = fine')).toBe('a sentence = fine');
+  });
+
+  it('redacts JSON behind an XSSI prefix', () => {
+    const out = net.redactResponseBody(
+      ")]}'\n" + JSON.stringify({ access_token: 'SECRET', ok: 1 }),
+    );
+    expect(out.startsWith(")]}'\n")).toBe(true);
+    expect(out).not.toContain('SECRET');
+    expect(out).toContain('"ok": 1');
+  });
+
+  it('redacts a >8 KB JSON request body before truncating', async () => {
+    await net.startRecording(1);
+    const big = JSON.stringify({ password: 'SECRET1', filler: 'x'.repeat(9000), token: 'SECRET2' });
+    request('big', 'http://x/api', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      postData: big,
+    });
+    const [e] = net.list(1);
+    expect(e?.postData).not.toContain('SECRET');
+    expect(e?.postData).toContain(net.REDACTED);
+    expect(e?.postData?.length).toBe(net.MAX_POST_DATA);
+    expect(e?.postDataTruncated).toBe(true);
+    request('small', 'http://x/api', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      postData: '{"a":1}',
+    });
+    expect(net.list(1).find((x) => x.id === 'small')?.postDataTruncated).toBe(false);
+  });
+
   it('redacts secret query values in URLs', () => {
     expect(net.redactUrl('http://x/a?access_token=1&page=2#frag')).toBe(
       `http://x/a?access_token=${net.REDACTED}&page=2#frag`,
