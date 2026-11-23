@@ -6,6 +6,9 @@ import {
   formatPercent,
   forgetCaptures,
   getCapture,
+  getDiffBaseline,
+  MAX_BASELINE_CHARS,
+  setDiffBaseline,
   type Pixels,
   setCapture,
 } from '../../src/background/capture-compare';
@@ -52,5 +55,22 @@ describe('helpers', () => {
     expect(getCapture(captureKey(7, 'view'))).toBeUndefined();
     expect(getCapture(captureKey(7, 'full'))).toBeUndefined();
     expect(getCapture(captureKey(70, 'view'))).toBeDefined();
+  });
+});
+
+describe('diff baselines', () => {
+  it('are dropped with the tab, and not kept when truncated or too big', () => {
+    setDiffBaseline(captureKey(8, 'diff:view'), 'AAAA');
+    setDiffBaseline(captureKey(80, 'diff:view'), 'AAAA');
+    expect(getDiffBaseline(captureKey(8, 'diff:view'))?.data).toBe('AAAA');
+    forgetCaptures(8);
+    expect(getDiffBaseline(captureKey(8, 'diff:view'))).toBeUndefined();
+    expect(getDiffBaseline(captureKey(80, 'diff:view'))).toBeDefined();
+
+    setDiffBaseline(captureKey(80, 'diff:view'), 'BBBB', true);
+    expect(getDiffBaseline(captureKey(80, 'diff:view'))).toBeUndefined();
+    setDiffBaseline(captureKey(80, 'diff:view'), 'A'.repeat(MAX_BASELINE_CHARS + 1));
+    expect(getDiffBaseline(captureKey(80, 'diff:view'))).toBeUndefined();
+    forgetCaptures(80);
   });
 });

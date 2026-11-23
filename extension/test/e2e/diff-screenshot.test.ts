@@ -42,7 +42,15 @@ describe('diff screenshot', () => {
   it('records a baseline first, then paints changes red', async () => {
     await bvl('open', fixture('/form.html'));
     const first = await bvlJson('diff', 'screenshot', '-o', 'd0.png');
-    expect(first.data).toMatchObject({ baselineRecorded: true, diffPath: null });
+    expect(first.data).toEqual({
+      baselineRecorded: true,
+      diffPath: null,
+      differentPixels: null,
+      totalPixels: null,
+      mismatchPercentage: null,
+      match: null,
+      dimensionMismatch: null,
+    });
 
     const same = await bvl('diff', 'screenshot', '-o', 'd1.png');
     expect(same.code).toBe(0);
@@ -79,18 +87,42 @@ describe('diff screenshot', () => {
   });
 
   it('uses the last `screenshot` as baseline, also on a hidden agent tab', async () => {
+    const other = ['--session', 'diff-other'];
+    await bvl('open', fixture('/form.html'), ...other);
     await bvl('open', fixture('/form.html'));
+    expect((await bvl('eval', 'document.visibilityState')).stdout.trim()).toBe('"hidden"');
+    await bvl('screenshot', 'base.png');
+    expect((await bvlJson('diff', 'screenshot')).data).toMatchObject({ match: true });
     await bvl('screenshot', 'base.png');
     await bvl(
       'eval',
       `document.body.insertAdjacentHTML('afterbegin', '<div style="height:80px;background:#d00"></div>')`,
     );
-    const j = (await bvlJson('diff', 'screenshot', '-o', 'd.png')).data as {
+    const j = (await bvlJson('diff', 'screenshot', '-o', 'dh.png')).data as {
       match: boolean;
       differentPixels: number;
     };
     expect(j.match).toBe(false);
     expect(j.differentPixels).toBeGreaterThan(0);
+    expect((await pixels('dh.png')).red).toBeGreaterThan(0);
+    await bvl('close', ...other);
+  });
+
+  it('a .jpg screenshot is a clean baseline (no JPEG noise)', async () => {
+    await bvl('open', fixture('/form.html'));
+    await bvl('screenshot', 'x.jpg');
+    expect((await bvlJson('diff', 'screenshot', '-t', '0')).data).toMatchObject({
+      match: true,
+      differentPixels: 0,
+    });
+  });
+
+  it('forgets the baseline when the tab is closed', async () => {
+    await bvl('open', fixture('/form.html'));
+    await bvl('screenshot', 'x.png');
+    await bvl('close');
+    await bvl('open', fixture('/form.html'));
+    expect((await bvlJson('diff', 'screenshot')).data).toMatchObject({ baselineRecorded: true });
   });
 
   it('reports a size change without an image', async () => {
@@ -133,5 +165,15 @@ describe('diff screenshot', () => {
     expect(t.code).not.toBe(0);
     expect(t.stderr + t.stdout).toContain('Threshold must be between 0 and 1, got 2');
     expect((await err('diff', 'nope')).code).toBe('bad_args');
+    const nan = await err('diff', 'screenshot', '-t', 'abc');
+    expect(nan).toMatchObject({
+      code: 'bad_args',
+      error: expect.stringContaining('Invalid threshold value: abc') as string,
+    });
+    const extra = await err('diff', 'screenshot', 'stray');
+    expect(extra).toMatchObject({
+      code: 'bad_args',
+      error: expect.stringContaining('Unexpected argument: stray') as string,
+    });
   });
 });

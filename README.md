@@ -166,7 +166,7 @@ reference).
 |---|---|
 | Navigation | `open` (`goto`, `navigate`), `back`, `forward`, `reload`, `close` |
 | Tabs | `tab`, `tab new [--label L] [url]`, `tab <tN\|label>`, `tab show`, `tab close`, `session list\|info` |
-| Reading | `snapshot [-i -c -d N -s sel -u]`, `get text\|html\|value\|attr\|title\|url\|count\|box`, `is visible\|enabled\|checked`, `screenshot [--full]`, `pdf <path>`, `set viewport\|media` (agent tabs), `eval` (`-b`, `--stdin`), `read [url]`, `frame` |
+| Reading | `snapshot [-i -c -d N -s sel -u]`, `get text\|html\|value\|attr\|title\|url\|count\|box`, `is visible\|enabled\|checked`, `screenshot [--full]`, `diff screenshot`, `pdf <path>`, `set viewport\|media` (agent tabs), `eval` (`-b`, `--stdin`), `read [url]`, `frame` |
 | Interaction | `click [--new-tab]`, `dblclick`, `hover`, `focus`, `fill`, `type`, `press`, `keydown`, `keyup`, `keyboard`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview`, `drag`, `upload`, `find …`, `mouse`, `pushstate`, `batch` |
 | Waiting | `wait <t\|ms>`, `--text`, `--url <glob>`, `--load`, `--fn`, `--state`; `dialog status\|accept\|dismiss` |
 | Debugging | `console`, `errors`, `network requests\|request`, `highlight` |

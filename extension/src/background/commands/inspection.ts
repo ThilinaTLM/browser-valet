@@ -22,6 +22,7 @@ import {
   setCapture,
   setDiffBaseline,
 } from '../capture-compare';
+import { base64Blob } from '../base64';
 import { snapshot } from '../snapshot';
 import { computedStyles } from './extra';
 import {
@@ -479,8 +480,13 @@ export const inspectionCommands: Command[] = [
       let truncated = false;
       if (full) ({ data, truncated } = await fullPage(id, format));
       else ({ data } = await viewport(id, format));
-      // The plain capture is also the reference for a later `diff screenshot`.
-      setDiffBaseline(captureKey(id, full ? 'diff:full' : 'diff:view'), { data, format });
+      // The plain capture is also the reference for a later `diff screenshot`. Only PNG is kept
+      // (JPEG noise would show up as changes), so a .jpg capture takes a PNG one as well.
+      setDiffBaseline(
+        captureKey(id, full ? 'diff:full' : 'diff:view'),
+        format === 'png' ? data : (await (full ? fullPage(id, 'png') : viewport(id, 'png'))).data,
+        truncated,
+      );
 
       const extra: Record<string, unknown> = {};
       if (conditional) {
@@ -520,9 +526,8 @@ export const inspectionCommands: Command[] = [
           offsetY: full ? v.pageY : 0,
           full,
         });
-        const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
         const drawn = await drawAnnotations(
-          new Blob([bytes], { type: `image/${format}` }),
+          await base64Blob(data, `image/${format}`),
           list,
           full ? m.cssContentSize.width : v.clientWidth,
           format,
@@ -706,8 +711,7 @@ export async function viewport(tabId: number, format: 'png' | 'jpeg'): Promise<{
 
 /** The capture decoded and downscaled for comparison. */
 async function comparisonPixels(base64: string, format: 'png' | 'jpeg'): Promise<Pixels> {
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const bmp = await createImageBitmap(new Blob([bytes], { type: `image/${format}` }));
+  const bmp = await createImageBitmap(await base64Blob(base64, `image/${format}`));
   const size = comparisonSize(bmp.width, bmp.height);
   const canvas = new OffscreenCanvas(size.width, size.height);
   const g = canvas.getContext('2d', { willReadFrequently: true });
@@ -746,10 +750,11 @@ export async function fullPage(
   for (let y = 0; y < height; y += SLICE) {
     const h = Math.min(SLICE, height - y);
     const { data } = await capture(y, h);
-    const blob = new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], {
-      type: 'image/png',
-    });
-    g.drawImage(await createImageBitmap(blob), 0, Math.round(y * dpr));
+    g.drawImage(
+      await createImageBitmap(await base64Blob(data, 'image/png')),
+      0,
+      Math.round(y * dpr),
+    );
   }
   const out = await canvas.convertToBlob({ type: `image/${format}` });
   return {

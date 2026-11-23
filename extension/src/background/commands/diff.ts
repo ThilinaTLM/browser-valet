@@ -1,30 +1,32 @@
 // `diff <subcommand>`: compare page states. Each subcommand is one entry in SUBCOMMANDS.
 
-import type { Args, Command, Ctx, Result } from '../command';
+import { type Args, type Command, type Ctx, type Flag, REDACTED, type Result } from '../command';
+import { base64Blob } from '../base64';
 import { captureKey, getDiffBaseline, setDiffBaseline } from '../capture-compare';
+import { evaluate } from '../dom';
+import * as cdp from '../cdp';
 import { UserError } from '../errors';
 import { diffImages } from '../image-diff';
 import { fullPage, toBase64, viewport } from './inspection';
 
-type Subcommand = (ctx: Ctx, a: Args) => Promise<Result>;
+/**
+ * One `diff` subcommand. Each brings its own flags and redaction: `show` positionals after the
+ * subcommand name and the `showFlags` values reach the activity log, everything else is `•••`
+ * (a selector or a path may be page-derived text, see security.md).
+ */
+interface Subcommand {
+  usage: string;
+  flags: Flag[];
+  show?: number;
+  showFlags?: string[];
+  run(ctx: Ctx, a: Args): Promise<Result>;
+}
 
 const SUBCOMMANDS: Record<string, Subcommand> = {
-  screenshot: diffScreenshot,
-};
-
-export const diffCommands: Command[] = [
-  {
-    name: 'diff',
-    group: 'Reading',
-    usage: 'diff screenshot [-o <file>] [-t <0-1>] [--full]',
-    summary: 'Pixel diff of the page against the last screenshot (changes in red)',
-    details:
-      'diff screenshot compares the page with the last screenshot of the same scope (viewport or --full) taken in this tab by `screenshot` or `diff screenshot`, and writes a diff image: the baseline in grey, changed pixels in red. The first call only records the baseline. Baseline files (--baseline <file>) are not supported: the extension cannot read local files. Exits 0 even when pixels differ; read the text or JSON (diffPath, differentPixels, totalPixels, mismatchPercentage, match, dimensionMismatch).',
-    examples: ['bvl screenshot && bvl click @e3 && bvl diff screenshot -o diff.png'],
-    show: Infinity,
-    showFlags: ['output', 'threshold'],
+  screenshot: {
+    usage: 'diff screenshot [-o <file>] [-t <0-1>] [-f|--full]',
     flags: [
-      { name: 'baseline', short: 'b', type: 'string', desc: 'Not supported yet (see details)' },
+      { name: 'baseline', short: 'b', type: 'string', desc: 'Not supported (see details)' },
       {
         name: 'output',
         short: 'o',
@@ -37,20 +39,57 @@ export const diffCommands: Command[] = [
         type: 'string',
         desc: 'Colour distance tolerated, 0-1 (default 0.1)',
       },
-      { name: 'full', type: 'bool', desc: 'Full page screenshot' },
+      { name: 'full', short: 'f', type: 'bool', desc: 'Full page screenshot' },
     ],
+    showFlags: ['output', 'threshold'],
+    run: diffScreenshot,
+  },
+};
+
+/** Flags of all subcommands (a name shared by several is declared once). */
+const allFlags = (): Flag[] => {
+  const seen = new Map<string, Flag>();
+  for (const s of Object.values(SUBCOMMANDS))
+    for (const f of s.flags) if (!seen.has(f.name)) seen.set(f.name, f);
+  return [...seen.values()];
+};
+
+export const diffCommands: Command[] = [
+  {
+    name: 'diff',
+    group: 'Reading',
+    usage: Object.values(SUBCOMMANDS)
+      .map((s) => s.usage)
+      .join(' | '),
+    summary: 'Pixel diff of the page against the last screenshot (changes in red)',
+    details:
+      'diff screenshot compares the page with the last screenshot of the same scope (viewport or --full) taken in this tab by `screenshot` or `diff screenshot`, and writes a diff image: the baseline in grey, changed pixels in red. The first call only records the baseline. The baseline lives in memory: it is lost when the tab is closed or revoked and when the extension restarts, and captures over ~12 MB (PNG) are not kept. --baseline <file> is not supported: the extension cannot read local files. Exits 0 even when pixels differ; read the text or JSON (diffPath, differentPixels, totalPixels, mismatchPercentage, match, dimensionMismatch).',
+    examples: ['bvl screenshot && bvl click @e3 && bvl diff screenshot -o diff.png'],
+    flags: allFlags(),
+    log(a) {
+      const name = a.pos[0];
+      const sub = name === undefined ? undefined : SUBCOMMANDS[name];
+      const out: string[] = name === undefined ? [] : [sub ? name : REDACTED];
+      const show = sub?.show ?? 0;
+      out.push(...a.pos.slice(1).map((p, i) => (i < show ? p : REDACTED)));
+      for (const [n, v] of a.given()) {
+        out.push(`--${n}`);
+        if (v !== true) out.push(sub?.showFlags?.includes(n) ? v : REDACTED);
+      }
+      return out;
+    },
     async run(ctx, a) {
-      const sub = a.pos[0];
-      const run = sub === undefined ? undefined : SUBCOMMANDS[sub];
-      if (!run) {
+      const name = a.pos[0];
+      const sub = name === undefined ? undefined : SUBCOMMANDS[name];
+      if (!sub) {
         throw new UserError(
-          sub === undefined
-            ? 'Missing diff subcommand: screenshot'
-            : `Unknown diff subcommand '${sub}' (available: ${Object.keys(SUBCOMMANDS).join(', ')})`,
+          name === undefined
+            ? `Missing diff subcommand (${Object.keys(SUBCOMMANDS).join(', ')})`
+            : `Unknown diff subcommand '${name}' (available: ${Object.keys(SUBCOMMANDS).join(', ')})`,
           'bad_args',
         );
       }
-      return run(ctx, a);
+      return sub.run(ctx, a);
     },
   },
 ];
@@ -61,9 +100,20 @@ interface Decoded {
   data: Uint8ClampedArray;
 }
 
+/** Decoded RGBA of a 16 MP image is 64 MB, and a diff holds three of them. */
+const MAX_PIXELS = 16_000_000;
+
+function checkSize(width: number, height: number): void {
+  if (width * height > MAX_PIXELS) {
+    throw new UserError(
+      `Page too large to diff (${String(width)}x${String(height)} px, limit ${String(MAX_PIXELS / 1e6)} megapixels): use the viewport instead of --full, or a smaller viewport`,
+    );
+  }
+}
+
 async function decode(base64: string, format: 'png' | 'jpeg'): Promise<Decoded> {
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const bmp = await createImageBitmap(new Blob([bytes], { type: `image/${format}` }));
+  const bmp = await createImageBitmap(await base64Blob(base64, `image/${format}`));
+  checkSize(bmp.width, bmp.height);
   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
   const g = canvas.getContext('2d', { willReadFrequently: true });
   if (!g) throw new Error('Canvas unavailable');
@@ -88,20 +138,21 @@ async function encodePng(img: Decoded): Promise<string> {
 const percent = (p: number): string => (p === 0 ? '0' : p.toFixed(2));
 
 async function diffScreenshot(ctx: Ctx, a: Args): Promise<Result> {
+  const extra = a.pos[1];
+  if (extra !== undefined) throw new UserError(`Unexpected argument: ${extra}`, 'bad_args');
   if (a.has('baseline')) {
     throw new UserError(
       '--baseline <file> is not supported: the extension cannot read local files. Omit --baseline to compare with the last screenshot taken in this tab',
       'bad_args',
     );
   }
-  if (a.has('threshold') && a.str('threshold') === undefined)
-    throw new UserError('Missing --threshold value', 'bad_args');
-  const threshold = a.num('threshold') ?? 0.1;
+  const thresholdArg = a.str('threshold');
+  const threshold = thresholdArg === undefined ? 0.1 : Number(thresholdArg);
+  if (Number.isNaN(threshold) || thresholdArg?.trim() === '')
+    throw new UserError(`Invalid threshold value: ${thresholdArg ?? ''}`, 'bad_args');
   if (threshold < 0 || threshold > 1) {
-    throw new UserError(`Threshold must be between 0 and 1, got ${String(threshold)}`, 'bad_args');
+    throw new UserError(`Threshold must be between 0 and 1, got ${thresholdArg ?? ''}`, 'bad_args');
   }
-  if (a.has('output') && a.str('output') === undefined)
-    throw new UserError('Missing --output value', 'bad_args');
   const outArg = a.str('output');
 
   const id = await ctx.tab();
@@ -109,17 +160,36 @@ async function diffScreenshot(ctx: Ctx, a: Args): Promise<Result> {
   const key = captureKey(id, full ? 'diff:full' : 'diff:view');
   const prev = getDiffBaseline(key);
 
+  if (full) {
+    const m = await cdp.send<{ cssContentSize: { width: number; height: number } }>(
+      id,
+      'Page.getLayoutMetrics',
+    );
+    const dpr = Number((await evaluate(id, 'devicePixelRatio')).value) || 1;
+    checkSize(
+      Math.ceil(m.cssContentSize.width * dpr),
+      Math.ceil(Math.min(m.cssContentSize.height, 32000 / dpr) * dpr),
+    );
+  }
   let data: string;
   let truncated = false;
   if (full) ({ data, truncated } = await fullPage(id, 'png'));
   else ({ data } = await viewport(id, 'png'));
-  setDiffBaseline(key, { data, format: 'png' });
+  setDiffBaseline(key, data, truncated);
   const warning = truncated ? 'Very tall page: the full-page screenshot was truncated' : undefined;
 
   if (!prev) {
     return {
-      text: `✓ No earlier ${full ? 'full-page ' : ''}screenshot to compare with: baseline recorded. Run \`diff screenshot\` again after the change`,
-      data: { baselineRecorded: true, diffPath: null, match: null },
+      text: `✓ No earlier ${full ? 'full-page ' : ''}screenshot to compare with: baseline recorded${outArg === undefined ? '' : ' (no diff image written)'}. Run \`diff screenshot\` again after the change`,
+      data: {
+        baselineRecorded: true,
+        diffPath: null,
+        differentPixels: null,
+        totalPixels: null,
+        mismatchPercentage: null,
+        match: null,
+        dimensionMismatch: null,
+      },
       warning,
     };
   }
