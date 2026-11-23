@@ -12,6 +12,7 @@ version:
 ```bash
 bvl skills get core           # the loop, consent rules, tips
 bvl skills get core --full    # plus the full command reference
+bvl skills list               # task skills, e.g. `bvl skills get dogfood` (exploratory QA report)
 ```
 
 If `bvl status` says `not connected`, the extension is probably switched off (it is off by default
