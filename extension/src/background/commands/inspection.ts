@@ -23,6 +23,8 @@ import {
   setDiffBaseline,
 } from '../capture-compare';
 import { base64Blob } from '../base64';
+import { frameBox } from '../frames';
+import { splitScreenshotArgs } from '../screenshot-args';
 import { snapshot } from '../snapshot';
 import { computedStyles } from './extra';
 import {
@@ -432,17 +434,19 @@ export const inspectionCommands: Command[] = [
   {
     name: 'screenshot',
     details:
-      'Saves a PNG of the visible page, or the whole scrollable page with --full. The format is JPEG when the path ends in .jpg/.jpeg, else --screenshot-format (png default); --screenshot-quality 0-100 applies to JPEG. Without a path it writes to a temp file (or --screenshot-dir) and prints the path.',
+      'Saves a PNG of the visible page, or the whole scrollable page with --full. With a ref, CSS selector or XPath it captures just that element (not with --full; on a shared tab the page is scrolled only if the element is not already in view). A single argument is the target unless it starts with / ./ ../, contains a / (without selector characters) or ends in .png/.jpg/.jpeg/.webp, then it is the path; with two, the target comes first. The format is JPEG when the path ends in .jpg/.jpeg, else --screenshot-format (png default); --screenshot-quality 0-100 applies to JPEG. Without a path it writes to a temp file (or --screenshot-dir) and prints the path.',
     examples: [
       'bvl screenshot',
       'bvl screenshot page.png --full',
+      'bvl screenshot @e3 card.png',
+      'bvl screenshot "#chart" chart.png',
       'bvl screenshot --screenshot-format jpeg --screenshot-quality 60',
     ],
     show: Infinity,
     group: 'Reading',
     showFlags: ['threshold'],
     usage:
-      'screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>] [--screenshot-format png|jpeg] [--screenshot-quality <0-100>] [--screenshot-dir <dir>]',
+      'screenshot [target] [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>] [--screenshot-format png|jpeg] [--screenshot-quality <0-100>] [--screenshot-dir <dir>]',
     summary:
       'Save a PNG or JPEG screenshot (--screenshot-format); without a path it goes to a temp file',
     flags: [
@@ -499,9 +503,13 @@ export const inspectionCommands: Command[] = [
       const dirArg = a.str('screenshot-dir');
       if (a.has('screenshot-dir') && !dirArg)
         throw new UserError('--screenshot-dir needs a directory', 'bad_args');
+      const { target, path: pathArg } = splitScreenshotArgs(a.pos);
+      if (target !== undefined && full) {
+        throw new UserError('--full cannot be combined with an element target', 'bad_args');
+      }
       const id = await ctx.tab();
       // An explicit path extension wins over --screenshot-format; png is the default.
-      const explicit = a.pos[0] ? ctx.path(a.pos[0]) : undefined;
+      const explicit = pathArg ? ctx.path(pathArg) : undefined;
       const flagFormat: Format = wanted === 'jpeg' ? 'jpeg' : 'png';
       const extFormat: Format | undefined = !explicit
         ? undefined
@@ -534,25 +542,41 @@ export const inspectionCommands: Command[] = [
       // Always the plain capture first; the comparison ignores annotations.
       let data: string;
       let truncated = false;
-      if (full) ({ data, truncated } = await fullPage(id, capEnc));
-      else ({ data } = await viewport(id, capEnc));
-      // The plain capture is also the reference for a later `diff screenshot`. Only PNG is kept
-      // (JPEG noise would show up as changes), so a JPEG capture (from a .jpg path or
-      // --screenshot-format jpeg) takes a PNG one as well.
-      const png: Encoding = { format: 'png', quality: undefined };
-      setDiffBaseline(
-        captureKey(id, full ? 'diff:full' : 'diff:view'),
-        capEnc.format === 'png'
-          ? data
-          : (await (full ? fullPage(id, png) : viewport(id, png))).data,
-        truncated,
-      );
+      let el: ElementShot | undefined;
+      let matchWarning: string | undefined;
+      if (target !== undefined) {
+        const h = await element(ctx, target);
+        if (h.matches !== undefined && h.matches > 1) {
+          matchWarning = `${String(h.matches)} elements match "${target}"; used the first. Use a @ref or a more specific selector.`;
+        }
+        el = await elementShot(h, capEnc);
+        ({ data, truncated } = el);
+      } else {
+        if (full) ({ data, truncated } = await fullPage(id, capEnc));
+        else ({ data } = await viewport(id, capEnc));
+        // The plain capture is also the reference for a later `diff screenshot`. Only PNG is kept
+        // (JPEG noise would show up as changes), so a JPEG capture (from a .jpg path or
+        // --screenshot-format jpeg) takes a PNG one as well. An element capture is not a
+        // baseline: it would replace the viewport/full one with a differently sized picture.
+        const png: Encoding = { format: 'png', quality: undefined };
+        setDiffBaseline(
+          captureKey(id, full ? 'diff:full' : 'diff:view'),
+          capEnc.format === 'png'
+            ? data
+            : (await (full ? fullPage(id, png) : viewport(id, png))).data,
+          truncated,
+        );
+      }
 
       const extra: Record<string, unknown> = {};
       if (conditional) {
         const key = captureKey(
           id,
-          `${full ? 'full' : 'view'}${annotate ? '+annotate' : ''}:${format}${q !== undefined ? String(q) : ''}`,
+          `${
+            target !== undefined
+              ? `el:${annotate ? 'annotate' : 'plain'}:${target}`
+              : `${full ? 'full' : 'view'}${annotate ? '+annotate' : ''}`
+          }:${format}${q !== undefined ? String(q) : ''}`,
         );
         const prev = getCapture(key);
         const pixels = await comparisonPixels(data, capEnc.format);
@@ -563,7 +587,13 @@ export const inspectionCommands: Command[] = [
           setCapture(key, { pixels: prev.pixels, revision });
           return {
             text: `✓ Screenshot unchanged (revision ${String(revision)}, ${formatPercent(ratio)} pixels changed)`,
-            data: { changed: false, pixelChangeRatio: ratio, revision, threshold },
+            data: {
+              changed: false,
+              pixelChangeRatio: ratio,
+              revision,
+              threshold,
+              ...(el ? { selector: target, box: el.box } : {}),
+            },
           };
         }
         setCapture(key, { pixels, revision });
@@ -582,17 +612,20 @@ export const inspectionCommands: Command[] = [
           cssContentSize: { width: number };
         }>(id, 'Page.getLayoutMetrics');
         const v = m.cssVisualViewport;
+        // An element capture: page-coordinate boxes of the refs inside it, moved to the clip origin.
+        const wantPage = full || el !== undefined;
         list = await annotations(id, ctx.session, {
           width: v.clientWidth,
           height: v.clientHeight,
-          offsetX: full ? v.pageX : 0,
-          offsetY: full ? v.pageY : 0,
-          full,
+          offsetX: wantPage ? v.pageX : 0,
+          offsetY: wantPage ? v.pageY : 0,
+          full: wantPage,
         });
+        if (el) list = insideBox(list, el.box);
         const drawn = await drawAnnotations(
           await base64Blob(data, 'image/png'),
           list,
-          full ? m.cssContentSize.width : v.clientWidth,
+          el ? el.box.width : full ? m.cssContentSize.width : v.clientWidth,
           format,
           q,
         );
@@ -605,12 +638,20 @@ export const inspectionCommands: Command[] = [
         text: `✓ Screenshot saved to ${path}${listing}`,
         data: {
           path,
+          ...(el ? { selector: target, box: el.box, truncated } : {}),
           ...(full ? { truncated } : {}),
           ...(list ? { annotations: list } : {}),
           ...extra,
         },
         warning: [
-          ...(truncated ? ['Very tall page: the full-page screenshot was truncated'] : []),
+          ...(matchWarning ? [matchWarning] : []),
+          ...(truncated
+            ? [
+                el
+                  ? `Very large element: the screenshot shows only its top-left ${String(el.box.width)}x${String(el.box.height)} px`
+                  : 'Very tall page: the full-page screenshot was truncated',
+              ]
+            : []),
           ...warnings,
         ],
       };
@@ -789,6 +830,122 @@ export async function viewport(tabId: number, enc: Encoding): Promise<{ data: st
     captureBeyondViewport: true,
     clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale: 1 },
   });
+}
+
+interface ElementShot {
+  data: string;
+  truncated: boolean;
+  /** The captured area in CSS px, page coordinates. */
+  box: Annotation['box'];
+}
+
+/**
+ * Screenshot of one element: measure its content quads (shifted by the iframe's box for an
+ * out-of-process iframe, as `annotations` does) and capture that area of the page.
+ *
+ * A visible tab whose element already lies inside the viewport is captured with a plain clip: no
+ * scrolling and no `captureBeyondViewport`, which resizes the viewport for the capture (fires
+ * `resize`, relayouts, can misplace `position: fixed` elements). Otherwise the element is
+ * scrolled into view first (this moves the user's scroll on a shared tab), and the capture uses
+ * `captureBeyondViewport` when the tab is hidden (the path hidden tabs use for the viewport) or
+ * the element does not fit in the viewport.
+ */
+async function elementShot(h: Handle, enc: Encoding): Promise<ElementShot> {
+  const hidden = (await evaluate(h.tabId, 'document.visibilityState')).value === 'hidden';
+  const measure = async () => {
+    let quads: number[][] = [];
+    try {
+      ({ quads } = await cdp.send<{ quads: number[][] }>(
+        h.tabId,
+        'DOM.getContentQuads',
+        { objectId: h.objectId },
+        h.sessionId,
+      ));
+    } catch {
+      // no box
+    }
+    const xs = quads.flatMap((q) => q.filter((_, i) => i % 2 === 0));
+    const ys = quads.flatMap((q) => q.filter((_, i) => i % 2 === 1));
+    if (xs.length === 0) throw new UserError('Element is not visible', 'not_visible');
+    let left = Math.min(...xs);
+    let top = Math.min(...ys);
+    let right = Math.max(...xs);
+    let bottom = Math.max(...ys);
+    if (h.sessionId) {
+      const f = await frameBox(h.tabId, h.sessionId);
+      left += f.x;
+      right += f.x;
+      top += f.y;
+      bottom += f.y;
+      // Only what the iframe shows. (An element of a same-process iframe is not clipped.)
+      left = Math.max(left, f.x);
+      top = Math.max(top, f.y);
+      right = Math.min(right, f.x + f.width);
+      bottom = Math.min(bottom, f.y + f.height);
+    }
+    return { left, top, right, bottom };
+  };
+  const metrics = async () =>
+    (
+      await cdp.send<{
+        cssVisualViewport: {
+          pageX: number;
+          pageY: number;
+          clientWidth: number;
+          clientHeight: number;
+        };
+      }>(h.tabId, 'Page.getLayoutMetrics')
+    ).cssVisualViewport;
+  const fits = (
+    b: { left: number; top: number; right: number; bottom: number },
+    v: Awaited<ReturnType<typeof metrics>>,
+  ) => b.left >= 0 && b.top >= 0 && b.right <= v.clientWidth && b.bottom <= v.clientHeight;
+
+  let b = await measure();
+  let v = await metrics();
+  if (hidden || !fits(b, v)) {
+    try {
+      await cdp.send(h.tabId, 'DOM.scrollIntoViewIfNeeded', { objectId: h.objectId }, h.sessionId);
+    } catch {
+      // not rendered; the measurement says so
+    }
+    b = await measure();
+    v = await metrics();
+  }
+  const dpr = Number((await evaluate(h.tabId, 'devicePixelRatio')).value) || 1;
+  const limit = Math.floor(MAX_HEIGHT / dpr);
+  const x = Math.max(0, Math.floor(b.left + v.pageX));
+  const y = Math.max(0, Math.floor(b.top + v.pageY));
+  const fullWidth = Math.ceil(b.right + v.pageX) - x;
+  const fullHeight = Math.ceil(b.bottom + v.pageY) - y;
+  if (!(fullWidth >= 1) || !(fullHeight >= 1)) {
+    throw new UserError('Element is not visible', 'not_visible');
+  }
+  const width = Math.min(fullWidth, limit);
+  const height = Math.min(fullHeight, SLICE, limit);
+  const plain = !hidden && fits(b, v);
+  const { data } = await captureScreenshot(h.tabId, {
+    format: enc.format,
+    ...(enc.quality !== undefined ? { quality: enc.quality } : {}),
+    ...(plain ? {} : { captureBeyondViewport: true }),
+    clip: { x, y, width, height, scale: 1 },
+  });
+  return {
+    data,
+    truncated: fullWidth > width || fullHeight > height,
+    box: { x, y, width, height },
+  };
+}
+
+/** Annotations whose centre lies in `box` (page coordinates), moved to the box's origin. */
+function insideBox(list: Annotation[], box: Annotation['box']): Annotation[] {
+  return list
+    .filter((a) => {
+      const cx = a.box.x + a.box.width / 2;
+      const cy = a.box.y + a.box.height / 2;
+      return cx >= box.x && cx <= box.x + box.width && cy >= box.y && cy <= box.y + box.height;
+    })
+    .map((a) => ({ ...a, box: { ...a.box, x: a.box.x - box.x, y: a.box.y - box.y } }));
 }
 
 /** The capture decoded and downscaled for comparison. */

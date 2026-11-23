@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Element Layout</title>
+    <style>
+      body {
+        margin: 0;
+        background: white;
+      }
+      #hero {
+        height: 100vh;
+        background: rgb(200, 200, 200);
+      }
+      #below {
+        height: 80px;
+        width: 160px;
+        background: rgb(0, 160, 0);
+      }
+      #spacer {
+        height: 600px;
+      }
+      #fixed {
+        position: fixed;
+        right: 20px;
+        top: 20px;
+        width: 120px;
+        height: 60px;
+        background: rgb(128, 0, 128);
+      }
+      #scroller {
+        width: 200px;
+        height: 100px;
+        overflow: auto;
+      }
+      #scroller .pad {
+        height: 400px;
+      }
+      #scroller #inner {
+        height: 40px;
+        background: rgb(0, 0, 255);
+      }
+      #scroller .end {
+        height: 400px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="fixed"></div>
+    <div id="hero"></div>
+    <div id="below"></div>
+    <div id="scroller">
+      <div class="pad"></div>
+      <div id="inner"></div>
+      <div class="end"></div>
+    </div>
+    <div id="spacer"></div>
+    <script>
+      window.resizes = 0;
+      addEventListener('resize', () => window.resizes++);
+    </script>
+  </body>
+</html>
