@@ -210,6 +210,22 @@ describe('read', () => {
     }
   });
 
+  it('a11y <url> never navigates a shared tab', async () => {
+    const page = await openUserTab(fixture('/'));
+    try {
+      const tid = await tidForTitle('Fixture Home');
+      const pending = bvl('tab', tid);
+      await approveNextConsent('allow');
+      await pending;
+      const r = await bvl('a11y', fixture('/a11y-csp.html'));
+      expect(r.code).toBe(0);
+      expect(r.stdout).toContain('/a11y-csp.html');
+      expect(await page.title()).toBe('Fixture Home');
+    } finally {
+      await page.close();
+    }
+  });
+
   it('falls back to Readability when there is no main/article', async () => {
     const r = await bvl('read', fixture('/prose.html'));
     expect(r.code).toBe(0);

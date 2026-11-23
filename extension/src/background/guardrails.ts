@@ -129,6 +129,7 @@ export function isPageContent(command: string, a: Args, result: Result): boolean
   switch (command) {
     case 'snapshot':
     case 'read':
+    case 'a11y':
     case 'console':
     case 'errors':
     case 'eval':

@@ -20,6 +20,7 @@ import { emulationCommands } from './commands/emulation';
 import { inspectionCommands } from './commands/inspection';
 import { interactionCommands } from './commands/interaction';
 import { navigationCommands } from './commands/navigation';
+import { a11yCommands } from './commands/a11y';
 import { readCommands } from './commands/read';
 import { networkCommands } from './commands/network';
 import { vitalsCommands } from './commands/vitals';
@@ -44,6 +45,7 @@ const COMMANDS: Command[] = [
   ...diffCommands,
   ...readCommands,
   ...vitalsCommands,
+  ...a11yCommands,
   ...extraCommands,
   ...frameCommands,
   ...networkCommands,
@@ -53,7 +55,7 @@ const COMMANDS: Command[] = [
 /** Commands whose whole point is to reach a page: a refused redirect makes them fail. */
 const NAVIGATES = new Set(['open']);
 /** Commands that navigate only when given a URL. */
-const NAVIGATES_WITH_URL = new Set(['read', 'vitals']);
+const NAVIGATES_WITH_URL = new Set(['read', 'vitals', 'a11y']);
 const GROUPS = ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging'];
 
 function lookup(name: string): Command | undefined {
