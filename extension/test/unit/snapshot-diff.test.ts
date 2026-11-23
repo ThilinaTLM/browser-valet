@@ -9,6 +9,13 @@ import {
   formatDelta,
   formatDeltaText,
   spliceHunks,
+  unifiedDiff,
+  stripRef,
+  stripBoundaryLines,
+  snapshotKey,
+  formatUnifiedDiff,
+  getLastSnapshot,
+  setLastSnapshot,
   formatUnchanged,
   getBaseline,
   nextRevision,
@@ -227,5 +234,162 @@ describe('formatDeltaText', () => {
   it('is shorter than the old JSON form for a small change', () => {
     const t = d(1, 1, ['  - x [ref=e9]']);
     expect(formatDeltaText(t, baseLines).length).toBeLessThan(formatDelta(t).length);
+  });
+});
+
+describe('unifiedDiff (diff snapshot)', () => {
+  it('matches upstream for a fully added tree', () => {
+    const d = unifiedDiff([], ['- heading "A"', '- button "Go"']);
+    expect(d).toEqual({
+      additions: 2,
+      changed: true,
+      diff: '--- before\n+++ after\n@@ -0,0 +1,2 @@\n+- heading "A"\n+- button "Go"\n\\ No newline at end of file\n',
+      removals: 0,
+      unchanged: 0,
+    });
+    expect(formatUnifiedDiff(d)).toBe(`${d.diff}\n2 additions, 0 removals, 0 unchanged`);
+  });
+
+  it('prints a replaced line with context', () => {
+    const d = unifiedDiff(
+      ['- heading "A"', '- button "Old"', '- p', '  - T'],
+      ['- heading "A"', '- button "Go"', '- p', '  - T'],
+    );
+    expect(d.diff).toBe(
+      '--- before\n+++ after\n@@ -1,4 +1,4 @@\n - heading "A"\n-- button "Old"\n+- button "Go"\n - p\n   - T\n\\ No newline at end of file\n',
+    );
+    expect([d.additions, d.removals, d.unchanged]).toEqual([1, 1, 3]);
+  });
+
+  it('limits context to 3 lines and splits distant changes into hunks', () => {
+    const a = many(20);
+    const b = [...a];
+    b[1] = '- changed1';
+    b[17] = '- changed2';
+    const d = unifiedDiff(a, b);
+    expect(d.diff.match(/^@@/gm)).toHaveLength(2);
+    expect(d.diff).toContain('@@ -1,5 +1,5 @@');
+    expect(d.diff).toContain('@@ -15,6 +15,6 @@');
+  });
+
+  it('merges close changes and tracks the new-side offset', () => {
+    const a = many(12);
+    const b = [...a.slice(0, 2), '- x', '- y', ...a.slice(2, 4), ...a.slice(6)];
+    // +2 lines at 3-4, then 2 lines removed (a[4], a[5]) within 6 lines: one hunk
+    const d = unifiedDiff(a, b);
+    expect(d.diff.match(/^@@/gm)).toHaveLength(1);
+    expect([d.additions, d.removals]).toEqual([2, 2]);
+  });
+
+  it('reports no changes', () => {
+    const d = unifiedDiff(['a', 'b'], ['a', 'b']);
+    expect(d).toEqual({ additions: 0, changed: false, diff: '', removals: 0, unchanged: 2 });
+    expect(formatUnifiedDiff(d)).toBe('✓ No changes detected');
+  });
+
+  it('stores the last snapshot per key and forgets it with the tab', () => {
+    setLastSnapshot(baselineKey(9, 'k'), 'text');
+    expect(getLastSnapshot(baselineKey(9, 'k'))).toBe('text');
+    forgetBaselines(9);
+    expect(getLastSnapshot(baselineKey(9, 'k'))).toBeUndefined();
+  });
+});
+
+describe('unifiedDiff details', () => {
+  const NOEOL = '\\ No newline at end of file';
+
+  it('prints no end-of-file marker for a change in the middle', () => {
+    const a = many(20);
+    const b = [...a];
+    b[10] = '- x';
+    expect(unifiedDiff(a, b).diff).not.toContain(NOEOL);
+  });
+
+  it('prints the marker after both the removed and the added last line', () => {
+    const d = unifiedDiff(['a', 'b', 'c'], ['a', 'b', 'd']).diff;
+    expect(d).toBe(`--- before\n+++ after\n@@ -1,3 +1,3 @@\n a\n b\n-c\n${NOEOL}\n+d\n${NOEOL}\n`);
+  });
+
+  it('prints the marker once after a trailing context line', () => {
+    const d = unifiedDiff(['a', 'b'], ['x', 'b']).diff;
+    expect(d.match(/No newline/g)).toHaveLength(1);
+    expect(d.endsWith(` b\n${NOEOL}\n`)).toBe(true);
+  });
+
+  it('handles everything removed (+0,0)', () => {
+    const d = unifiedDiff(['a', 'b'], []);
+    expect(d.diff).toBe(`--- before\n+++ after\n@@ -1,2 +0,0 @@\n-a\n-b\n${NOEOL}\n`);
+    expect([d.additions, d.removals, d.unchanged]).toEqual([0, 2, 0]);
+  });
+
+  it('prints original lines (with refs) while comparing stripped ones', () => {
+    const a = ['- button "Go" [ref=e2]', '- link "L" [ref=e3]'];
+    const b = ['- button "Go" [ref=e9]', '- link "M" [ref=e10]'];
+    const d = unifiedDiff(a.map(stripRef), b.map(stripRef), a, b);
+    expect(d.diff).toContain(' - button "Go" [ref=e9]\n');
+    expect(d.diff).toContain('-- link "L" [ref=e3]\n');
+    expect(d.diff).toContain('+- link "M" [ref=e10]\n');
+    expect([d.additions, d.removals, d.unchanged]).toEqual([1, 1, 1]);
+  });
+
+  it('finds the real changes in a large tree quickly', () => {
+    const a = many(60_000);
+    const b = [...a];
+    b.splice(100, 1);
+    b.splice(30_000, 0, '- new');
+    b[59_000] = '- changed';
+    const t = Date.now();
+    const d = unifiedDiff(a, b);
+    expect(Date.now() - t).toBeLessThan(2000);
+    expect([d.additions, d.removals]).toEqual([2, 2]);
+    expect(d.diff.match(/^@@/gm)).toHaveLength(3);
+  });
+
+  it('falls back to one hunk for a rewrite beyond the edit-distance cap', () => {
+    const a = Array.from({ length: 4000 }, (_, i) => `a${String(i)}`);
+    const b = Array.from({ length: 4000 }, (_, i) => `b${String(i)}`);
+    const d = unifiedDiff(a, b);
+    expect([d.additions, d.removals]).toEqual([4000, 4000]);
+    expect(d.diff.match(/^@@/gm)).toHaveLength(1);
+  });
+});
+
+describe('stripRef and friends', () => {
+  it('drops ref=eN from the attribute group only', () => {
+    expect(stripRef('- button "Go" [ref=e2]')).toBe('- button "Go"');
+    expect(stripRef('  - heading "A" [level=1, ref=e1]')).toBe('  - heading "A" [level=1]');
+    expect(stripRef('- link "x" [ref=e3, url=http://a/] clickable [onclick]: v')).toBe(
+      '- link "x" [url=http://a/] clickable [onclick]: v',
+    );
+    expect(stripRef('- StaticText "see [ref=e5]"')).toBe('- StaticText "see [ref=e5]"');
+    expect(stripRef('- button "a \\" [ref=e1]" [ref=e2]')).toBe('- button "a \\" [ref=e1]"');
+  });
+
+  it('removes boundary marker lines', () => {
+    expect(
+      stripBoundaryLines([
+        '--- AGENT_BROWSER_PAGE_CONTENT nonce=ab origin=http://x/ ---',
+        '- a',
+        '--- END_AGENT_BROWSER_PAGE_CONTENT nonce=ab ---',
+      ]),
+    ).toEqual(['- a']);
+  });
+
+  it('snapshotKey keeps the old baselineKey string and adds the frame only when set', () => {
+    const o = { interactive: true, compact: false, depth: 2, scope: 'main', urls: false };
+    expect(snapshotKey(4, o)).toBe(
+      baselineKey(
+        4,
+        JSON.stringify({ interactive: true, compact: false, depth: 2, scope: 'main', urls: false }),
+      ),
+    );
+    expect(snapshotKey(4, o, 'F1')).not.toBe(snapshotKey(4, o));
+  });
+
+  it('keeps at most 8 option sets per tab', () => {
+    for (let i = 0; i < 10; i++) setLastSnapshot(baselineKey(7, `k${String(i)}`), 't');
+    expect(getLastSnapshot(baselineKey(7, 'k0'))).toBeUndefined();
+    expect(getLastSnapshot(baselineKey(7, 'k9'))).toBe('t');
+    forgetBaselines(7);
   });
 });

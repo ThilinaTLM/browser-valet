@@ -1,9 +1,21 @@
-// `diff <subcommand>`: compare page states. Each subcommand is one entry in SUBCOMMANDS.
+// `diff <subcommand>`: compare page states (`snapshot`, `screenshot`). Each subcommand is one entry
+// in SUBCOMMANDS.
 
 import { type Args, type Command, type Ctx, type Flag, REDACTED, type Result } from '../command';
 import { base64Blob } from '../base64';
 import { captureKey, getDiffBaseline, setDiffBaseline } from '../capture-compare';
 import { evaluate } from '../dom';
+import { state } from '../state';
+import { snapshot } from '../snapshot';
+import {
+  formatUnifiedDiff,
+  getLastSnapshot,
+  setLastSnapshot,
+  snapshotKey,
+  stripBoundaryLines,
+  stripRef,
+  unifiedDiff,
+} from '../snapshot-diff';
 import * as cdp from '../cdp';
 import { UserError } from '../errors';
 import { diffImages } from '../image-diff';
@@ -23,6 +35,19 @@ interface Subcommand {
 }
 
 const SUBCOMMANDS: Record<string, Subcommand> = {
+  snapshot: {
+    usage: 'diff snapshot [--stdin] [-s <selector>] [-c] [-d N]',
+    flags: [
+      { name: 'stdin', type: 'bool', desc: 'Read the baseline snapshot text from stdin' },
+      { name: 'baseline', short: 'b', type: 'string', desc: 'Not supported (see details)' },
+      { name: 'selector', short: 's', type: 'string', desc: 'Scope to an element (CSS or @ref)' },
+      { name: 'compact', short: 'c', type: 'bool', desc: 'Drop empty structural nodes' },
+      { name: 'depth', short: 'd', type: 'string', desc: 'Limit tree depth' },
+    ],
+    // Like `snapshot`: the depth and selector are logged, a baseline never is.
+    showFlags: ['depth', 'selector'],
+    run: diffSnapshot,
+  },
   screenshot: {
     usage: 'diff screenshot [-o <file>] [-t <0-1>] [-f|--full]',
     flags: [
@@ -61,10 +86,15 @@ export const diffCommands: Command[] = [
     usage: Object.values(SUBCOMMANDS)
       .map((s) => s.usage)
       .join(' | '),
-    summary: 'Pixel diff of the page against the last screenshot (changes in red)',
+    summary: 'Compare the page with the last snapshot (text) or screenshot (pixels)',
     details:
+      'diff snapshot takes a snapshot and prints a unified diff against the last snapshot taken on this tab with the same options (-c, -d, -s, and the frame); a snapshot taken with -i or -u is not a baseline. Refs are ignored when comparing, so a reload or navigation does not make every line differ; the printed lines keep their refs. Without an earlier snapshot the whole tree shows as added (with a warning). --stdin compares against a text baseline instead (`bvl snapshot > before.txt`, later `bvl diff snapshot --stdin < before.txt`); -b <file> is not supported because the extension cannot read files. The new snapshot becomes the baseline for the next diff. --json: {diff, additions, removals, unchanged, changed}. \n\n' +
       'diff screenshot compares the page with the last screenshot of the same scope (viewport or --full) taken in this tab by `screenshot` or `diff screenshot`, and writes a diff image: the baseline in grey, changed pixels in red. The first call only records the baseline. The baseline lives in memory: it is lost when the tab is closed or revoked and when the extension restarts, and captures over ~12 MB (PNG) are not kept. --baseline <file> is not supported: the extension cannot read local files. Exits 0 even when pixels differ; read the text or JSON (diffPath, differentPixels, totalPixels, mismatchPercentage, match, dimensionMismatch).',
-    examples: ['bvl screenshot && bvl click @e3 && bvl diff screenshot -o diff.png'],
+    examples: [
+      'bvl diff snapshot',
+      'bvl diff snapshot --stdin < before.txt',
+      'bvl screenshot && bvl click @e3 && bvl diff screenshot -o diff.png',
+    ],
     flags: allFlags(),
     log(a) {
       const name = a.pos[0];
@@ -93,6 +123,57 @@ export const diffCommands: Command[] = [
     },
   },
 ];
+
+async function diffSnapshot(ctx: Ctx, a: Args): Promise<Result> {
+  if (a.pos.length > 1) {
+    throw new UserError(
+      `Unexpected argument ${a.pos[1] ?? ''}: to scope the diff use -s <selector|@ref>. Usage: ${String(SUBCOMMANDS.snapshot?.usage)}`,
+      'bad_args',
+    );
+  }
+  if (a.str('baseline') !== undefined) {
+    throw new UserError(
+      '-b <file> is not supported (the extension cannot read files). Pipe the baseline instead: bvl diff snapshot --stdin < before.txt',
+      'bad_args',
+    );
+  }
+  const useStdin = a.has('stdin');
+  const stdin = ctx.req.stdin ?? '';
+  if (useStdin && stdin.trim() === '') {
+    throw new UserError(
+      '--stdin needs the baseline snapshot text on stdin (bvl diff snapshot --stdin < before.txt)',
+      'bad_args',
+    );
+  }
+  const id = await ctx.tab();
+  const opts = {
+    interactive: false,
+    compact: a.has('compact'),
+    depth: a.num('depth'),
+    scope: a.str('selector'),
+    urls: false,
+  };
+  const key = snapshotKey(id, opts, state.frames[id]?.frameId);
+  const last = useStdin ? undefined : getLastSnapshot(key);
+  const baseline = useStdin ? stdin : (last ?? '');
+  const snap = await snapshot(id, { ...opts, session: ctx.session });
+  setLastSnapshot(key, snap.text);
+  const before = stripBoundaryLines(
+    baseline === '' ? [] : baseline.replace(/\r?\n$/, '').split(/\r?\n/),
+  );
+  const after = snap.text.split('\n');
+  const d = unifiedDiff(before.map(stripRef), after.map(stripRef), before, after);
+  return {
+    text: formatUnifiedDiff(d),
+    data: d,
+    ...(!useStdin && last === undefined
+      ? {
+          warning:
+            'no earlier snapshot with these options; showing the whole tree as added (-i and -u snapshots do not count)',
+        }
+      : {}),
+  };
+}
 
 interface Decoded {
   width: number;

@@ -141,6 +141,8 @@ export function isPageContent(command: string, a: Args, result: Result): boolean
         sub !== 'dismiss' &&
         (result.data as { hasDialog?: boolean } | undefined)?.hasDialog === true
       );
+    case 'diff':
+      return sub === 'snapshot';
     case 'network':
       return sub === 'request';
     default:

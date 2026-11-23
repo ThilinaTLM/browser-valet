@@ -41,13 +41,13 @@ const COMMANDS: Command[] = [
   ...navigationCommands,
   ...interactionCommands,
   ...inspectionCommands,
+  ...diffCommands,
   ...readCommands,
   ...vitalsCommands,
   ...extraCommands,
   ...frameCommands,
   ...networkCommands,
   ...emulationCommands,
-  ...diffCommands,
   ...batchCommands,
 ];
 /** Commands whose whole point is to reach a page: a refused redirect makes them fail. */

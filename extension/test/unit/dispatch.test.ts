@@ -218,6 +218,28 @@ describe('activity log (describe)', () => {
     expect(lastCommand()).toBe('diff •••');
   });
 
+  it('logs diff snapshot like snapshot: selector and depth, nothing else', async () => {
+    await run('diff', 'snapshot', '-s', '#secret-id', '--stdin');
+    expect(lastCommand()).toBe('diff snapshot --selector #secret-id --stdin');
+    await run('diff', 'snapshot', '-d', '3', '-c');
+    expect(lastCommand()).toBe('diff snapshot --depth 3 --compact');
+  });
+
+  it('diff: usage errors', async () => {
+    for (const argv of [
+      ['diff'],
+      ['diff', 'bogus'],
+      ['diff', 'snapshot', '-b', 'f.txt'],
+      ['diff', 'snapshot', '@e3'],
+      ['diff', 'snapshot', '--stdin'],
+    ]) {
+      const r = await run(...argv, '--json');
+      expect((JSON.parse(r.stdout) as { code?: string }).code, argv.join(' ')).toBe('bad_args');
+    }
+    const b = await run('diff', 'snapshot', '-b', 'f.txt', '--json');
+    expect(b.stdout).toContain('--stdin');
+  });
+
   it('redacts the text of dialog accept', async () => {
     await run('dialog', 'accept', 'hunter2');
     expect(lastCommand()).toBe('dialog accept •••');

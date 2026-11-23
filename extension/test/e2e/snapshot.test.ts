@@ -2,7 +2,7 @@
 // --delta. Fixtures: form.html, other.html, clickable.html.
 
 import { describe, expect, it } from 'vitest';
-import { bvl, bvlJson, fixture, useBrowser } from './harness';
+import { bvl, bvlJson, bvlStdin, fixture, useBrowser } from './harness';
 
 useBrowser();
 
@@ -229,5 +229,57 @@ describe('snapshot --delta', () => {
     await delta();
     await bvl('snapshot', '-i');
     expect((await delta()).stdout).toMatch(/^unchanged/);
+  });
+});
+
+describe('diff snapshot', () => {
+  it('diffs against the last snapshot and a stdin baseline', async () => {
+    await bvl('open', fixture('/form.html'));
+    const before = (await bvl('snapshot')).stdout;
+    await bvl(
+      'eval',
+      `document.body.insertAdjacentHTML('afterbegin', '<button id="late">Late</button>')`,
+    );
+    const d = await bvl('diff', 'snapshot');
+    expect(d.stdout).toMatch(/^--- before\n\+\+\+ after\n@@ /);
+    expect(d.stdout).toContain('+- button "Late"');
+    expect(d.stdout.trimEnd()).toMatch(/\n\n1 additions, 0 removals, \d+ unchanged$/);
+
+    // The diff became the baseline.
+    expect((await bvl('diff', 'snapshot')).stdout.trim()).toBe('✓ No changes detected');
+
+    const j = JSON.parse(
+      (await bvlStdin(before, 'diff', 'snapshot', '--stdin', '--json')).stdout,
+    ) as {
+      data: { additions: number; removals: number; changed: boolean };
+    };
+    expect(j.data.additions).toBe(1);
+    expect(j.data.removals).toBe(0);
+    expect(j.data.changed).toBe(true);
+  });
+
+  it('ignores refs: a reload does not make every line differ, and refs stay in the output', async () => {
+    await bvl('open', fixture('/form.html'));
+    const before = (await bvl('snapshot')).stdout;
+    await bvl('reload');
+    const same = await bvlStdin(before, 'diff', 'snapshot', '--stdin');
+    expect(same.stdout.trim()).toBe('✓ No changes detected');
+
+    await bvl(
+      'eval',
+      `document.body.insertAdjacentHTML('afterbegin', '<button id="late">Late</button>')`,
+    );
+    const d = await bvlStdin(before, 'diff', 'snapshot', '--stdin');
+    expect(d.stdout).toMatch(/^\+- button "Late" \[ref=e\d+\]$/m);
+    expect(d.stdout.trimEnd()).toMatch(/\n\n1 additions, 0 removals, \d+ unchanged$/);
+    expect(d.stdout.match(/^-/gm)).toHaveLength(1); // only the `---` header
+  });
+
+  it('warns when there is no earlier snapshot with these options', async () => {
+    await bvl('open', fixture('/other.html'));
+    await bvl('snapshot', '-i');
+    const r = await bvl('diff', 'snapshot', '-d', '7');
+    expect(r.stderr).toContain('no earlier snapshot');
+    expect(r.stdout).toMatch(/^@@ -0,0 \+1,\d+ @@$/m);
   });
 });
