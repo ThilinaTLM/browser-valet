@@ -116,6 +116,7 @@ describe('content boundaries', () => {
       ['get', ['value', '@e1']],
       ['get', ['attr', '@e1', 'href']],
       ['network', ['request', '3']],
+      ['diff', ['snapshot']],
     ];
     for (const [c, p] of yes) expect(g.isPageContent(c, pos(...p), {}), c).toBe(true);
     const no: [string, string[]][] = [
@@ -125,6 +126,7 @@ describe('content boundaries', () => {
       ['tab', []],
       ['click', ['@e1']],
       ['network', ['requests']],
+      ['diff', ['screenshot']],
       ['dialog', ['accept']],
     ];
     for (const [c, p] of no) expect(g.isPageContent(c, pos(...p), {}), c).toBe(false);

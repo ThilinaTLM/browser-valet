@@ -4,6 +4,7 @@
 open [url]   back   forward   reload   close
 tab [list | new [--label L] [url] | show [tN|label] | <tN|label> | close [tN|label]]
 snapshot [-i] [-c] [-d N] [-s <selector>] [-u] [--delta] [--full] [@ref]   # --json: {origin,title,refs,removedRefs,snapshot}
+diff snapshot [--stdin] [-s <selector>] [-c] [-d N]   # unified diff vs last snapshot or stdin baseline; --json: {diff,additions,removals,unchanged,changed}
 click <t> [--new-tab] [--right] [--human]   dblclick <t> [--human]   hover <t> [--human]   focus <t>
 fill <t> <text>   type <t> <text>   press <key>   keydown <key>   keyup <key>
 keyboard type|inserttext <text>   check <t>   uncheck <t>   select <t> <value...>

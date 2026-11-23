@@ -26,13 +26,14 @@ import { base64Blob } from '../base64';
 import { snapshot } from '../snapshot';
 import { computedStyles } from './extra';
 import {
-  baselineKey,
   computeDelta,
   formatDeltaText,
   formatUnchanged,
   getBaseline,
   nextRevision,
   setBaseline,
+  setLastSnapshot,
+  snapshotKey,
 } from '../snapshot-diff';
 import { session, state } from '../state';
 import { sleep } from '../tabs';
@@ -173,6 +174,8 @@ export const inspectionCommands: Command[] = [
         urls: a.has('urls'),
       };
       const snap = await snapshot(id, { ...opts, session: ctx.session });
+      const key = snapshotKey(id, opts, state.frames[id]?.frameId);
+      setLastSnapshot(key, snap.text);
       const full = {
         text: snap.text,
         data: {
@@ -186,7 +189,6 @@ export const inspectionCommands: Command[] = [
       if (!a.has('delta') && !a.has('full')) return full;
 
       // Baseline per tab and option set; `--full` returns the tree and resets it.
-      const key = baselineKey(id, JSON.stringify(opts));
       const now = {
         lines: snap.text.split('\n'),
         refs: snap.refs,

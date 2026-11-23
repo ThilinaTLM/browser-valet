@@ -213,14 +213,272 @@ export function computeDelta(
 }
 
 // ---------------------------------------------------------------------------
+// `diff snapshot`: unified diff in agent-browser's format
+// ---------------------------------------------------------------------------
+
+export interface UnifiedDiff {
+  additions: number;
+  changed: boolean;
+  /** Unified diff text (empty when nothing changed). */
+  diff: string;
+  removals: number;
+  unchanged: number;
+}
+
+function range(start0: number, count: number): string {
+  if (count === 0) return `${String(start0)},0`;
+  return count === 1 ? String(start0 + 1) : `${String(start0 + 1)},${String(count)}`;
+}
+
+const CONTEXT = 3;
+/** Edit distance above which Myers is not run (memory is O(D²)); the middle becomes one hunk. */
+const MAX_EDIT_DISTANCE = 3000;
+
+const REF_ATTR = /^ref=e\d+$/;
+// `- role`, an optional JSON-quoted name, then an optional `[attr, attr]` group (see snapshot.ts).
+const LINE_ATTRS = /^(\s*- \S+(?: "(?:[^"\\]|\\.)*")?) \[([^\]]*)\]/;
+
+/**
+ * A snapshot line without its `ref=eN` attribute, so trees can be compared across reloads and
+ * navigation (refs keep counting up). Same idea as agent-browser's `snapshot_comparison_text`.
+ */
+export function stripRef(line: string): string {
+  const m = LINE_ATTRS.exec(line);
+  if (!m) return line;
+  const kept = (m[2] ?? '').split(', ').filter((x) => !REF_ATTR.test(x));
+  const attrs = kept.length ? ` [${kept.join(', ')}]` : '';
+  return `${m[1] ?? ''}${attrs}${line.slice(m[0].length)}`;
+}
+
+/** Remove bvl's content-boundary marker lines (a baseline saved with --content-boundaries). */
+export function stripBoundaryLines(lines: string[]): string[] {
+  return lines.filter(
+    (l) =>
+      !l.startsWith('--- AGENT_BROWSER_PAGE_CONTENT ') &&
+      !l.startsWith('--- END_AGENT_BROWSER_PAGE_CONTENT '),
+  );
+}
+
+/** Myers O(ND) diff of two line lists as hunks; undefined if the edit distance is too large. */
+function myersHunks(a: readonly string[], b: readonly string[]): Hunk[] | undefined {
+  const n = a.length;
+  const m = b.length;
+  const max = Math.min(n + m, MAX_EDIT_DISTANCE);
+  const off = max + 1;
+  const v = new Int32Array(2 * off + 1);
+  const trace: Int32Array[] = [];
+  let found = -1;
+  for (let d = 0; d <= max && found < 0; d++) {
+    trace.push(v.slice(off - d - 1, off + d + 2)); // index = k + d + 1
+    for (let k = -d; k <= d; k += 2) {
+      let x =
+        k === -d || (k !== d && (v[off + k - 1] ?? 0) < (v[off + k + 1] ?? 0))
+          ? (v[off + k + 1] ?? 0)
+          : (v[off + k - 1] ?? 0) + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x++;
+        y++;
+      }
+      v[off + k] = x;
+      if (x >= n && y >= m) {
+        found = d;
+        break;
+      }
+    }
+  }
+  if (found < 0) return undefined;
+  // Walk back, collecting single-line edits (x/y are positions in a/b before each edit).
+  const edits: { del: boolean; x: number; y: number }[] = [];
+  let x = n;
+  let y = m;
+  for (let d = found; d > 0; d--) {
+    const pv = trace[d] ?? v;
+    const at = (k: number) => pv[k + d + 1] ?? 0;
+    const k = x - y;
+    const down = k === -d || (k !== d && at(k - 1) < at(k + 1));
+    const pk = down ? k + 1 : k - 1;
+    const px = at(pk);
+    const py = px - pk;
+    while (x > (down ? px : px + 1) && y > (down ? py + 1 : py)) {
+      x--;
+      y--;
+    }
+    edits.push(down ? { del: false, x: px, y: py } : { del: true, x: px, y: py });
+    x = px;
+    y = py;
+  }
+  edits.reverse();
+  const hunks: Hunk[] = [];
+  let cur: Hunk | undefined;
+  let curEnd = -1;
+  for (const e of edits) {
+    // An edit continues the hunk when it starts where the previous one ended in `a`.
+    if (!cur || e.x !== curEnd) {
+      cur = { start: e.x, deleteCount: 0, lines: [] };
+      hunks.push(cur);
+    }
+    if (e.del) {
+      cur.deleteCount++;
+      curEnd = e.x + 1;
+    } else {
+      cur.lines.push(b[e.y] ?? '');
+      curEnd = e.x;
+    }
+  }
+  return hunks;
+}
+
+/**
+ * Unified diff of two line lists (`--- before` / `+++ after`, 3 lines of context) with the counts
+ * agent-browser prints. `a` and `b` are what is compared (refs stripped); `shownA` and `shownB`
+ * (same lengths, default `a` and `b`) are what is printed. A `\ No newline at end of file` line
+ * follows a printed line that ends the old or new text, as `similar` prints it.
+ */
+export function unifiedDiff(
+  a: readonly string[],
+  b: readonly string[],
+  shownA: readonly string[] = a,
+  shownB: readonly string[] = b,
+): UnifiedDiff {
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start++;
+  if (start === a.length && start === b.length) {
+    return { additions: 0, changed: false, diff: '', removals: 0, unchanged: a.length };
+  }
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA--;
+    endB--;
+  }
+  const inner = myersHunks(a.slice(start, endA), b.slice(start, endB));
+  const hunks: Hunk[] = inner
+    ? inner.map((h) => ({ ...h, start: h.start + start }))
+    : [{ start, deleteCount: endA - start, lines: b.slice(start, endB) }];
+  const removals = hunks.reduce((n, h) => n + h.deleteCount, 0);
+  const additions = hunks.reduce((n, h) => n + h.lines.length, 0);
+  // `lines` holds stripped text; printing uses the shown arrays by index.
+  const bIndexAt = (h: Hunk, shift: number) => h.start + shift;
+  // Group hunks whose gap is small enough for their context to meet.
+  const groups: Hunk[][] = [];
+  for (const h of hunks) {
+    const last = groups[groups.length - 1];
+    const prev = last?.[last.length - 1];
+    if (last && prev && h.start - (prev.start + prev.deleteCount) <= 2 * CONTEXT) last.push(h);
+    else groups.push([h]);
+  }
+  const out = ['--- before', '+++ after'];
+  const NO_EOL = '\\ No newline at end of file';
+  let shift = 0; // new line index - old line index before the current hunk
+  for (const g of groups) {
+    const first = g[0];
+    const end = g[g.length - 1];
+    if (!first || !end) continue;
+    const from = Math.max(0, first.start - CONTEXT);
+    const to = Math.min(a.length, end.start + end.deleteCount + CONTEXT);
+    const groupShift = shift;
+    const body: string[] = [];
+    const context = (i: number) => {
+      const bi = i + shift;
+      body.push(` ${shownB[bi] ?? shownA[i] ?? ''}`);
+      if (i === a.length - 1 && bi === b.length - 1) body.push(NO_EOL);
+    };
+    let at = from;
+    let oldCount = 0;
+    let newCount = 0;
+    for (const h of g) {
+      for (; at < h.start; at++) {
+        context(at);
+        oldCount++;
+        newCount++;
+      }
+      for (let i = 0; i < h.deleteCount; i++) {
+        body.push(`-${shownA[h.start + i] ?? ''}`);
+        if (h.start + i === a.length - 1) body.push(NO_EOL);
+      }
+      h.lines.forEach((l, i) => {
+        const bi = bIndexAt(h, shift) + i;
+        body.push(`+${shownB[bi] ?? l}`);
+        if (bi === b.length - 1) body.push(NO_EOL);
+      });
+      at = h.start + h.deleteCount;
+      oldCount += h.deleteCount;
+      newCount += h.lines.length;
+      shift += h.lines.length - h.deleteCount;
+    }
+    for (; at < to; at++) {
+      context(at);
+      oldCount++;
+      newCount++;
+    }
+    out.push(`@@ -${range(from, oldCount)} +${range(from + groupShift, newCount)} @@`, ...body);
+  }
+  return {
+    additions,
+    changed: true,
+    diff: `${out.join('\n')}\n`,
+    removals,
+    unchanged: a.length - removals,
+  };
+}
+
+/** The text printed for a diff: the diff, a blank line, then the counts. */
+export function formatUnifiedDiff(d: UnifiedDiff): string {
+  if (!d.changed) return '✓ No changes detected';
+  return `${d.diff}\n${String(d.additions)} additions, ${String(d.removals)} removals, ${String(d.unchanged)} unchanged`;
+}
+
+// ---------------------------------------------------------------------------
 // Baselines (in memory only: the session-storage quota rules out persisting them)
 // ---------------------------------------------------------------------------
 
 const baselines = new Map<string, Baseline>();
 const revisions = new Map<number, number>();
+/** Last snapshot text per tab and option set, for `diff snapshot` (any snapshot updates it). */
+const lastSnapshots = new Map<string, string>();
+
+export const getLastSnapshot = (key: string): string | undefined => lastSnapshots.get(key);
+/** Option sets remembered per tab; the least recently written one is dropped beyond this. */
+const MAX_LAST_PER_TAB = 8;
+export function setLastSnapshot(key: string, text: string): void {
+  lastSnapshots.delete(key);
+  lastSnapshots.set(key, text);
+  const prefix = key.slice(0, key.indexOf(':') + 1);
+  const mine = [...lastSnapshots.keys()].filter((k) => k.startsWith(prefix));
+  for (const k of mine.slice(0, Math.max(0, mine.length - MAX_LAST_PER_TAB))) {
+    lastSnapshots.delete(k);
+  }
+}
 
 export const baselineKey = (tabId: number, optionKey: string): string =>
   `${String(tabId)}:${optionKey}`;
+/**
+ * Baseline key for a snapshot's option set; the same for `snapshot` and `diff snapshot`. The
+ * frame scope is part of the key only when one is set, so keys without a frame are unchanged.
+ */
+export const snapshotKey = (
+  tabId: number,
+  o: {
+    interactive: boolean;
+    compact: boolean;
+    depth: number | undefined;
+    scope: string | undefined;
+    urls: boolean;
+  },
+  frameId?: string,
+): string =>
+  baselineKey(
+    tabId,
+    JSON.stringify({
+      interactive: o.interactive,
+      compact: o.compact,
+      depth: o.depth,
+      scope: o.scope,
+      urls: o.urls,
+      ...(frameId ? { frame: frameId } : {}),
+    }),
+  );
 export const getBaseline = (key: string): Baseline | undefined => baselines.get(key);
 export const setBaseline = (key: string, b: Baseline): void => void baselines.set(key, b);
 
@@ -234,5 +492,7 @@ export function nextRevision(tabId: number): number {
 export function forgetBaselines(tabId: number): void {
   forgetCaptures(tabId);
   revisions.delete(tabId);
-  for (const k of [...baselines.keys()]) if (k.startsWith(`${String(tabId)}:`)) baselines.delete(k);
+  const prefix = `${String(tabId)}:`;
+  for (const k of [...baselines.keys()]) if (k.startsWith(prefix)) baselines.delete(k);
+  for (const k of [...lastSnapshots.keys()]) if (k.startsWith(prefix)) lastSnapshots.delete(k);
 }

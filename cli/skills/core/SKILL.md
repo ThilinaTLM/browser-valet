@@ -90,6 +90,15 @@ those baseline lines with the `+` lines. Separate edits come as `delta (…, N c
 change or when the delta would be larger. `--full` forces the tree and resets the baseline. Each
 combination of flags (`-i`, `-c`, `-s`…) has its own baseline.
 
+`bvl diff snapshot [-s <sel>] [-c] [-d N]` prints a unified diff (`---`/`+++`/`@@`, 3 lines of context)
+of the tree against the last `snapshot` taken with the same `-s`/`-c`/`-d` (and frame), then
+`N additions, N removals, N unchanged` (`✓ No changes detected` when equal). Refs are ignored when
+comparing, so a reload alone is no change; printed lines keep their current refs. `snapshot -i` and `-u`
+are different option sets and are not a baseline (without one the whole tree shows as added, with a
+warning). To compare with an older state, save it and pipe it back: `bvl snapshot > before.txt`, later
+`bvl diff snapshot --stdin < before.txt` (`-b <file>` is not supported). `--json`:
+`{diff, additions, removals, unchanged, changed}`.
+
 Elements that act like buttons but have no interactive role (`<div onclick>`, `cursor: pointer`
 spans, `tabindex`) get a ref too, marked `clickable [cursor:pointer, onclick]` (or
 `focusable [tabindex]`). In `-i` their text is the name. Listeners added with `addEventListener`
