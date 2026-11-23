@@ -23,7 +23,9 @@
 - **Accessibility**: unlabelled controls, missing alt text, focus order, keyboard traps,
   focus lost after a dialog, headings out of order, colour as the only signal.
 - **Performance**: slow loads or interactions, long spinners, large or repeated requests
-  (`network requests`), layout jumping while loading, unresponsive UI.
+  (`network requests`), layout jumping while loading, unresponsive UI. `bvl vitals [url]` rates
+  TTFB, FCP, LCP, CLS and INP; in an agent tab (background) LCP/FCP are "not measurable", so
+  quote only TTFB/CLS/INP there, or ask the user to bring a shared tab to the front for LCP.
 - **Content**: typos, placeholder text, stale or contradictory copy, untranslated strings.
 
 ## Exploration checklist

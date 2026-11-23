@@ -121,6 +121,9 @@ Visit each area in turn (depth first through the main flows, then breadth). Use
    `snapshot -i`), missing form labels, images without alt text and focus lost after a dialog
    closes.
 
+Performance: `bvl vitals` on key pages (see the Performance entry in the checklist for its
+background-tab limits).
+
 Checklist: `bvl skills get dogfood --ref issue-taxonomy`.
 Aim for 5–10 well-documented issues rather than dozens of thin ones. Stop at what the scope
 covers.
@@ -169,6 +172,6 @@ confirm it is reproducible before you record it.
 
 `open`, `tab`, `tab show`, `snapshot -i [--delta]`, `screenshot [--annotate] [--full]`,
 `click`, `fill`, `press`, `get`, `eval`, `read`, `back`, `reload`, `console`, `errors`,
-`network requests|request`, `set viewport|media`, `close`.
+`network requests|request`, `vitals`, `set viewport|media`, `close`.
 
 References: `--ref issue-taxonomy` (severity, categories, checklist), `--ref report-template`.
