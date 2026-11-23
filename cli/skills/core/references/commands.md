@@ -18,6 +18,7 @@ get text|html|value|attr|title|url|count|box [t] [attr]   get styles <t> [prop..
 wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob | --load s | --fn js
 read [url] [--outline] [--filter <text>]
 screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
+diff screenshot [-o <file>] [-t <0-1>] [--full]   # pixel diff vs the last screenshot of this tab: grey baseline, changes red; first call records the baseline; --baseline <file> unsupported
 eval <js> | eval -b <base64> | eval --stdin
 batch [--bail] [--omit-command] "<cmd>" "<cmd>" … | batch --stdin   # one command per line
 pdf <path> [--landscape] [--background]   set viewport <w> <h> [scale] | reset

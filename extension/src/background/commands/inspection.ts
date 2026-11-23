@@ -20,6 +20,7 @@ import {
   getCapture,
   type Pixels,
   setCapture,
+  setDiffBaseline,
 } from '../capture-compare';
 import { snapshot } from '../snapshot';
 import { computedStyles } from './extra';
@@ -478,6 +479,8 @@ export const inspectionCommands: Command[] = [
       let truncated = false;
       if (full) ({ data, truncated } = await fullPage(id, format));
       else ({ data } = await viewport(id, format));
+      // The plain capture is also the reference for a later `diff screenshot`.
+      setDiffBaseline(captureKey(id, full ? 'diff:full' : 'diff:view'), { data, format });
 
       const extra: Record<string, unknown> = {};
       if (conditional) {
@@ -657,7 +660,7 @@ export const inspectionCommands: Command[] = [
 const SLICE = 8000;
 const MAX_HEIGHT = 32000;
 
-function toBase64(bytes: Uint8Array): string {
+export function toBase64(bytes: Uint8Array): string {
   let s = '';
   for (let i = 0; i < bytes.length; i += 0x8000) {
     s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -688,7 +691,7 @@ async function captureScreenshot(
  * capture the viewport's area of the page the way `--full` does (`captureBeyondViewport`), which
  * renders this tab's own frame.
  */
-async function viewport(tabId: number, format: 'png' | 'jpeg'): Promise<{ data: string }> {
+export async function viewport(tabId: number, format: 'png' | 'jpeg'): Promise<{ data: string }> {
   const hidden = (await evaluate(tabId, 'document.visibilityState')).value === 'hidden';
   if (!hidden) return captureScreenshot(tabId, { format });
   const { cssVisualViewport: v } = await cdp.send<{
@@ -714,7 +717,7 @@ async function comparisonPixels(base64: string, format: 'png' | 'jpeg'): Promise
 }
 
 /** Full-page screenshot; tall pages are captured in slices and stitched together. */
-async function fullPage(
+export async function fullPage(
   tabId: number,
   format: 'png' | 'jpeg',
 ): Promise<{ data: string; truncated: boolean }> {

@@ -56,4 +56,15 @@ export const setCapture = (key: string, e: Entry): void => void last.set(key, e)
 
 export function forgetCaptures(tabId: number): void {
   for (const k of [...last.keys()]) if (k.startsWith(`${String(tabId)}:`)) last.delete(k);
+  for (const k of [...baselines.keys()]) if (k.startsWith(`${String(tabId)}:`)) baselines.delete(k);
 }
+
+// Full-size baselines for `diff screenshot`: the last encoded capture per (tab, scope), in memory only.
+export interface DiffBaseline {
+  /** Base64 image as captured. */
+  data: string;
+  format: 'png' | 'jpeg';
+}
+const baselines = new Map<string, DiffBaseline>();
+export const getDiffBaseline = (key: string): DiffBaseline | undefined => baselines.get(key);
+export const setDiffBaseline = (key: string, b: DiffBaseline): void => void baselines.set(key, b);

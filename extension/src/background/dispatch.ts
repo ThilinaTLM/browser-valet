@@ -13,6 +13,7 @@ import {
   type Result,
 } from './command';
 import { batchCommands, type Outcome, runBatch } from './commands/batch';
+import { diffCommands } from './commands/diff';
 import { extraCommands } from './commands/extra';
 import { frameCommands } from './commands/frame';
 import { emulationCommands } from './commands/emulation';
@@ -44,6 +45,7 @@ const COMMANDS: Command[] = [
   ...frameCommands,
   ...networkCommands,
   ...emulationCommands,
+  ...diffCommands,
   ...batchCommands,
 ];
 /** Commands whose whole point is to reach a page: a refused redirect makes them fail. */
