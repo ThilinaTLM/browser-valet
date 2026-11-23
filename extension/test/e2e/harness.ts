@@ -435,13 +435,27 @@ export async function extensionWorkerState(): Promise<'dead' | 'wedged' | 'healt
   if (!target || !(await extensionWorkerRunning())) return 'dead';
   const worker = await target.worker();
   if (!worker) return 'dead';
-  const answered = await Promise.race([
-    worker.evaluate(() => chrome.runtime.getPlatformInfo().then(() => true)).catch(() => false),
-    new Promise<boolean>((resolve) =>
-      setTimeout(() => {
-        resolve(false);
-      }, 2000),
-    ),
-  ]);
-  return answered ? 'healthy' : 'wedged';
+  // Only a call that neither returns nor fails within the limit counts as wedged: a rejected evaluate
+  // (the inspector could not run it) says nothing about the worker.
+  let outcome: 'answered' | 'failed' | 'timeout';
+  try {
+    outcome = await Promise.race([
+      worker
+        .evaluate(() => chrome.runtime.getPlatformInfo().then(() => true))
+        .then(() => 'answered' as const)
+        .catch((e: unknown) => {
+          console.warn(`[e2e] could not inspect the worker: ${String(e)}`);
+          return 'failed' as const;
+        }),
+      new Promise<'timeout'>((resolve) =>
+        setTimeout(() => {
+          resolve('timeout');
+        }, 6000),
+      ),
+    ]);
+  } finally {
+    // Leave no DevTools session on the worker: an attached inspector can keep a worker alive.
+    await worker.client.detach().catch(() => undefined);
+  }
+  return outcome === 'timeout' ? 'wedged' : 'healthy';
 }

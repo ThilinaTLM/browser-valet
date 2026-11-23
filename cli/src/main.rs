@@ -413,10 +413,14 @@ pub(crate) fn status_with_ext(c: &Config, wait: Duration) -> Result<Value> {
 
 /// What to tell about an extension that is not connected, from the proxy's `extLost` (null when it is just off).
 pub(crate) fn not_connected_hint(lost: &Value) -> String {
+    const OFF: &str = "if the browser was restarted, or the extension was disabled or reloaded, ask the user to click the Browser Valet icon and switch it on";
     if lost.is_object() {
+        let wait = match lost["waitSecs"].as_u64() {
+            Some(n) if n > 0 => format!(" within about {n} s"),
+            _ => String::new(),
+        };
         format!(
-            "its background worker stopped responding (the browser terminated it, usually after a controlled tab was closed). It restarts by itself, within about {} s: retry shortly; opening the Browser Valet popup wakes it at once",
-            lost["waitSecs"].as_u64().unwrap_or(0)
+            "its background worker stopped responding (the browser terminated it, usually after a controlled tab was closed). It restarts by itself{wait}: retry shortly; opening the Browser Valet popup wakes it at once. Otherwise: {OFF}"
         )
     } else {
         "it is probably switched off: ask the user to click the Browser Valet icon and switch it on".into()

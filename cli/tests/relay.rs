@@ -455,13 +455,35 @@ fn status_does_not_drop_an_extension_with_a_request_in_flight() {
     let s = status(&p);
     assert!(s["ext"].is_null());
     assert_eq!(s["extLost"]["reason"], "unresponsive");
-    assert!(t.elapsed() >= Duration::from_millis(1500), "waits longer when busy");
+    assert!(
+        t.elapsed() < Duration::from_millis(1500),
+        "status waits one probe, not the busy multiple"
+    );
+    assert_eq!(s["extLost"]["waitSecs"], 0);
     assert_eq!(s["proxy"]["pending"], 1);
     send(
         &mut e,
         json!({"t":"res","id":r["id"],"res":{"exitCode":0,"stdout":"done\n"}}),
     );
     assert_eq!(recv(&mut c)["res"]["stdout"], "done\n");
+}
+
+/// The real CLI has a 10 s read timeout: `bvl status` with a silent, busy extension must answer well within it.
+#[test]
+fn cli_status_with_a_silent_busy_extension_is_prompt() {
+    let p = start_env(&[], &[("BVL_EXT_PROBE_MS", "2500")]);
+    let mut e = live_ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    pong(&mut e);
+    recv(&mut e); // the request; never answered
+    let t = Instant::now();
+    let out = bvl(&p, &["status"]);
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(out.status.success(), "{text} {}", String::from_utf8_lossy(&out.stderr));
+    assert!(text.contains("extension: not connected"), "{text}");
+    assert!(t.elapsed() < Duration::from_secs(8), "{:?}", t.elapsed());
+    drop(c);
 }
 
 #[test]
@@ -578,6 +600,8 @@ fn request_fails_when_a_dead_extension_does_not_come_back() {
 #[test]
 fn extension_of_another_version_is_not_probed() {
     if !embedded() {
+        // CI builds extension/dist before `cargo test`; locally the test is skipped without it.
+        assert!(std::env::var_os("CI").is_none(), "extension/dist is missing in CI");
         return;
     }
     let p = probing("4000");

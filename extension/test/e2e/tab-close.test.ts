@@ -33,6 +33,9 @@ async function expectRecovery(name: string, closedAt: number, settle: boolean): 
   let path = 'not inspected';
   if (settle) {
     await sleep(1500); // let Chrome finish closing (and, perhaps, wedge or stop the worker)
+    // Status first: inspecting attaches DevTools to the worker, which can change what it answers (a
+    // run saw `status` connected right after a "wedged" reading). Wedging only ever progresses to
+    // dead within these seconds, so a status taken before the reading must already agree with it.
     const status = (await bvl('status')).stdout;
     const state = await extensionWorkerState();
     path = state;

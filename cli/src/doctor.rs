@@ -312,7 +312,7 @@ fn extension(r: &mut Report, p: &Proxy) {
                 "extension",
                 St::Fail,
                 "connected, but its background worker stopped responding",
-                Some("the browser terminated it (usually after a controlled tab was closed); it restarts by itself within about a minute, or at once when you open the Browser Valet popup. Run `bvl doctor` again"),
+                Some("the browser terminated it (usually after a controlled tab was closed); it restarts by itself within about a minute, or at once when you open the Browser Valet popup (run `bvl doctor` again). If the browser was restarted, or the extension disabled or reloaded, switch it on in the popup"),
             );
             return;
         }

@@ -37,7 +37,8 @@ browser and switch it on, then retry. If it was never installed, the user runs `
 /// Shown when the extension stopped answering and did not come back in time.
 pub const WORKER_DEAD: &str = "browser extension stopped responding and did not restart in time. Its background worker was \
 terminated by the browser (this happens when a controlled tab is closed). Opening the Browser Valet popup or any browser \
-activity wakes it; then retry.";
+activity wakes it; then retry. If the browser was restarted, or the extension was disabled or reloaded, ask the user to \
+click the Browser Valet icon and switch it on.";
 
 /// Why the proxy lost the extension while it was (probably) still switched on.
 struct Lost {
@@ -196,13 +197,14 @@ fn drop_conn(st: &mut State, conn: u64, reason: &'static str) {
 /// Extensions of another version than the bundled one (dev builds, an update in progress) may predate
 /// `ping`/`pong`: they cannot be probed. Their own 20 s pings still feed the silence limit.
 fn probeable(info: &Value) -> bool {
-    EMBEDDED_EXT_VERSION.is_none_or(|v| info["extVersion"].as_str() == Some(v))
+    // Without an embedded extension (dev builds) the bvl version stands in for the bundled one.
+    info["extVersion"].as_str() == Some(EMBEDDED_EXT_VERSION.unwrap_or(VERSION))
 }
 
 /// Check the extension connection is live: it must answer a `ping` (which it does only after an extension
 /// API call returned). True when it did, or when there is nothing to check. False when it did not: the
 /// connection is then dropped, unless it has a request in flight and `drop_busy` is false (`status` stays
-/// truthful without failing that request). Waits `BVL_EXT_PROBE_MS` (a worker busy with a request may be slow: four times as long then).
+/// truthful without failing that request). Waits `BVL_EXT_PROBE_MS` (a `req` probe, which drops, waits four times as long while the extension has a request in flight, as a busy worker may be slow; `status` never waits longer, so it stays within the CLI's own 10 s read timeout).
 async fn probe_ext(sh: &Shared, drop_busy: bool) -> bool {
     let sent = Instant::now();
     let (conn, busy) = {
@@ -214,7 +216,12 @@ async fn probe_ext(sh: &Shared, drop_busy: bool) -> bool {
         e.tx.send(json!({"t":"ping"}).to_string()).ok();
         (e.conn, st.pending.values().any(|p| p.owner == e.conn))
     };
-    let deadline = tokio::time::Instant::now() + if busy { sh.probe_wait * 4 } else { sh.probe_wait };
+    let deadline = tokio::time::Instant::now()
+        + if busy && drop_busy {
+            sh.probe_wait * 4
+        } else {
+            sh.probe_wait
+        };
     loop {
         // Register for the notification before looking, so one arriving in between is not missed.
         let n = sh.alive.notified();
@@ -428,13 +435,11 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
     st.exts -= 1;
     if st.ext.as_ref().is_some_and(|e| e.conn == id) {
         st.ext = None;
-        // No close frame: the worker was terminated, not switched off. A request should wait for its restart.
-        if !clean {
-            st.lost = Some(Lost {
-                at: Instant::now(),
-                reason: "vanished",
-            });
-        }
+        // A close the extension chose (switched off) leaves no loss behind; a torn-down connection does.
+        st.lost = (!clean).then(|| Lost {
+            at: Instant::now(),
+            reason: "vanished",
+        });
     }
     let dead: Vec<u64> = st
         .pending
@@ -446,6 +451,8 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
         let p = st.pending.remove(&k).unwrap();
         p.out.send(err_res("browser extension disconnected")).ok();
     }
+    drop(st);
+    sh.alive.notify_waiters(); // a probe of this connection need not wait out its timeout
     log("ext disconnected");
 }
 
@@ -486,14 +493,16 @@ async fn cli_conn(sh: &Shared, mut ws: Ws) -> Result<()> {
                     .filter(|_| alive)
                     .map_or(Value::Null, |e| e.info.clone());
                 let lost = st.lost.as_ref().filter(|l| l.at.elapsed() < sh.wake_wait);
+                // A recorded loss: requests wait `waitSecs` more for it. Unanswered but not dropped (busy):
+                // nothing is recorded and no request would wait (`waitSecs` 0).
                 let ext_lost = match (lost, alive) {
-                    (Some(l), _) => Some((l.reason, l.at.elapsed())),
-                    (None, false) => Some(("unresponsive", Duration::ZERO)),
-                    _ => None,
+                    (Some(l), _) => {
+                        let age = l.at.elapsed();
+                        json!({"reason":l.reason,"ageSecs":age.as_secs(),"waitSecs":sh.wake_wait.saturating_sub(age).as_secs()})
+                    }
+                    (None, false) => json!({"reason":"unresponsive","ageSecs":0,"waitSecs":0}),
+                    _ => Value::Null,
                 };
-                let ext_lost = ext_lost.map_or(Value::Null, |(reason, age)| {
-                json!({"reason":reason,"ageSecs":age.as_secs(),"waitSecs":sh.wake_wait.saturating_sub(age).as_secs()})
-            });
                 let proxy = json!({"version":VERSION,"pid":std::process::id(),"port":sh.port,"idleTimeoutSecs":sh.idle,"pending":st.pending.len()});
                 json!({"t":"status","proxy":proxy,"ext":ext,"extLost":ext_lost})
             };

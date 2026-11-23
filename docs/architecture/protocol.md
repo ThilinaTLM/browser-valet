@@ -68,14 +68,19 @@ Any message other than `auth` before authentication → close.
   activity for the idle timer. The extension sends one only after an extension API call (`getPlatformInfo`) has
   returned.
 - **Liveness.** A browser keeps the socket of a dead service worker open, so an open socket proves nothing.
-  After a controlled tab is closed Chrome can leave the worker running JavaScript (socket, timers) while every
-  `chrome.*` call hangs, then terminate it. The proxy therefore trusts only `ping`/`pong` frames, which the
-  extension sends only after an extension API call has returned. A `res` or `event` proves nothing: a wedged
-  worker can finish a request and hang on the next.
+  After a controlled tab is closed Chrome can leave the worker *wedged*: JavaScript, timers and the socket still
+  work (the socket stays open) while every `chrome.*` call hangs. Some seconds later Chrome *terminates* it:
+  the connection then ends with close code 1001 (going away) or with no close frame at all. The proxy
+  therefore trusts only `ping`/`pong` frames, which the extension sends only after an extension API call has
+  returned. A `res` or `event` proves nothing: a wedged worker can finish a request and hang on the next.
   - Before it answers `status` or forwards a `req` the proxy **always** sends `{"t":"ping"}` and waits up to
     `BVL_EXT_PROBE_MS` (default 2.5 s; `0` turns probing off) for a `ping` or `{"t":"pong"}` (a healthy worker
-    answers in about a millisecond). With a request in flight on that connection it waits four times as long.
-    The CLI's own version-check `status` carries `"probe":false` and skips this.
+    answers in about a millisecond). A `req` probe waits four times as long while the extension has a request in
+    flight (a worker busy with one may be slow); a `status` probe never does, so the reply stays well inside the
+    CLI's 10 s read timeout. A synchronous CPU block of more than the probe wait during a concurrent `req` can
+    therefore get a healthy connection dropped and fail the command that was in flight on it; commands avoid
+    long synchronous work. The CLI's own version-check `status` and `setup`'s `ext_info` (update decision)
+    carry `"probe":false` and skip the probe; their `ext` can therefore show a dead worker.
   - No answer: the proxy drops the connection (`bye` with reason `restart`, which a slow but live worker
     answers by reconnecting instead of switching itself off; a dead one never reads it), fails its pending
     requests with "browser extension disconnected" and records the loss (`unresponsive`). Exception: for a
@@ -83,12 +88,12 @@ Any message other than `auth` before authentication → close.
     reports the extension as not connected.
   - It also drops an extension that sent no `ping`/`pong` for `BVL_EXT_SILENT_MS` (default 50 s; the extension
     pings every 20 s).
-  - A connection that ends with a WebSocket close frame of code 1001 (going away: what Chrome sends when it
-    terminates the worker) or with no close frame is recorded as a loss too (`vanished`). One the extension
-    closes itself (no code) is a switch-off, not a loss.
+  - A connection that ends with close code 1001 or with no close frame is recorded as a loss too (`vanished`).
+    The same happens when the browser quits or the extension is disabled, reloaded or removed, so a recorded
+    loss does not prove the switch is on; the messages say to ask the user to switch it on in that case. One the
+    extension closes itself (no code) is a switch-off, not a loss, and clears a recorded one.
   - A replacement connection that arrives while a probe waits is never dropped by that probe.
-  - An extension whose `extVersion` differs from the bundled one (dev build, update in progress) may predate
-    `ping`; it is never probed (so never dropped for silence on a probe), only by the silence limit.
+  - An extension whose `extVersion` differs from the bundled one (dev build, update in progress; without an embedded extension, from the bvl version) may predate `ping`: it is never probed (so never dropped for silence on a probe), only by the silence limit.
   A recorded loss is cleared when an extension connects and forgotten `BVL_EXT_WAKE_MS` (default 65 s) after it
   happened.
 - A `req` that finds no extension waits `BVL_EXT_WAIT_MS` (default 10 s) for one. While a loss is recorded it
@@ -131,7 +136,7 @@ An extension of another version is not liveness-probed (it may not know `ping`),
 After `welcome`, the CLI sends exactly one message and waits:
 
 - `{"t":"req","req":{...}}` — run a command in the browser.
-- `{"t":"status"}` → proxy replies `{"t":"status","proxy":{"version":"…","pid":123,"port":47823,"idleTimeoutSecs":600,"pending":0},"ext":null | {"browser":"…","extVersion":"…","managed":true}}` (`ext` is the extension's auth `info`; the proxy first checks the extension is alive, see Liveness, so `ext` is `null` for a dead worker). `extLost` is `null`, or `{"reason":"unresponsive"|"vanished","ageSecs":0,"waitSecs":65}` while the proxy has lost an extension that was probably switched on (`waitSecs`: how much longer a request would wait for it). The CLI's `status`, help and `doctor` print "its background worker stopped responding, retry shortly" instead of "switch it on" when `extLost` is set. The CLI may send `{"t":"status","probe":false}` to skip the liveness check.
+- `{"t":"status"}` → proxy replies `{"t":"status","proxy":{"version":"…","pid":123,"port":47823,"idleTimeoutSecs":600,"pending":0},"ext":null | {"browser":"…","extVersion":"…","managed":true}}` (`ext` is the extension's auth `info`; the proxy first checks the extension is alive, see Liveness, so `ext` is `null` for a dead worker). `extLost` is `null`, or `{"reason":"unresponsive"|"vanished","ageSecs":0,"waitSecs":65}` while the proxy has lost an extension (`waitSecs`: how much longer a request would wait for it). A `status` that finds a busy extension unresponsive does not drop it and records nothing: it reports `ext: null` with `waitSecs` 0. The CLI's `status`, help and `doctor` print "its background worker stopped responding, retry shortly" instead of "switch it on" when `extLost` is set. The CLI may send `{"t":"status","probe":false}` to skip the liveness check.
 - `{"t":"shutdown","reason":"restart"|"stop"}` (`reason` optional; missing or unknown = `stop`) → proxy fails all in-flight requests (each CLI gets a `res`, `exitCode` 1, "proxy is shutting down"), sends `cancel` for them to the extension, then `bye` with the reason, replies `{"t":"ok"}` and exits. The CLI sends `restart` when a new proxy follows at once (version restart, `pair`, `doctor --fix`) and `stop` for `bvl stop` and `unpair`. `pending` in `status` is the number of in-flight requests.
 
 `req` object (opaque to the proxy):
