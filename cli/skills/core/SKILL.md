@@ -217,10 +217,11 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
 - `network requests [--filter --type --method --status 4xx --clear]` / `network request <id>` show what the
   page sent and received (read-only). Recording starts at the first `network` command on a tab, so
   reload or repeat the action afterwards. Cookie, Authorization and similar headers, secret fields in
-  request bodies (redacted before the 8 KB request-body cap; `postDataTruncated` in `--json`) and
-  token/secret/password/API-key/session-id/JWT fields in JSON (also `)]}'`-prefixed) and form-encoded
-  response bodies are always shown as `[redacted]`. Fields like `token_type`, `tokens_used`, `expires_in`
-  stay visible; response bodies are capped at 32 KB.
+  request bodies (redacted before the 8,192-character request-body cap; `postDataTruncated` in `--json`) and
+  token/secret/password/API-key/session-id/JWT/cookie/signature fields in JSON (also XSSI-prefixed,
+  NDJSON, SSE, JSONP) and form-encoded response bodies, and URL fragments and `Location`/`Referer` are always shown as `[redacted]`. Fields like `token_type`, `tokens_used`, `expires_in`
+  stay visible; response bodies are capped at 32,768 characters. A bare `code` and
+  `refresh` are not redacted.
 - `pdf <path> [--landscape] [--background]` works on any controlled tab (read-only).
 - `set viewport <w> <h> [scale]` / `set media dark|light [reduced-motion]` (and `... reset`) work on
   tabs you opened only; shared tabs are refused. They persist across navigations and end on `close`.

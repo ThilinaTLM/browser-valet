@@ -406,3 +406,254 @@ describe('network command', () => {
     ).toEqual(['requests', '--filter', '•••', '--status', '4xx']);
   });
 });
+
+describe('redaction hardening', () => {
+  const t0 = (): number => performance.now();
+
+  it('form check is linear (no ReDoS)', () => {
+    const evil = `a=${'&a='.repeat(50)} x`;
+    const s = t0();
+    expect(net.redactResponseBody(evil)).toBe(evil);
+    expect(t0() - s).toBeLessThan(200);
+  });
+
+  it('leaves form-looking text with whitespace unchanged', () => {
+    const t = '  token=abc and more\n';
+    expect(net.redactResponseBody(t, 'text/plain')).toBe(t);
+    const untouched = '  a=1&b=2  \n';
+    expect(net.redactResponseBody(untouched, 'text/plain')).toBe(untouched);
+  });
+
+  it('redacts every listed response key; keeps harmless ones', () => {
+    const secret = [
+      'SecretKey',
+      'SecretAccessKey',
+      'x-amz-security-token',
+      'x-amz-signature',
+      'x-api-key',
+      'x-auth-token',
+      'Cookie',
+      'secretKey',
+      'secret_key',
+      'accessKey',
+      'sessionKey',
+      'encryption_key',
+      'signing_key',
+      'new_password',
+      'current_password',
+      'password_confirmation',
+      'jwtToken',
+      'personal_access_token',
+      'authenticity_token',
+      'mfa_token',
+      'reset_token',
+      'verification_token',
+      'customToken',
+      'firebaseToken',
+      'sasToken',
+      '_csrf',
+      'csrf',
+      'credentials',
+      'device_code',
+      'authorization_code',
+      'client_assertion',
+      'assertion',
+      'signature',
+      'code_verifier',
+      'api_token',
+      'auth_token',
+      'session_token',
+      'csrf_token',
+      'apiKey',
+      'api_key',
+      'private_key',
+      'sessionId',
+      'session_id',
+      'jwt',
+      'app_secret',
+      'access_token',
+      'refresh_token',
+      'id_token',
+      'password',
+      'client_secret',
+    ];
+    const visible = {
+      tokens_used: 1,
+      token_count: 2,
+      token_type: 'Bearer',
+      expires_in: 3,
+      code: 'US',
+      refresh: 'x',
+      pageToken: 'p',
+      nextPageToken: 'n',
+      continuation_token: 'c',
+      syncToken: 's',
+      resumeToken: 'r',
+      cursorToken: 'k',
+      name: 'n',
+    };
+    const input: Record<string, unknown> = { ...visible };
+    for (const k of secret) input[k] = 'SECRET';
+    const out = JSON.parse(net.redactResponseBody(JSON.stringify(input))) as Record<
+      string,
+      unknown
+    >;
+    for (const k of secret) expect(out[k], k).toBe(net.REDACTED);
+    expect(out).toMatchObject(visible);
+  });
+
+  it('redacts secret keys beyond 32 KB before truncating', async () => {
+    const filler = 'x'.repeat(net.MAX_BODY_CHARS + 100);
+    const send = mock.chrome.debugger.sendCommand as unknown as {
+      mockImplementation(fn: (t: unknown, m: string) => unknown): void;
+    };
+    send.mockImplementation((_t, m) =>
+      Promise.resolve(
+        m === 'Network.getResponseBody'
+          ? { body: JSON.stringify({ filler, access_token: 'SECRET' }), base64Encoded: false }
+          : {},
+      ),
+    );
+    const r = await net.responseBody(1, {
+      id: 'r',
+      method: 'GET',
+      url: 'u',
+      type: 'Fetch',
+      requestHeaders: {},
+      responseHeaders: {},
+      finished: true,
+      status: 200,
+      mimeType: 'application/json',
+    });
+    expect(r.truncated).toBe(true);
+    expect(r.text).not.toContain('SECRET');
+  });
+
+  it('redacts NDJSON, SSE and JSONP bodies by key/value pairs', () => {
+    const nd = '{"access_token":"SECRET1","a":1}\n{"id":2,"password":"SECRET2"}\n';
+    const o1 = net.redactResponseBody(nd, 'application/x-ndjson');
+    expect(o1).not.toContain('SECRET');
+    expect(o1).toContain('"a":1');
+    const sse = 'event: m\ndata: {"session_id":"SECRET3","ok":true}\n\n';
+    const o2 = net.redactResponseBody(sse, 'text/event-stream');
+    expect(o2).not.toContain('SECRET3');
+    expect(o2).toContain('"ok":true');
+    const o3 = net.redactResponseBody(
+      'cb({"jwt":"SECRET4","token_type":"Bearer"});',
+      'application/javascript',
+    );
+    expect(o3).not.toContain('SECRET4');
+    expect(o3).toContain('"token_type":"Bearer"');
+    expect(
+      net.redactResponseBody('{"a":1}\n{"secret":{"k":"SECRET5"}}', 'application/x-ndjson'),
+    ).not.toContain('SECRET5');
+  });
+
+  it.each([")]}'\n", ")]}',\n", 'while(1);', 'for(;;);', 'for (;;);\n', '{}&& '])(
+    'handles XSSI prefix %j',
+    (prefix) => {
+      const out = net.redactResponseBody(
+        `${prefix}${JSON.stringify({ id_token: 'SECRET', ok: 1 })}`,
+      );
+      expect(out).not.toContain('SECRET');
+      expect(out).toContain('"ok": 1');
+    },
+  );
+
+  it('redacts fragments and URL headers', () => {
+    expect(net.redactUrl('http://x/cb#access_token=SECRET&state=1')).toBe(
+      `http://x/cb#access_token=${net.REDACTED}&state=1`,
+    );
+    expect(net.redactUrl('http://x/a?code_verifier=S&x=1#frag')).toBe(
+      `http://x/a?code_verifier=${net.REDACTED}&x=1#frag`,
+    );
+    const h = net.redactHeaders({
+      Location: 'http://x/cb#access_token=SECRET',
+      Referer: 'http://x/?token=SECRET',
+      'Content-Location': '/a?api_key=SECRET',
+      Refresh: '0; url=http://x/?id_token=SECRET',
+    });
+    expect(JSON.stringify(h)).not.toContain('SECRET');
+  });
+
+  it('widens request keys', () => {
+    for (const k of ['code_verifier', 'client_assertion', 'assertion', 'device_code', 'signature'])
+      expect(net.isSecretKey(k), k).toBe(true);
+    expect(net.isSecretKey('code')).toBe(false);
+    expect(
+      net.redactRequestBody('code_verifier=S&code=1', 'application/x-www-form-urlencoded'),
+    ).toBe(`code_verifier=${net.REDACTED}&code=1`);
+  });
+
+  it('redacts kebab-case keys', () => {
+    const out = net.redactResponseBody('{"x-auth-token":"S","session-id":"S","ok":1}');
+    expect(out).not.toContain('"S"');
+  });
+
+  it('redacts >8 KB form and multipart request bodies before truncating', async () => {
+    await net.startRecording(1);
+    const form = `password=SECRET1&token=SECRET2&filler=${'x'.repeat(9000)}`;
+    request('f', 'http://x/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: form,
+    });
+    const dash = 'Content-Disposition: form-data; name=';
+    const mp = [
+      `--B\r\n${dash}"password"\r\n\r\nSECRET3`,
+      `--B\r\n${dash}"filler"\r\n\r\n${'x'.repeat(9000)}`,
+      '--B--',
+    ].join('\r\n');
+    request('m', 'http://x/', {
+      method: 'POST',
+      headers: { 'content-type': 'multipart/form-data; boundary=B' },
+      postData: mp,
+    });
+    for (const id of ['f', 'm']) {
+      const e = net.getEntry(1, id);
+      expect(e?.postDataTruncated, id).toBe(true);
+      expect(e?.postData?.length).toBe(net.MAX_POST_DATA);
+      expect(e?.postData, id).not.toContain('SECRET');
+      expect(e?.postData, id).toContain(net.REDACTED);
+    }
+    expect(net.redactRequestBody(mp, 'multipart/form-data; boundary=B')).not.toContain('SECRET3');
+  });
+
+  it('multipart redaction is linear and bodies over 1 MB are dropped', async () => {
+    const part = 'Content-Disposition: form-data; name="a"\r\n\r\nvalue\r\n';
+    const big = Array.from({ length: 8000 }, () => `--B\r\n${part}`).join('') + '--B--';
+    const s = t0();
+    net.redactRequestBody(big, 'multipart/form-data; boundary=B');
+    expect(t0() - s).toBeLessThan(500);
+    await net.startRecording(1);
+    request('huge', 'http://x/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      postData: `{"password":"SECRET","a":"${'x'.repeat(net.MAX_REDACT_INPUT)}"}`,
+    });
+    const e = net.getEntry(1, 'huge');
+    expect(e?.postData).toBeUndefined();
+    expect(e?.postDataNote).toBe('body too large to redact');
+  });
+
+  it('command exposes postDataTruncated and the truncation line', async () => {
+    const { parseArgs } = await import('../../src/background/command');
+    const { networkCommands } = await import('../../src/background/commands/network');
+    const cmd = networkCommands[0];
+    if (!cmd) throw new Error('missing');
+    await net.startRecording(1);
+    request('big', 'http://x/api', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      postData: JSON.stringify({ password: 'SECRET', filler: 'x'.repeat(9000) }),
+    });
+    const ctx = { tab: () => Promise.resolve(1) } as never;
+    const r = (await cmd.run(ctx, parseArgs(['request', 'big'], cmd.flags ?? []))) as {
+      text: string;
+      data: Record<string, unknown>;
+    };
+    expect(r.data.postDataTruncated).toBe(true);
+    expect(r.text).toContain(`[truncated at ${net.MAX_POST_DATA} characters]`);
+    expect(r.text).not.toContain('SECRET');
+  });
+});

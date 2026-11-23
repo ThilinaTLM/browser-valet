@@ -11,6 +11,11 @@ export const REDACTED = '[redacted]';
 export const MAX_ENTRIES = 500;
 export const MAX_BODY_CHARS = 32_768;
 export const MAX_POST_DATA = 8192;
+/** Larger request bodies are not kept at all: redacting them is not worth the time. */
+export const MAX_REDACT_INPUT = 1_000_000;
+
+/** Copy a slice so the (possibly large) parent string is not retained. */
+const flat = (s: string): string => new TextDecoder().decode(new TextEncoder().encode(s));
 
 export interface Entry {
   /** CDP requestId; redirect hops get `<requestId>~<n>`. */
@@ -27,6 +32,8 @@ export interface Entry {
   postData?: string;
   /** The request body was longer than MAX_POST_DATA and cut after redaction. */
   postDataTruncated?: boolean;
+  /** Why there is no `postData` (too large to redact). */
+  postDataNote?: string;
   /** Wall-clock ms at the start of the request. */
   startedAt?: number;
   /** Monotonic CDP seconds at the start (for the duration). */
@@ -60,35 +67,49 @@ export function isCredentialHeader(name: string): boolean {
   );
 }
 
+/** Headers whose value is a URL (or holds one): its query and fragment are redacted. */
+const URL_HEADERS = new Set(['location', 'referer', 'content-location', 'refresh']);
+
 export function redactHeaders(h: Record<string, unknown> | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(h ?? {})) {
-    out[k] = isCredentialHeader(k) ? REDACTED : String(v);
+    const name = k.toLowerCase();
+    out[k] = isCredentialHeader(k)
+      ? REDACTED
+      : URL_HEADERS.has(name)
+        ? redactUrl(String(v))
+        : String(v);
   }
   return out;
 }
 
 const norm = (k: string): string => k.toLowerCase().replace(/[-_.\s]/g, '');
 
-/** Keys whose values are secrets in a request (form, JSON or query string). */
+/**
+ * Keys whose values are secrets in a request (form, JSON, multipart or URL query). Matching is
+ * case- and separator-insensitive (`norm`). A bare `code` is deliberately not matched (too many
+ * harmless `code=US` / `code=404` fields); OAuth callback `code` values are single-use.
+ */
 export function isSecretKey(key: string): boolean {
-  return /passw|passcode|token|secret|apikey|credential|authorization|csrf|xsrf|^auth$|^pin$|^otp$|privatekey|sessionid/.test(
+  return /passw|passcode|token|secret|apikey|credential|authorization|csrf|xsrf|^auth$|^pin$|^otp$|privatekey|sessionid|sessionkey|accesskey|encryptionkey|signingkey|cookie|jwt|assertion|devicecode|authcode|authorizationcode|codeverifier|signature/.test(
     norm(key),
   );
 }
 
+/** `*token` keys that are cursors, not credentials. */
+const HARMLESS_TOKEN = /^((next|prev|previous)?(page|continuation|sync|resume|cursor))token$/;
+
 /**
- * Keys whose values are secrets in a response body (compared after `norm`). Narrower than
- * `isSecretKey`: `token` only counts alone or after a credential word, so `tokens_used`,
- * `token_count`, `token_type`, `expires_in` and `nextPageToken` stay visible.
+ * Keys whose values are secrets in a response body (after `norm`): any key ending in `token`
+ * (except pagination/cursor tokens) or containing a secret-like word. `tokens_used`,
+ * `token_count`, `token_type`, `expires_in`, a bare `code` and `refresh` stay visible.
  */
 export function isResponseSecretKey(key: string): boolean {
   const n = norm(key);
+  if (HARMLESS_TOKEN.test(n)) return false;
   return (
-    /^(access|refresh|id|auth|session|csrf|xsrf|api|bearer|oauth|sso|login|device|user|client|private)?token$/.test(
-      n,
-    ) ||
-    /secret$|^passw(or)?d$|^passcode$|^apikey$|^privatekey$|^sessionid$|^jwt$|^authorization$/.test(
+    n.endsWith('token') ||
+    /secret|passw|apikey|accesskey|secretkey|privatekey|sessionkey|sessionid|encryptionkey|signingkey|credential|cookie|csrf|xsrf|jwt|assertion|devicecode|authcode|authorizationcode|codeverifier|signature|authorization/.test(
       n,
     )
   );
@@ -131,11 +152,32 @@ function redactForm(text: string, isSecret: (k: string) => boolean = isSecretKey
     .join('&');
 }
 
-function redactMultipart(text: string): string {
-  return text.replace(
-    /(name="([^"]*)"[^\r\n]*\r?\n(?:[^\r\n]+\r?\n)*\r?\n)([^\r\n]*)/g,
-    (m, head: string, name: string) => (isSecretKey(name) ? `${head}${REDACTED}` : m),
-  );
+/** Linear multipart redaction: split on the boundary, then look at each part's own headers. */
+function redactMultipart(text: string, contentType: string): string {
+  let boundary = /boundary=("?)([^";\s]+)\1/i.exec(contentType)?.[2];
+  if (!boundary && text.startsWith('--')) {
+    const eol = text.search(/\r?\n/);
+    boundary = text.slice(2, eol === -1 ? undefined : eol).trim();
+  }
+  if (!boundary) return REDACTED;
+  const delim = `--${boundary}`;
+  return text
+    .split(delim)
+    .map((part, i) => {
+      if (i === 0 || part.startsWith('--')) return part;
+      const crlf = part.indexOf('\r\n\r\n');
+      const lf = part.indexOf('\n\n');
+      const useCrlf = crlf !== -1 && (lf === -1 || crlf < lf);
+      const at = useCrlf ? crlf : lf;
+      if (at === -1) return part;
+      const sep = useCrlf ? '\r\n\r\n' : '\n\n';
+      const name = /name="([^"]*)"/i.exec(part.slice(0, at))?.[1];
+      if (name === undefined || !isSecretKey(name)) return part;
+      const value = part.slice(at + sep.length);
+      const tail = value.endsWith('\r\n') ? '\r\n' : value.endsWith('\n') ? '\n' : '';
+      return `${part.slice(0, at + sep.length)}${REDACTED}${tail}`;
+    })
+    .join(delim);
 }
 
 /** Redact secret-like fields in a request body (JSON, urlencoded form or multipart). */
@@ -145,18 +187,45 @@ export function redactRequestBody(text: string, contentType = ''): string {
     return JSON.stringify(redactJson(json, isSecretKey));
   }
   if (/multipart\/form-data/i.test(contentType) || text.startsWith('--'))
-    return redactMultipart(text);
+    return redactMultipart(text, contentType);
   if (/x-www-form-urlencoded/i.test(contentType) || /^[^\s=&]+=/.test(text)) {
     return redactForm(text);
   }
   return text;
 }
 
-const XSSI_PREFIX = /^\)\]\}',?[ \t]*\r?\n?/;
+const XSSI_PREFIX = /^(\)\]\}',?|while\s*\(1\);|for\s*\(;;\);|\{\}&&)[ \t]*\r?\n?/;
+const JSONISH_MIME = /json|event-stream|javascript|ecmascript/i;
+const WITHHELD = '[body withheld: could not be parsed for redaction]';
 
 /**
- * Redact token fields (`isResponseSecretKey`) in a JSON response body (also behind an XSSI prefix
- * `)]}'`) or a urlencoded one (e.g. OAuth `access_token=...`). Other content is returned as is.
+ * Fallback for JSON-like text that is not one JSON document (NDJSON, SSE, JSONP): redact the value
+ * of every `"key": value` pair whose key is secret. A secret key holding an object or array cannot
+ * be cut out reliably, so the whole body is withheld then.
+ */
+function redactJsonPairs(text: string): string {
+  const state = { withhold: false };
+  const out = text.replace(
+    /"((?:[^"\\]|\\.)*)"(\s*:\s*)("(?:[^"\\]|\\.)*"|[{[]|[^\s,}\]"]+)/g,
+    (m, key: string, colon: string, value: string) => {
+      let k = key;
+      try {
+        k = JSON.parse(`"${key}"`) as string;
+      } catch {
+        // keep raw key
+      }
+      if (!isResponseSecretKey(k)) return m;
+      if (value === '{' || value === '[') state.withhold = true;
+      return `"${key}"${colon}"${REDACTED}"`;
+    },
+  );
+  return state.withhold ? WITHHELD : out;
+}
+
+/**
+ * Redact secret fields (`isResponseSecretKey`) in a response body: JSON (also behind an XSSI
+ * prefix), urlencoded (`access_token=...`), and JSON-like text (NDJSON, SSE, JSONP) by key/value
+ * pairs. Other content is returned as is.
  */
 export function redactResponseBody(text: string, mimeType = ''): string {
   const xssi = XSSI_PREFIX.exec(text)?.[0] ?? '';
@@ -165,22 +234,22 @@ export function redactResponseBody(text: string, mimeType = ''): string {
     return xssi + JSON.stringify(redactJson(json, isResponseSecretKey), null, 2);
   }
   const trimmed = text.trim();
-  if (
-    /x-www-form-urlencoded/i.test(mimeType) ||
-    /^[^\s=&<>{}[\]]+=[^\s]*(&[^\s=&]+=[^\s]*)*$/.test(trimmed)
-  ) {
-    return redactForm(trimmed, isResponseSecretKey);
+  if (/x-www-form-urlencoded/i.test(mimeType) || /^[^\s=&<>{}[\]]+=\S*$/.test(trimmed)) {
+    const redacted = redactForm(trimmed, isResponseSecretKey);
+    return redacted === trimmed ? text : redacted;
   }
+  if (JSONISH_MIME.test(mimeType) || /^[{[]/.test(trimmed)) return redactJsonPairs(text);
   return text;
 }
 
-/** Redact secret-like query parameter values in a URL. */
+/** Redact secret-like query and fragment values in a URL (OAuth implicit flow: `#access_token=`). */
 export function redactUrl(url: string): string {
-  const q = url.indexOf('?');
-  if (q === -1) return url;
-  const hash = url.indexOf('#', q);
-  const query = url.slice(q + 1, hash === -1 ? undefined : hash);
-  return `${url.slice(0, q + 1)}${redactForm(query)}${hash === -1 ? '' : url.slice(hash)}`;
+  const hash = url.indexOf('#');
+  const main = hash === -1 ? url : url.slice(0, hash);
+  const frag = hash === -1 ? '' : `#${redactForm(url.slice(hash + 1))}`;
+  const q = main.indexOf('?');
+  if (q === -1) return main + frag;
+  return `${main.slice(0, q + 1)}${redactForm(main.slice(q + 1))}${frag}`;
 }
 
 export function isTextMime(mime: string | undefined): boolean {
@@ -233,6 +302,7 @@ export async function startRecording(tabId: number): Promise<boolean> {
     await cdp.send(tabId, 'Network.enable', {
       maxTotalBufferSize: 10_000_000,
       maxResourceBufferSize: 2_000_000,
+      maxPostDataSize: MAX_REDACT_INPUT,
     });
   } catch (e) {
     logs.delete(tabId);
@@ -346,9 +416,17 @@ export function handleEvent(tabId: number, method: string, raw: unknown): void {
           ([k]) => k.toLowerCase() === 'content-type',
         )?.[1];
         // Redact the whole body first: a cut JSON body no longer parses and would leak.
-        const redacted = redactRequestBody(req.postData, str(ct, ''));
-        e.postDataTruncated = redacted.length > MAX_POST_DATA;
-        e.postData = e.postDataTruncated ? redacted.slice(0, MAX_POST_DATA) : redacted;
+        if (req.postData.length > MAX_REDACT_INPUT) {
+          // Fail closed: too large to redact, so keep nothing.
+          e.postData = undefined;
+          e.postDataTruncated = false;
+          e.postDataNote = 'body too large to redact';
+        } else {
+          const redacted = redactRequestBody(req.postData, str(ct, ''));
+          e.postDataNote = undefined;
+          e.postDataTruncated = redacted.length > MAX_POST_DATA;
+          e.postData = e.postDataTruncated ? flat(redacted.slice(0, MAX_POST_DATA)) : redacted;
+        }
       }
       e.startMono = Number(p.timestamp);
       e.startedAt = typeof p.wallTime === 'number' ? p.wallTime * 1000 : Date.now();
