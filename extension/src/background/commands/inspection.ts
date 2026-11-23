@@ -74,32 +74,51 @@ function urlMatches(url: string, pattern: string): boolean {
 const FRAME_EVERY_MS = 500;
 
 /**
- * `networkidle`: the document has loaded and no resource finished loading for 500 ms. This counts
- * resource-timing entries (no `Network.enable`), so it is blind to a request still in flight (a
- * long poll, an event stream counts as idle) and to anything the page does not report there.
- * The page's buffer holds 250 entries by default and then drops new ones, which would look idle
- * forever: the first poll raises the limit and clears the entries, so only what finishes during
- * the wait is counted (`performance.getEntriesByType('resource')` of the page is emptied once).
+ * `networkidle`: the document has loaded and no resource finished loading for 500 ms. An observer
+ * (`PerformanceObserver`, type `resource`, not `buffered`) runs in an isolated world, so the page
+ * cannot see it and nothing of the page's performance timeline changes (no buffer size, no
+ * clearing: RUM scripts and `vitals` observe what they would anyway). It only sees resources that
+ * finish after it started, and no `Network.enable` is involved, so it is blind to a request still
+ * in flight (a long poll counts as idle until it finishes) and to anything that produces no
+ * resource-timing entry (WebSocket traffic, requests failing before a response).
  */
 export async function waitNetworkIdle(ctx: Ctx, id: number): Promise<void> {
-  let last = -1;
-  let primed = false;
-  let since = Date.now();
+  let world: number | undefined;
+  const setup = async (): Promise<number> => {
+    const tree = await cdp.send<{ frameTree: { frame: { id: string } } }>(id, 'Page.getFrameTree');
+    const w = await cdp.send<{ executionContextId: number }>(id, 'Page.createIsolatedWorld', {
+      frameId: tree.frameTree.frame.id,
+      worldName: 'bvl-idle',
+    });
+    await cdp.send(id, 'Runtime.evaluate', {
+      contextId: w.executionContextId,
+      expression: `(() => {
+        const s = { last: performance.now() };
+        new PerformanceObserver(() => { s.last = performance.now(); }).observe({ type: 'resource' });
+        globalThis.__bvlIdle = s;
+      })()`,
+    });
+    return w.executionContextId;
+  };
   await poll(ctx, 'network idle', async () => {
-    if ((await evaluate(id, 'document.readyState')).value !== 'complete') return false;
-    if (!primed) {
-      await evaluate(
+    try {
+      world ??= await setup();
+      const r = await cdp.send<{ result: { value?: { ready: boolean; quiet: number } } }>(
         id,
-        'performance.setResourceTimingBufferSize(100000), performance.clearResourceTimings()',
+        'Runtime.evaluate',
+        {
+          contextId: world,
+          expression:
+            '({ ready: document.readyState === "complete", quiet: performance.now() - globalThis.__bvlIdle.last })',
+          returnByValue: true,
+        },
       );
-      primed = true;
+      const v = r.result.value;
+      return !!v && v.ready && v.quiet >= 500;
+    } catch (e) {
+      world = undefined; // the page navigated and the world is gone: observe again
+      throw e;
     }
-    const n = (await evaluate(id, "performance.getEntriesByType('resource').length")).value;
-    if (n !== last) {
-      last = n as number;
-      since = Date.now();
-    }
-    return Date.now() - since >= 500;
   });
 }
 

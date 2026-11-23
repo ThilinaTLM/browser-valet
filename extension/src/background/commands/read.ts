@@ -39,7 +39,8 @@ export const readCommands: Command[] = [
       if (url) {
         // Same rules as `open <url>`: never navigates a tab the user shared.
         const open = navigationCommands.find((c) => c.name === 'open');
-        await open?.run(ctx, new Args([url], new Map()));
+        if (!open) throw new Error('open command missing');
+        await open.run(ctx, new Args([url], new Map()));
       }
       const id = await ctx.tab();
       const r = await evaluate(id, `${await extractorSource()}\n;__bvlRead()`);

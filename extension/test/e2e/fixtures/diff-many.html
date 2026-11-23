@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Diff Many</title>
+  </head>
+  <body>
+    <h1>Many</h1>
+    <script>
+      // 300 resources right after load: more than the default resource-timing buffer (250).
+      window.addEventListener('load', () => {
+        for (let i = 0; i < 300; i++) fetch(`/diff-a.html?i=${i}`).then((r) => r.text());
+      });
+    </script>
+  </body>
+</html>

@@ -278,4 +278,30 @@ describe('diff url', () => {
     await setGuardrails({});
     await bvl('close', ...S);
   });
+
+  it('networkidle does not touch the page: >250 resources, entries are neither cleared nor resized', async () => {
+    await bvl('close');
+    await bvl('open', fixture('/diff-many.html'));
+    await bvl('wait', '1000');
+    const count = async () =>
+      Number((await bvl('eval', "performance.getEntriesByType('resource').length")).stdout);
+    const before = await count();
+    expect(before).toBeGreaterThan(100);
+    expect((await bvl('wait', '--load', 'networkidle')).code).toBe(0);
+    expect(await count()).toBe(before);
+    // a fresh load with the observer racing the burst still settles
+    const r = await bvl(
+      'diff',
+      'url',
+      fixture('/diff-a.html'),
+      fixture('/diff-many.html'),
+      '--wait-until',
+      'networkidle',
+    );
+    expect(r.code).toBe(0);
+    const resized = (
+      await bvl('eval', "performance.getEntriesByType('resource').length")
+    ).stdout.trim();
+    expect(Number(resized)).toBeGreaterThan(100);
+  });
 });
