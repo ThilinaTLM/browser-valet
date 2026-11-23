@@ -20,8 +20,8 @@ import { inspectionCommands } from './commands/inspection';
 import { interactionCommands } from './commands/interaction';
 import { navigationCommands } from './commands/navigation';
 import { readCommands } from './commands/read';
-import { vitalsCommands } from './commands/vitals';
 import { networkCommands } from './commands/network';
+import { vitalsCommands } from './commands/vitals';
 import { type ErrorCode, UserError } from './errors';
 import { blockedMessage, narrowFor, takeBlocked } from './navigation-guard';
 import {
@@ -49,7 +49,9 @@ const COMMANDS: Command[] = [
   ...batchCommands,
 ];
 /** Commands whose whole point is to reach a page: a refused redirect makes them fail. */
-const NAVIGATES = new Set(['open', 'read', 'vitals']);
+const NAVIGATES = new Set(['open']);
+/** Commands that navigate only when given a URL. */
+const NAVIGATES_WITH_URL = new Set(['read', 'vitals']);
 const GROUPS = ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging'];
 
 function lookup(name: string): Command | undefined {
@@ -272,7 +274,10 @@ export async function execute(
     ctx.described = describe(cmd, req, args);
     await confirmCommand(ctx, cmd.name, args);
     const release = await narrowFor(ctx);
-    const navigates = NAVIGATES.has(cmd.name) || (cmd.name === 'tab' && args.pos[0] === 'new');
+    const navigates =
+      NAVIGATES.has(cmd.name) ||
+      (NAVIGATES_WITH_URL.has(cmd.name) && args.pos[0] !== undefined) ||
+      (cmd.name === 'tab' && args.pos[0] === 'new');
     let raw: Result | undefined;
     try {
       raw = await raceDialog(ctx, cmd.run(ctx, args));

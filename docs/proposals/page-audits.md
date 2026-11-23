@@ -1,4 +1,4 @@
-# Page audits: `a11y` and `vitals`
+# Page audits: `a11y`
 
 **Status:** Draft · **Labels:** feature, automation
 

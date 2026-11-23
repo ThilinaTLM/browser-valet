@@ -26,8 +26,6 @@ export interface Vitals {
   notMeasurable: Partial<Record<'fcp' | 'lcp', string>>;
 }
 
-export const BACKGROUND_REASON = 'page loaded in a background tab';
-
 // Thresholds from web.dev: [good upper bound, poor lower bound].
 const THRESHOLDS = {
   ttfb: [800, 1800],
@@ -76,43 +74,71 @@ export function computeInp(events: RawVitals['events']): number | null {
 
 const round = (n: number, d = 1) => Math.round(n * 10 ** d) / 10 ** d;
 
-/** A page that was hidden before it painted never gets LCP (or FCP) from Chrome. */
-function hiddenAtLoad(raw: RawVitals): boolean {
-  if (raw.states.some((s) => s.name === 'hidden' && s.startTime <= (raw.fcp ?? Infinity)))
-    return true;
-  return raw.visibility === 'hidden' && raw.states.length === 0;
+export const BACKGROUND_REASON = 'page loaded in a background tab';
+export const HIDDEN_REASON = 'page was hidden before it was reported';
+
+/**
+ * When the page first became hidden, as web-vitals computes it: 0 if it started hidden (the first
+ * `visibility-state` entry), else the first later `hidden` entry. `null`: never hidden, or (before
+ * Chrome 115, no entries) unknown.
+ */
+function firstHidden(raw: RawVitals): number | null {
+  const first = raw.states[0];
+  if (first?.name === 'hidden') return 0;
+  return raw.states.find((s) => s.name === 'hidden')?.startTime ?? null;
+}
+
+/**
+ * Chrome reports FCP/LCP only for the time the page was visible: a metric that is missing, or that
+ * is at/after the first hide, is not measurable. Without visibility entries (Chrome < 115) only a
+ * missing metric on a page that is hidden now is flagged.
+ */
+function unmeasurable(raw: RawVitals, value: number | null): string | undefined {
+  const hidden = firstHidden(raw);
+  if (hidden === null) {
+    return value === null && raw.states.length === 0 && raw.visibility === 'hidden'
+      ? BACKGROUND_REASON
+      : undefined;
+  }
+  if (value !== null && value < hidden) return undefined;
+  return hidden === 0 ? BACKGROUND_REASON : HIDDEN_REASON;
 }
 
 export function compute(raw: RawVitals): Vitals {
   const notMeasurable: Vitals['notMeasurable'] = {};
-  const bg = hiddenAtLoad(raw);
-  if (!raw.lcp && bg) notMeasurable.lcp = BACKGROUND_REASON;
-  if (raw.fcp === null && bg) notMeasurable.fcp = BACKGROUND_REASON;
-  const score = round(computeCls(raw.shifts), 4);
+  const ttfb = raw.ttfb && raw.ttfb > 0 ? raw.ttfb : null;
+  const lcpReason = unmeasurable(raw, raw.lcp?.startTime ?? null);
+  const fcpReason = unmeasurable(raw, raw.fcp);
+  if (lcpReason) notMeasurable.lcp = lcpReason;
+  if (fcpReason) notMeasurable.fcp = fcpReason;
+  const fcp = fcpReason ? null : raw.fcp;
+  const lcp = lcpReason ? null : raw.lcp;
+  const cls = computeCls(raw.shifts);
   const inp = computeInp(raw.events);
-  const ratings: Vitals['ratings'] = { cls: rate('cls', score) };
-  if (raw.ttfb !== null) ratings.ttfb = rate('ttfb', raw.ttfb);
-  if (raw.fcp !== null) ratings.fcp = rate('fcp', raw.fcp);
-  if (raw.lcp) ratings.lcp = rate('lcp', raw.lcp.startTime);
+  const ratings: Vitals['ratings'] = { cls: rate('cls', cls) };
+  if (ttfb !== null) ratings.ttfb = rate('ttfb', ttfb);
+  if (fcp !== null) ratings.fcp = rate('fcp', fcp);
+  if (lcp) ratings.lcp = rate('lcp', lcp.startTime);
   if (inp !== null) ratings.inp = rate('inp', inp);
+  // Rounding as upstream: times to 0.1 ms (LCP to whole ms), CLS score to 2 decimals, shifts to 4.
   return {
     url: raw.url,
-    ttfb: raw.ttfb === null ? null : round(raw.ttfb),
-    fcp: raw.fcp === null ? null : round(raw.fcp),
-    lcp: raw.lcp && { ...raw.lcp, startTime: round(raw.lcp.startTime) },
+    ttfb: ttfb === null ? null : round(ttfb),
+    fcp: fcp === null ? null : round(fcp),
+    lcp: lcp && { ...lcp, startTime: Math.round(lcp.startTime) },
     cls: {
-      score,
+      score: round(cls, 2),
       entries: raw.shifts
         .filter((s) => !s.hadRecentInput)
         .map((s) => ({ value: round(s.value, 4), startTime: round(s.startTime) })),
     },
-    inp,
+    inp: inp === null ? null : Math.round(inp),
     ratings,
     notMeasurable,
   };
 }
 
-const fmt = (ms: number) => `${round(ms)}ms`;
+const fmt = (ms: number, d = 0) => `${round(ms, d)}ms`;
 
 export function format(v: Vitals): string {
   const r = (m: keyof Vitals['ratings']) => (v.ratings[m] ? ` (${v.ratings[m]})` : '');
@@ -120,32 +146,31 @@ export function format(v: Vitals): string {
     v.notMeasurable[m] ? 'n/a' : n === null ? '-' : fmt(n) + r(m);
   const lines = [
     `url: ${v.url}`,
-    `ttfb: ${v.ttfb === null ? '-' : fmt(v.ttfb) + r('ttfb')}  fcp: ${val('fcp', v.fcp)}  lcp: ${val('lcp', v.lcp?.startTime ?? null)}  cls: ${v.cls.score}${r('cls')}  inp: ${v.inp === null ? '-' : fmt(v.inp) + r('inp')}`,
+    `ttfb: ${v.ttfb === null ? '-' : fmt(v.ttfb, 1) + r('ttfb')}  fcp: ${val('fcp', v.fcp)}  lcp: ${val('lcp', v.lcp?.startTime ?? null)}  cls: ${v.cls.score}${r('cls')}  inp: ${v.inp === null ? '-' : fmt(v.inp) + r('inp')}`,
   ];
   if (v.lcp?.element) lines.push(`lcp: element: ${v.lcp.element}`);
   for (const m of ['lcp', 'fcp'] as const)
     if (v.notMeasurable[m])
       lines.push(`${m.toUpperCase()}: not measurable (${v.notMeasurable[m]})`);
   if (v.inp === null)
-    lines.push('inp: no interactions seen (Chrome buffers only interactions of 104 ms or more)');
+    lines.push('inp: no slow interactions recorded (Chrome buffers only ≥ 104 ms)');
   return lines.join('\n');
 }
 
 /** Runs in the page. Reads the buffered entries; returns a `RawVitals` (without `url`). */
 export const vitalsScript = `(async () => {
-  const collect = (type, extra) => new Promise((resolve) => {
+  const collect = (type, extra) => {
     try {
-      const out = [];
-      const po = new PerformanceObserver((l) => out.push(...l.getEntries()));
+      const po = new PerformanceObserver(() => {});
       po.observe(Object.assign({ type, buffered: true }, extra));
-      setTimeout(() => { out.push(...po.takeRecords()); po.disconnect(); resolve(out); }, 50);
-    } catch { resolve([]); }
-  });
-  const [lcps, shifts, events] = await Promise.all([
-    collect('largest-contentful-paint'),
-    collect('layout-shift'),
-    collect('event', { durationThreshold: 16 }),
-  ]);
+      const out = po.takeRecords();
+      po.disconnect();
+      return out;
+    } catch { return []; }
+  };
+  const lcps = collect('largest-contentful-paint');
+  const shifts = collect('layout-shift');
+  const events = collect('event', { durationThreshold: 16 });
   const nav = performance.getEntriesByType('navigation')[0];
   const fcp = performance.getEntriesByName('first-contentful-paint')[0];
   const l = lcps[lcps.length - 1];
@@ -155,7 +180,7 @@ export const vitalsScript = `(async () => {
     url: location.href,
     visibility: document.visibilityState,
     states,
-    ttfb: nav ? nav.responseStart : null,
+    ttfb: nav && nav.responseStart > 0 ? nav.responseStart : null,
     fcp: fcp ? fcp.startTime : null,
     lcp: l ? { element: l.element ? l.element.tagName.toLowerCase() : null, size: l.size, startTime: l.startTime, url: l.url || null } : null,
     shifts: shifts.map((s) => ({ value: s.value, startTime: s.startTime, hadRecentInput: s.hadRecentInput })),

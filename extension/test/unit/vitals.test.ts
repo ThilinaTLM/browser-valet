@@ -51,17 +51,85 @@ describe('vitals', () => {
     ).toBe(80);
   });
 
-  it('missing LCP on a page hidden while loading is not measurable', () => {
+  const hiddenAt0 = [{ name: 'hidden', startTime: 0 }];
+
+  it('missing LCP and FCP on a page hidden while loading are not measurable', () => {
+    const v = compute({ ...base, lcp: null, fcp: null, visibility: 'hidden', states: hiddenAt0 });
+    expect(v.lcp).toBeNull();
+    expect(v.fcp).toBeNull();
+    expect(v.notMeasurable.lcp).toContain('background tab');
+    expect(v.notMeasurable.fcp).toContain('background tab');
+    expect(format(v)).toContain('LCP: not measurable (page loaded in a background tab)');
+    expect(format(v)).toContain('fcp: n/a');
+  });
+
+  it('FCP present, hidden at 0: not measurable', () => {
+    const v = compute({ ...base, visibility: 'hidden', states: hiddenAt0 });
+    expect(v.fcp).toBeNull();
+    expect(v.lcp).toBeNull();
+    expect(v.ratings.fcp).toBeUndefined();
+    expect(v.notMeasurable.fcp).toContain('background tab');
+  });
+
+  it('LCP present, hidden before it: not measurable; FCP before the hide is kept', () => {
     const v = compute({
       ...base,
-      lcp: null,
-      fcp: null,
-      visibility: 'hidden',
-      states: [{ name: 'hidden', startTime: 0 }],
+      fcp: 100,
+      lcp: { element: 'h1', size: 5, startTime: 300, url: null },
+      states: [
+        { name: 'visible', startTime: 0 },
+        { name: 'hidden', startTime: 200 },
+      ],
     });
     expect(v.lcp).toBeNull();
-    expect(v.notMeasurable.lcp).toContain('background tab');
-    expect(format(v)).toContain('LCP: not measurable (page loaded in a background tab)');
+    expect(v.notMeasurable.lcp).toContain('hidden before');
+    expect(v.fcp).toBe(100);
+    expect(v.notMeasurable.fcp).toBeUndefined();
+  });
+
+  it('a hide after the metric keeps it', () => {
+    const v = compute({
+      ...base,
+      states: [
+        { name: 'visible', startTime: 0 },
+        { name: 'hidden', startTime: 5000 },
+      ],
+    });
+    expect(v.lcp?.startTime).toBe(120);
+    expect(v.notMeasurable).toEqual({});
+  });
+
+  it('without visibility entries (Chrome < 115) only a missing metric on a hidden page is flagged', () => {
+    expect(compute({ ...base, lcp: null, visibility: 'hidden' }).notMeasurable.lcp).toContain(
+      'background tab',
+    );
+    expect(compute({ ...base, visibility: 'hidden' }).notMeasurable).toEqual({});
+    expect(compute({ ...base, lcp: null }).notMeasurable).toEqual({});
+  });
+
+  it('TTFB 0 is null', () => {
+    expect(compute({ ...base, ttfb: 0 }).ttfb).toBeNull();
+  });
+
+  it('INP with 50+ interactions skips the worst one (p98)', () => {
+    const events = Array.from({ length: 50 }, (_, i) => ({
+      interactionId: i + 1,
+      duration: 100 + i,
+      startTime: i,
+    }));
+    expect(computeInp(events)).toBe(148);
+    expect(computeInp(events.slice(0, 49))).toBe(148);
+  });
+
+  it('rating thresholds: the upper bound of a band belongs to it', () => {
+    expect(rate('lcp', 4000)).toBe('needs-improvement');
+    expect(rate('lcp', 4001)).toBe('poor');
+    expect(rate('cls', 0.1)).toBe('good');
+    expect(rate('cls', 0.25)).toBe('needs-improvement');
+    expect(rate('inp', 200)).toBe('good');
+    expect(rate('inp', 500.5)).toBe('poor');
+    expect(rate('ttfb', 800)).toBe('good');
+    expect(rate('fcp', 3000)).toBe('needs-improvement');
   });
 
   it('missing LCP on a visible page is just absent', () => {

@@ -64,10 +64,30 @@ describe('vitals', () => {
     const d = r.data as VitalsData;
     expect((await bvl('eval', 'document.visibilityState')).stdout.trim()).toBe('"hidden"');
     expect(d.lcp).toBeNull();
+    expect(d.fcp).toBeNull();
+    expect(d.notMeasurable.fcp).toContain('background tab');
     expect(d.notMeasurable.lcp).toContain('background tab');
     const text = (await bvl('vitals')).stdout;
     expect(text).toContain('LCP: not measurable (page loaded in a background tab)');
     expect(text).not.toMatch(/lcp: 0/);
     await bvl('close');
+  });
+
+  it('vitals <url> never navigates a shared tab, and reports load info', async () => {
+    const page = await openUserTab(fixture('/'));
+    try {
+      const tid = await tidForTitle('Fixture Home');
+      const pending = bvl('tab', tid);
+      await approveNextConsent('allow');
+      await pending;
+      const r = await bvlJson('vitals', fixture('/vitals.html'));
+      expect(r.success).toBe(true);
+      expect((r.data as VitalsData & { loaded: boolean }).url).toContain('/vitals.html');
+      expect((r.data as { loaded: boolean }).loaded).toBe(true);
+      expect(await page.title()).toBe('Fixture Home');
+      await bvl('close');
+    } finally {
+      await page.close();
+    }
   });
 });

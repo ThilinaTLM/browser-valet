@@ -7,12 +7,13 @@
   <body>
     <h1 id="hero" style="font-size: 48px">Vitals hero heading</h1>
     <p id="late"></p>
+    <div id="big" style="height: 400px; background: #cde">Big block</div>
     <button id="busy">Busy</button>
     <script>
       // A late layout shift: content inserted above the button after the first paint.
       setTimeout(() => {
         const p = document.getElementById('late');
-        p.style.height = '120px';
+        p.style.height = '300px';
         p.textContent = 'late content';
       }, 150);
       // A slow handler, for INP.

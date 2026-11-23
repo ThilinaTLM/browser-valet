@@ -316,7 +316,7 @@ export function blockedError(
   );
 }
 
-/** Refuse agent-initiated navigation to `url` (open, tab new, click --new-tab, pushstate, read <url>). */
+/** Refuse agent-initiated navigation to `url` (open, tab new, click --new-tab, pushstate, read <url>, vitals <url>). */
 export function assertNavigable(ctx: Ctx, url: string): void {
   const by = blockedBy(url, ctx.agentAllowedDomains);
   if (by) {
@@ -399,7 +399,7 @@ export function siteOf(url: string): string | undefined {
 const MAX_SITES = 200;
 
 /**
- * Before the agent navigates to `url` (open, tab new, click --new-tab, read <url>): refuse it if
+ * Before the agent navigates to `url` (open, tab new, click --new-tab, read <url>, vitals <url>): refuse it if
  * the domain policy says so, then ask when `navigate-new-site` is in force and the session has
  * not been to this site yet. A site counts as visited once the agent was allowed there.
  */
