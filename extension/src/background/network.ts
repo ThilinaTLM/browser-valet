@@ -214,14 +214,20 @@ const XSSI_PREFIX = /^(\)\]\}',?|while\s*\(1\);|for\s*\(;;\);|\{\}&&)[ \t]*\r?\n
 const JSONISH_MIME = /json|event-stream|javascript|ecmascript/i;
 const WITHHELD = '[body withheld: could not be parsed for redaction]';
 
-/** End index (exclusive) of the JSON string starting at `start` (a `"`), or -1 if unclosed. */
+/**
+ * End index (exclusive) of the JSON string starting at `start` (a `"`). A JSON string cannot hold a
+ * raw newline, so an unterminated string stops at the newline (or the end of the text) and the
+ * result is `-(position) - 1`: the caller resumes scanning at that position and treats it as no
+ * key and no value. This keeps one stray quote from shifting the pairing on later lines.
+ */
 function stringEnd(text: string, start: number): number {
   for (let i = start + 1; i < text.length; i++) {
     const c = text.charCodeAt(i);
     if (c === 92) i++;
     else if (c === 34) return i + 1;
+    else if (c === 10 || c === 13) return -i - 1;
   }
-  return -1;
+  return -text.length - 1;
 }
 
 const isWs = (c: string | undefined): boolean =>
@@ -245,7 +251,10 @@ function redactJsonText(text: string, isSecret: (k: string) => boolean): string 
       continue;
     }
     const end = stringEnd(text, i);
-    if (end === -1) break;
+    if (end < 0) {
+      i = -end - 1;
+      continue;
+    }
     let k = end;
     while (isWs(text[k])) k++;
     if (text[k] === ':') {
@@ -261,8 +270,10 @@ function redactJsonText(text: string, isSecret: (k: string) => boolean): string 
         const c = text[v];
         if (c === '{' || c === '[') return WITHHELD;
         let ve = v;
-        if (c === '"') ve = stringEnd(text, v) === -1 ? n : stringEnd(text, v);
-        else while (ve < n && !isWs(text[ve]) && !/[,}\]]/.test(text[ve] ?? '')) ve++;
+        if (c === '"') {
+          const se = stringEnd(text, v);
+          ve = se < 0 ? -se - 1 : se;
+        } else while (ve < n && !isWs(text[ve]) && !/[,}\]]/.test(text[ve] ?? '')) ve++;
         out.push(text.slice(last, v), `"${REDACTED}"`);
         last = ve;
         i = ve;

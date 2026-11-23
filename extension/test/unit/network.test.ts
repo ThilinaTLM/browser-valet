@@ -771,4 +771,21 @@ describe('redaction hardening', () => {
     expect(nd).not.toContain('eyJ');
     expect(nd).not.toContain('SECRET');
   });
+
+  it('a stray quote does not shift pairing onto later lines', () => {
+    const sse = net.redactResponseBody(
+      'event: "x\ndata: {"token":"S1","ok":1}\n\n',
+      'text/event-stream',
+    );
+    expect(sse).not.toContain('S1');
+    expect(sse).toContain('"ok":1');
+    const nd = net.redactResponseBody(
+      '{"note":"it"s broken}\n{"password":"S2","a":1}\n',
+      'application/x-ndjson',
+    );
+    expect(nd).not.toContain('S2');
+    expect(nd).toContain('"a":1');
+    const req = net.redactRequestBody('{"a":"x\n{"token":"S3"}', 'application/x-ndjson');
+    expect(req).not.toContain('S3');
+  });
 });
