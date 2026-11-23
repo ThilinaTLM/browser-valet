@@ -101,7 +101,7 @@ are never altered at capture time.
   the spike numbers.
 - *Do `screenshot` calls become frames?* Yes.
 - *Settled directions wording:* when accepted, replace "video/trace" with "video (see
-  recording.md)/trace" and add: "A step timeline (`timeline`) exists; it stores screenshots only in
+  the recording proposal)/trace" and add: "A step timeline (`timeline`) exists; it stores screenshots only in
   session storage."
 
 ## Test plan
