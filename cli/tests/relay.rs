@@ -428,6 +428,32 @@ fn request_fails_when_a_dead_extension_does_not_come_back() {
 }
 
 #[test]
+fn vanished_extension_is_waited_for_but_a_closed_one_is_not() {
+    let p = start(&[]);
+    // Closed with a close frame (switched off): the usual "not connected" after the short wait.
+    let mut e = ext(&p);
+    e.close(None).ok();
+    e.flush().ok();
+    std::thread::sleep(Duration::from_millis(200));
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    let r = recv(&mut c);
+    assert!(r["res"]["stderr"].as_str().unwrap().contains("switch it on"));
+    // Gone without a close frame (terminated worker): wait for a restart.
+    let e = ext(&p);
+    e.get_ref().shutdown(std::net::Shutdown::Both).ok();
+    drop(e);
+    std::thread::sleep(Duration::from_millis(200));
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    assert_eq!(recv(&mut c)["t"], "event");
+    assert!(recv(&mut c)["res"]["stderr"]
+        .as_str()
+        .unwrap()
+        .contains("stopped responding"));
+}
+
+#[test]
 fn no_extension_errors_after_wait() {
     let p = start(&[]);
     let mut c = cli(&p);

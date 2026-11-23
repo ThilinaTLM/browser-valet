@@ -165,7 +165,8 @@ async fn probe_ext(sh: &Shared) -> bool {
     {
         let st = sh.st.lock().unwrap();
         let Some(e) = st.ext.as_ref() else { return true };
-        if e.rx.elapsed() < FRESH {
+        // A worker busy with a request may be slow to answer; the silence limit covers a dead one.
+        if e.rx.elapsed() < FRESH || st.pending.values().any(|p| p.owner == e.conn) {
             return true;
         }
         e.tx.send(json!({"t":"ping"}).to_string()).ok();
@@ -212,6 +213,12 @@ async fn send(ws: &mut Ws, v: Value) -> Result<()> {
 
 /// Next JSON text frame; None on close/error. Cancel-safe (keeps no state between polls).
 async fn next_json(ws: &mut Ws) -> Option<Value> {
+    next_json_noting(ws, &mut false).await
+}
+
+/// Like `next_json`; sets `clean` when the peer ended the connection with a close frame (as opposed to
+/// vanishing, which is what a terminated worker does).
+async fn next_json_noting(ws: &mut Ws, clean: &mut bool) -> Option<Value> {
     loop {
         match ws.next().await? {
             Ok(Message::Text(t)) => {
@@ -219,7 +226,11 @@ async fn next_json(ws: &mut Ws) -> Option<Value> {
                     return Some(v);
                 }
             }
-            Ok(Message::Close(_)) | Err(_) => return None,
+            Ok(Message::Close(_)) => {
+                *clean = true;
+                return None;
+            }
+            Err(_) => return None,
             _ => {}
         }
     }
@@ -334,13 +345,14 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
         st.exts += 1;
         id
     };
+    let mut clean = false;
     loop {
         tokio::select! {
             m = rx.recv() => match m {
                 Some(s) => if ws.send(Message::text(s)).await.is_err() { break },
                 None => break,
             },
-            m = next_json(&mut ws) => match m {
+            m = next_json_noting(&mut ws, &mut clean) => match m {
                 None => break,
                 Some(v) => {
                     if let Some(e) = sh.st.lock().unwrap().ext.as_mut().filter(|e| e.conn == id) {
@@ -357,6 +369,10 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
     st.exts -= 1;
     if st.ext.as_ref().is_some_and(|e| e.conn == id) {
         st.ext = None;
+        // No close frame: the worker was terminated, not switched off. A request should wait for its restart.
+        if !clean {
+            st.lost = Some(Instant::now());
+        }
     }
     let dead: Vec<u64> = st
         .pending

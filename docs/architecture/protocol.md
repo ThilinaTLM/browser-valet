@@ -70,7 +70,7 @@ Any message other than `auth` before authentication → close.
 - **Liveness.** A browser keeps the socket of a dead service worker open, so an open socket proves nothing.
   After a controlled tab is closed Chrome can leave the worker running JavaScript while every `chrome.*` call
   hangs, then terminate it; the proxy sees no close. So the proxy tracks when it last received *any* frame from
-  the extension. Before it answers `status` or forwards a `req`, if that was more than 0.5 s ago, it sends
+  the extension. Before it answers `status` or forwards a `req`, if that was more than 0.5 s ago and the extension has no request in flight (a busy worker may be slow; the 50 s limit covers it), it sends
   `{"t":"ping"}` and waits up to 2.5 s for any frame. The extension answers `ping` with `{"t":"pong"}`, again
   only after an extension API call has returned. No answer: the proxy drops the connection (sends `bye` with
   reason `restart`, which a slow but live worker answers by reconnecting instead of switching itself off; a
@@ -78,7 +78,7 @@ Any message other than `auth` before authentication → close.
   that it lost the extension. The proxy also drops an extension silent for 50 s (the extension's own ping comes
   every 20 s).
 - A `req` that finds no extension waits `BVL_EXT_WAIT_MS` (default 10 s). If the proxy lost the extension this
-  way, it instead waits until `BVL_EXT_WAKE_MS` (default 35 s) after the drop, sending the CLI an `event`
+  way, or the extension's connection ended without a WebSocket close frame (a terminated worker; a switched-off extension closes properly), it instead waits until `BVL_EXT_WAKE_MS` (default 35 s) after the drop, sending the CLI an `event`
   ("browser extension stopped responding; waiting for it to restart …"). A dead worker starts again on the next
   browser event, or on its 30 s alarm at the latest, and reconnects. If it does not, the `res` says the
   worker stopped responding (`code` `not_connected`).
