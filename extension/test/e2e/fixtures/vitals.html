@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Vitals</title>
+  </head>
+  <body>
+    <h1 id="hero" style="font-size: 48px">Vitals hero heading</h1>
+    <p id="late"></p>
+    <div id="big" style="height: 400px; background: #cde">Big block</div>
+    <button id="busy">Busy</button>
+    <script>
+      // A late layout shift: content inserted above the button after the first paint.
+      setTimeout(() => {
+        const p = document.getElementById('late');
+        p.style.height = '300px';
+        p.textContent = 'late content';
+      }, 150);
+      // A slow handler, for INP.
+      document.getElementById('busy').addEventListener('click', () => {
+        const t = performance.now();
+        while (performance.now() - t < 150);
+      });
+    </script>
+  </body>
+</html>

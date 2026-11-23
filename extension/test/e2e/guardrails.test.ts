@@ -158,13 +158,14 @@ describe('allowed domains (commands layer)', () => {
     expect((await bvl('open', fixture('/prose.html'))).code).toBe(0);
   });
 
-  it('the popup policy blocks open, tab new and read <url> with code domain_blocked', async () => {
+  it('the popup policy blocks open, tab new, read <url> and vitals <url> with code domain_blocked', async () => {
     await setGuardrails({ allowedDomains: ['127.0.0.1'] });
     expect((await bvl('open', fixture('/prose.html'))).code).toBe(0);
     for (const args of [
       ['open', other()],
       ['tab', 'new', other()],
       ['read', other()],
+      ['vitals', other()],
     ]) {
       const r = await blocked(...args);
       expect(r, args.join(' ')).toMatchObject({ success: false, code: 'domain_blocked', exit: 1 });

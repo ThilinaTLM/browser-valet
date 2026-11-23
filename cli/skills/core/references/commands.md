@@ -17,6 +17,7 @@ find first|last <selector> <action> [value]   find nth <n> <selector> <action> [
 get text|html|value|attr|title|url|count|box [t] [attr]   get styles <t> [prop...] [--all]   is visible|enabled|checked <t>
 wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob | --load s | --fn js
 read [url] [--outline] [--filter <text>]
+vitals [url]   # TTFB/FCP/LCP/CLS/INP + ratings; --json: {url,ttfb,fcp,lcp,cls,inp,ratings,notMeasurable}
 screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
 diff screenshot [-o <file>] [-t <0-1>] [-f|--full]   # pixel diff vs the last screenshot of this tab (grey baseline, changes red); first call records the baseline, kept in memory only; --baseline <file> unsupported
 eval <js> | eval -b <base64> | eval --stdin
