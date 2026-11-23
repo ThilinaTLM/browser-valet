@@ -4,7 +4,7 @@ import * as cdp from '../cdp';
 import { type Command, type Ctx } from '../command';
 import { call, evaluate, type Handle, resolve, UserError } from '../dom';
 import { assertNavigable } from '../guardrails';
-import { heldModifiers, prime, sendInput } from '../input';
+import { heldModifiers, prime, sendInput, travel } from '../input';
 import { meta, state } from '../state';
 import { humanPath, MAX_STEPS } from '../human-path';
 import { pointer, randomSeed } from '../pointer';
@@ -32,14 +32,6 @@ function coord(s: string | undefined, what: string): number {
   if (s === undefined || s === '' || !Number.isFinite(n))
     throw new UserError(`Missing ${what}`, 'bad_args');
   return n;
-}
-
-/** The button reported for moves: the lowest held one. */
-function heldButton(buttons: number): Button | 'none' {
-  if (buttons & 1) return 'left';
-  if (buttons & 2) return 'right';
-  if (buttons & 4) return 'middle';
-  return 'none';
 }
 
 interface MoveOpts {
@@ -79,21 +71,7 @@ async function mouseMove(ctx: Ctx, x: number, y: number, o: MoveOpts) {
       points.push({ x: fromX + ((x - fromX) * i) / steps, y: fromY + ((y - fromY) * i) / steps });
     }
   }
-  for (let i = 0; i < points.length; i++) {
-    const pt = points[i];
-    if (!pt) continue;
-    await sendInput(id, hidden, 'Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: pt.x,
-      y: pt.y,
-      button: heldButton(p.buttons),
-      buttons: p.buttons,
-      modifiers: heldModifiers(),
-    });
-    p.x = pt.x;
-    p.y = pt.y;
-    if (i < points.length - 1 && duration > 0) await sleep(duration / points.length);
-  }
+  await travel(id, hidden, { points, delayMs: points.length > 0 ? duration / points.length : 0 });
   return { moved: true, x, y, ...(o.human ? { human: true, seed } : {}) };
 }
 

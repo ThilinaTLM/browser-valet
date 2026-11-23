@@ -31,6 +31,22 @@
         height: 40px;
         background: #c33;
       }
+      #card {
+        position: absolute;
+        left: 20px;
+        top: 650px;
+        width: 60px;
+        height: 40px;
+        background: #36c;
+      }
+      #bin {
+        position: absolute;
+        left: 300px;
+        top: 650px;
+        width: 100px;
+        height: 60px;
+        background: #fc3;
+      }
       #zone {
         position: absolute;
         left: 500px;
@@ -46,11 +62,20 @@
     <div id="menu">menu</div>
     <div id="knob">knob</div>
     <div id="zone">zone</div>
+    <div id="card" draggable="true">card</div>
+    <div id="bin">bin</div>
     <script>
       // Every pointer event as "type x,y"; a mouse-driven drag of #knob that reports the drop.
       window.events = [];
       window.dropped = false;
       let dragging = false;
+      window.htmlDropped = 0;
+      const bin = document.getElementById('bin');
+      bin.addEventListener('dragover', (e) => e.preventDefault());
+      bin.addEventListener('drop', (e) => {
+        e.preventDefault();
+        window.htmlDropped++;
+      });
       for (const type of ['mousemove', 'mousedown', 'mouseup', 'click', 'dblclick']) {
         addEventListener(type, (e) => events.push(`${type} ${e.clientX},${e.clientY}`));
       }

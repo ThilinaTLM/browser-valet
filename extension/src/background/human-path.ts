@@ -34,7 +34,8 @@ export function easeInOut(t: number): number {
   return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
-const round = (n: number) => Math.round(n * 100) / 100;
+/** Round to 0.01 px and keep inside the viewport's top-left (negative coordinates miss the page). */
+const round = (n: number) => Math.max(0, Math.round(n * 100) / 100);
 
 function bezier(p0: Point, p1: Point, p2: Point, p3: Point, t: number): Point {
   const u = 1 - t;

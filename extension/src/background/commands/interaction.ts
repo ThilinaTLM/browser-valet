@@ -80,15 +80,29 @@ async function observeNav(tabId: number, act: () => Promise<Result | undefined>)
 // Actions on a resolved element (shared by direct commands and `find`)
 // ---------------------------------------------------------------------------
 
-/** Approach along a human path, then re-check actionability when the approach was slow. */
+interface Pt {
+  x: number;
+  y: number;
+  sessionId?: string;
+}
+
+/**
+ * Move along a human path to `pt`. When the path took over 200 ms the page may have changed under
+ * it, so actionability is checked again; a changed point is then moved to directly.
+ */
 async function approach(
   h: Handle,
-  pt: { x: number; y: number; sessionId?: string },
+  pt: Pt,
   opts: { allowDisabled?: boolean },
-): Promise<{ x: number; y: number; sessionId?: string }> {
+): Promise<{ pt: Pt; hidden: boolean }> {
   const plan = planHuman(h.tabId, pt);
-  await input.move(h.tabId, pt.x, pt.y, pt.sessionId, plan);
-  return plan.durationMs > 200 ? clickPoint(h, opts) : pt;
+  const { hidden, elapsedMs } = await input.move(h.tabId, pt.x, pt.y, pt.sessionId, plan);
+  if (elapsedMs <= 200) return { pt, hidden };
+  const again = await clickPoint(h, opts);
+  if (Math.hypot(again.x - pt.x, again.y - pt.y) >= 0.5) {
+    await input.move(h.tabId, again.x, again.y, again.sessionId);
+  }
+  return { pt: again, hidden };
 }
 
 async function clickEl(
@@ -98,10 +112,16 @@ async function clickEl(
   human = false,
 ): Promise<Result> {
   let pt = await clickPoint(h);
-  if (human) pt = await approach(h, pt, {});
+  let hidden: boolean | undefined;
+  if (human) ({ pt, hidden } = await approach(h, pt, {}));
   const { x, y, sessionId } = pt;
   return observeNav(h.tabId, async () => {
-    await input.click(h.tabId, x, y, { count, button, ...(sessionId ? { sessionId } : {}) });
+    await input.click(h.tabId, x, y, {
+      count,
+      button,
+      ...(sessionId ? { sessionId } : {}),
+      ...(hidden !== undefined ? { hidden, hover: false } : {}),
+    });
     return DONE;
   });
 }
@@ -301,8 +321,11 @@ async function typeEl(h: Handle, text: string): Promise<Result> {
 }
 
 async function hoverEl(h: Handle, human = false): Promise<Result> {
-  let pt = await clickPoint(h, { allowDisabled: true });
-  if (human) pt = await approach(h, pt, { allowDisabled: true });
+  const pt = await clickPoint(h, { allowDisabled: true });
+  if (human) {
+    await approach(h, pt, { allowDisabled: true });
+    return DONE;
+  }
   const { x, y, sessionId } = pt;
   await input.move(h.tabId, x, y, sessionId);
   return DONE;

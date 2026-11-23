@@ -175,6 +175,9 @@ Full list with arguments and global flags: `bvl skills get core --ref commands`.
 - `Element <x> is covered by <div#…>`: bvl already forced a frame (background tabs don't render on their own),
   waited briefly and tried other points of the element, so the overlay is real: dismiss it, re-snapshot, retry.
   A button that only appears on hover: `hover` its row first, or `focus` it and `press Enter`.
+  A menu that opens only on real `mousemove`s, a slider, or a drag library that needs intermediate moves: add
+  `--human` (`hover <t> --human`, `drag <a> <b> --human`, `click <t> --human`) to move along a curved path from the last
+  pointer position; `mouse move <x> <y> --human --seed 42` repeats the same path.
 - A `confirm`/`prompt` dialog pauses the page: `bvl dialog accept` or `bvl dialog dismiss`.
   Alerts and `beforeunload` prompts are accepted automatically.
 - Known sequences cost one call as `bvl batch "fill @e1 a@b.c" "fill @e2 pw" "click @e3" "wait --url **/home"`

@@ -1,6 +1,7 @@
 // Small parity commands: mouse, highlight, get styles, XPath, pushstate, session.
 
 import { describe, expect, it } from 'vitest';
+import { humanPath } from '../../src/background/human-path';
 import { bvl, bvlJson, bvlWith, fixture, useBrowser } from './harness';
 
 useBrowser();
@@ -220,15 +221,55 @@ describe('--human pointer paths', () => {
       });
       return moves();
     };
-    const a = await run();
-    const b = await run();
-    expect(a).toEqual(b);
-    // Hidden agent tabs coalesce moves to about one per frame, so the count is only bounded.
-    expect(a.length).toBeGreaterThanOrEqual(1);
-    expect(a.at(-1)).toEqual([400, 300]);
-    expect(a.length).toBeGreaterThan(1);
-    const dev = Math.max(...a.map(([x, y]) => Math.abs(y - 10 - ((x - 10) * 290) / 390)));
-    expect(dev).toBeGreaterThan(2);
+    const expected = humanPath(
+      { x: 10, y: 10 },
+      { x: 400, y: 300 },
+      { seed: 42, steps: 30, durationMs: 0 },
+    ).points;
+    // Hidden agent tabs coalesce moves to about one per frame, so each run receives a subsequence
+    // of the path (exact equality is unit-tested); it must end on the target and be curved.
+    for (const raw of [await run(), await run()]) {
+      // Chrome truncates to whole pixels; a stale event at the start point may land late.
+      const got = raw.filter(
+        ([x, y], i) =>
+          !(x === 10 && y === 10) && (i === 0 || x !== raw[i - 1]?.[0] || y !== raw[i - 1]?.[1]),
+      );
+      expect(got.length).toBeGreaterThan(1);
+      expect(got.at(-1)).toEqual([400, 300]);
+      let at = 0;
+      for (const [x, y] of got) {
+        while (
+          at < expected.length &&
+          Math.hypot((expected[at]?.x ?? 0) - x, (expected[at]?.y ?? 0) - y) > 1.5
+        ) {
+          at++;
+        }
+        expect(at, `unexpected point ${String(x)},${String(y)}`).toBeLessThan(expected.length);
+        at++;
+      }
+      const dev = Math.max(...got.map(([x, y]) => Math.abs(y - 10 - ((x - 10) * 290) / 390)));
+      expect(dev).toBeGreaterThan(2);
+    }
+  });
+
+  it('a long human move on a hidden tab does not wait for every event', async () => {
+    await bvl('open', fixture('/human.html'));
+    const t = Date.now();
+    const r = await bvl(
+      'mouse',
+      'move',
+      '700',
+      '500',
+      '--human',
+      '--seed',
+      '1',
+      '--steps',
+      '240',
+      '--duration',
+      '0',
+    );
+    expect(r.code).toBe(0);
+    expect(Date.now() - t).toBeLessThan(15000);
   });
 
   it('rejects --steps outside 1-240', async () => {
@@ -267,4 +308,14 @@ describe('--human pointer paths', () => {
     expect((await bvl('eval', 'window.dropped')).stdout.trim()).toBe('true');
     expect((await moves()).length).toBeGreaterThan(1);
   });
+
+  it.each([[[]], [['--human']]])(
+    'drag %j drops a native HTML5 draggable on its target',
+    async (flags: string[]) => {
+      await bvl('open', fixture('/human.html'));
+      await bvl('eval', 'window.htmlDropped = 0');
+      expect((await bvl('drag', '#card', '#bin', ...flags)).code).toBe(0);
+      expect((await bvl('eval', 'window.htmlDropped')).stdout.trim()).toBe('1');
+    },
+  );
 });
