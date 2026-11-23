@@ -355,17 +355,29 @@ export async function detach(tabId: number): Promise<void> {
  * (a revoke that was cut short by a restart or a self-update leaves the session attached).
  */
 export async function releaseUncontrolled(): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const targets = await chrome.debugger.getTargets();
-    await Promise.all(
-      targets
-        .filter(
-          (t) => t.attached && t.tabId !== undefined && state.tabs[t.tabId]?.control === undefined,
-        )
-        .map((t) => chrome.debugger.detach({ tabId: t.tabId }).catch(() => undefined)),
-    );
+    await Promise.race([
+      (async () => {
+        const targets = await chrome.debugger.getTargets();
+        await Promise.all(
+          targets
+            .filter(
+              (t) =>
+                t.attached && t.tabId !== undefined && state.tabs[t.tabId]?.control === undefined,
+            )
+            .map((t) => chrome.debugger.detach({ tabId: t.tabId }).catch(() => undefined)),
+        );
+      })(),
+      // Startup waits for this before connecting: never for long.
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, DETACH_TIMEOUT_MS);
+      }),
+    ]);
   } catch {
     // best effort (the unit-test mock has no getTargets)
+  } finally {
+    clearTimeout(timer);
   }
 }
 

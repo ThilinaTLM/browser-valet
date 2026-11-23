@@ -18,6 +18,7 @@ export type ErrorCode =
   | 'not_shared'
   | 'denied'
   | 'domain_blocked'
+  | 'not_connected'
   | 'revoked'
   | 'not_controllable';
 

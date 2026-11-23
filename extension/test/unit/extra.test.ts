@@ -15,6 +15,7 @@ beforeEach(async () => {
   vi.resetModules();
   mock = installChromeMock();
   stateMod = await import('../../src/background/state');
+  await stateMod.updateSettings({ enabled: true }); // `execute` refuses while the switch is off
   ({ execute } = await import('../../src/background/dispatch'));
 });
 

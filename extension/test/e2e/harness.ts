@@ -115,8 +115,6 @@ export function useBrowser(): { readonly current: Browser } {
 }
 
 let wakes = 0;
-/** How many times `useBrowser()` had to wake a dead extension service worker in this test file. */
-export const extensionWakes = (): number => wakes;
 
 /**
  * Safety net for #51 (the extension's service worker dying, and the proxy keeping its dead socket):

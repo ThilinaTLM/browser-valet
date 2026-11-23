@@ -18,6 +18,7 @@ export async function revokeAll(): Promise<void> {
   const ids = Object.entries(state.tabs)
     .filter(([, m]) => m.control)
     .map(([id]) => Number(id));
+  // (`revoke` clears again, which is harmless; this pass makes the strip atomic for all tabs.)
   for (const id of ids) clearControl(id);
   await Promise.all(ids.map((id) => revoke(id)));
 }
