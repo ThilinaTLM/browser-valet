@@ -17,6 +17,7 @@ find first|last <selector> <action> [value]   find nth <n> <selector> <action> [
 get text|html|value|attr|title|url|count|box [t] [attr]   get styles <t> [prop...] [--all]   is visible|enabled|checked <t>
 wait <t|ms> [--state visible|hidden|attached|detached] | --text s | --url glob | --load s | --fn js
 read [url] [--outline] [--filter <text>]
+vitals [url]   # TTFB/FCP/LCP/CLS/INP + ratings; --json: {url,ttfb,fcp,lcp,cls,inp,ratings,notMeasurable}
 screenshot [path] [--full] [--annotate] [--if-changed] [--threshold <0-1>]
 eval <js> | eval -b <base64> | eval --stdin
 batch [--bail] [--omit-command] "<cmd>" "<cmd>" … | batch --stdin   # one command per line

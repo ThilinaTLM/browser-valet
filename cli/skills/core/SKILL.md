@@ -109,11 +109,18 @@ For docs and articles use `bvl read [url]` (markdown of the main content, no nav
 snapshot: `--outline` lists headings, `--filter <text>` returns matching sections,
 `read <url>` follows the `open` rules. Use `snapshot` to act.
 
+## Web vitals
+
+`bvl vitals [url]` prints TTFB, FCP, LCP, CLS and INP with good / needs-improvement / poor ratings (read-only;
+a URL is opened like `open`). Agent tabs load in the background, where Chrome reports no LCP/FCP: those print
+`LCP: not measurable (page loaded in a background tab)` (`null` in `--json`, see `notMeasurable`), not 0. For real LCP
+measure a tab the user shared and has in front. `inp: -` means no slow interaction was recorded (Chrome buffers only ≥ 104 ms).
+
 ## Commands (summary)
 
 `open`, `back`, `forward`, `reload`, `close`, `tab`, `snapshot`, `click`, `fill`, `type`, `press`,
 `select`, `scroll`, `mouse`, `wait`, `get` (incl. `styles`), `find`, `highlight`, `pushstate`, `session`, `frame`,
-`read`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
+`read`, `vitals`, `screenshot`, `pdf`, `set`, `network`, `batch`, `eval`, `dialog`, `console`, `errors`. Targets may be refs, CSS or XPath.
 `screenshot --annotate` draws boxes labelled `[N]` = `@eN` and lists them (use the refs directly); `screenshot --if-changed` / `--threshold 0.01` skips unchanged captures and prints `unchanged` instead of a path.
 Full list with arguments and global flags: `bvl skills get core --ref commands`.
 `bvl <command> --help` for details; `bvl --help` gives the overview and, once the extension is connected, the full command list.

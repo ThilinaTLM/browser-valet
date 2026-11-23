@@ -20,6 +20,7 @@ import { inspectionCommands } from './commands/inspection';
 import { interactionCommands } from './commands/interaction';
 import { navigationCommands } from './commands/navigation';
 import { readCommands } from './commands/read';
+import { vitalsCommands } from './commands/vitals';
 import { networkCommands } from './commands/network';
 import { type ErrorCode, UserError } from './errors';
 import { blockedMessage, narrowFor, takeBlocked } from './navigation-guard';
@@ -40,6 +41,7 @@ const COMMANDS: Command[] = [
   ...interactionCommands,
   ...inspectionCommands,
   ...readCommands,
+  ...vitalsCommands,
   ...extraCommands,
   ...frameCommands,
   ...networkCommands,
@@ -47,7 +49,7 @@ const COMMANDS: Command[] = [
   ...batchCommands,
 ];
 /** Commands whose whole point is to reach a page: a refused redirect makes them fail. */
-const NAVIGATES = new Set(['open', 'read']);
+const NAVIGATES = new Set(['open', 'read', 'vitals']);
 const GROUPS = ['Navigation', 'Tabs', 'Reading', 'Interaction', 'Waiting', 'Debugging'];
 
 function lookup(name: string): Command | undefined {
