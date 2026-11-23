@@ -26,6 +26,12 @@ your browser and switch it on." Then retry once; don't retry in a loop. Commands
 `code: not_connected` and the same hint while it is off. Switching off also ends control of every
 tab, so after the user switches it on, earlier tab approvals are gone (agent tabs too).
 
+If a command prints `browser extension stopped responding; waiting for it to restart`, or `bvl status`
+says the extension's background worker stopped responding, the browser terminated the extension's worker
+(this happens after a tab you control is closed). It restarts by itself, usually within about 30 s, and the
+command then runs; just wait. The wait comes on top of `--timeout` (up to about 65 s in the worst case). If it
+still fails with `stopped responding`, ask the user to open the Browser Valet popup, then retry.
+
 If it says `Not paired`, or the user never installed the extension, ask them to run `bvl setup`
 (one-time: it installs the extension into a folder they load via chrome://extensions → Developer
 mode → Load unpacked, pairs automatically, and asks them to switch it on). The extension updates

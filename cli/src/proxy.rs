@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Notify};
 use tokio::time::{sleep, timeout};
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{handshake::server::*, http, Message};
 use tokio_tungstenite::WebSocketStream;
 
@@ -18,11 +19,33 @@ const EXT_ORIGIN: &str = "chrome-extension://fekhggniifjffgnkljlblgfcoolaonbm";
 
 type Ws = WebSocketStream<TcpStream>;
 
+/// A live extension sends a `ping` at least every 20 s (only after an extension API call returned). Silent
+/// for longer than `BVL_EXT_SILENT_MS` (default this): dead.
+const EXT_SILENT_MS: u64 = 50_000;
+/// How long a liveness `ping` may stay unanswered before `status` / `req` treat the extension as dead
+/// (`BVL_EXT_PROBE_MS`; 0 turns probing off). A browser keeps a dead service worker's socket open.
+const PROBE_MS: u64 = 2_500;
+/// A dead worker is gone for up to ~30 s before Chrome stops it, then waits for the next 30 s alarm.
+const WAKE_WAIT_MS: u64 = 65_000;
+
 /// Shown to the agent when no extension is connected. The usual cause is the switch being off.
 pub const NOT_CONNECTED: &str =
     "browser extension is not connected. It is switched off by default, and switches itself off \
 when bvl stops or has been idle, and when the browser restarts. Ask the user to click the Browser Valet icon in their \
 browser and switch it on, then retry. If it was never installed, the user runs `bvl setup` first.";
+
+/// Shown when the extension stopped answering and did not come back in time.
+pub const WORKER_DEAD: &str = "browser extension stopped responding and did not restart in time. Its background worker was \
+terminated by the browser (this happens when a controlled tab is closed). Opening the Browser Valet popup or any browser \
+activity wakes it; then retry. If the browser was restarted, or the extension was disabled or reloaded, ask the user to \
+click the Browser Valet icon and switch it on.";
+
+/// Why the proxy lost the extension while it was (probably) still switched on.
+struct Lost {
+    at: Instant,
+    /// `unresponsive` (no answer to a ping / silent too long) or `vanished` (connection ended without a close frame).
+    reason: &'static str,
+}
 
 /// An in-flight request: which ext connection owns it, how to reach that ext, how to reach the CLI.
 struct Pending {
@@ -34,6 +57,9 @@ struct Ext {
     conn: u64,
     tx: mpsc::UnboundedSender<String>,
     info: Value,
+    /// When the last `ping`/`pong` arrived. Other frames do not count: a wedged worker can still answer
+    /// (or finish) a request while every extension API call hangs, and only a `ping`/`pong` proves otherwise.
+    alive: Instant,
 }
 struct State {
     ext: Option<Ext>,
@@ -44,26 +70,37 @@ struct State {
     exts: usize,
     next: u64,
     last: Instant,
+    /// The extension was lost without being switched off (cleared when one connects, ignored after `wake_wait`).
+    lost: Option<Lost>,
 }
 struct Shared {
     secret: String,
     port: u16,
     idle: u64,
     ext_wait: Duration,
+    /// How long a request waits for an extension whose worker died to restart.
+    wake_wait: Duration,
+    /// `BVL_EXT_PROBE_MS`: zero = never probe.
+    probe_wait: Duration,
+    silent: Duration,
     st: Mutex<State>,
     stop: Notify,
+    /// Notified when a `ping`/`pong` arrives.
+    alive: Notify,
 }
 
 pub fn run(secret: String, port: u16, idle: u64) -> Result<()> {
-    let ext_wait = std::env::var("BVL_EXT_WAIT_MS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(10_000);
+    let ms = |var: &str, default: u64| {
+        Duration::from_millis(std::env::var(var).ok().and_then(|v| v.parse().ok()).unwrap_or(default))
+    };
     let sh = Arc::new(Shared {
         secret,
         port,
         idle,
-        ext_wait: Duration::from_millis(ext_wait),
+        ext_wait: ms("BVL_EXT_WAIT_MS", 10_000),
+        wake_wait: ms("BVL_EXT_WAKE_MS", WAKE_WAIT_MS),
+        probe_wait: ms("BVL_EXT_PROBE_MS", PROBE_MS),
+        silent: ms("BVL_EXT_SILENT_MS", EXT_SILENT_MS),
         st: Mutex::new(State {
             ext: None,
             pending: HashMap::new(),
@@ -71,8 +108,10 @@ pub fn run(secret: String, port: u16, idle: u64) -> Result<()> {
             exts: 0,
             next: 1,
             last: Instant::now(),
+            lost: None,
         }),
         stop: Notify::new(),
+        alive: Notify::new(),
     });
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -102,7 +141,9 @@ async fn serve_all(sh: Arc<Shared>) -> Result<()> {
                 flush(&sh).await;
                 return Ok(());
             }
-            _ = tick.tick() => if sh.idle > 0 {
+            _ = tick.tick() => {
+                tick_ext(&sh);
+                if sh.idle == 0 { continue; }
                 let idle = {
                     let mut st = sh.st.lock().unwrap();
                     let idle = st.pending.is_empty() && st.last.elapsed() >= Duration::from_secs(sh.idle);
@@ -116,9 +157,92 @@ async fn serve_all(sh: Arc<Shared>) -> Result<()> {
                     flush(&sh).await;
                     return Ok(());
                 }
-            },
+            }
         }
     }
+}
+
+/// Once a tick: drop an extension that has not sent a `ping`/`pong` for `silent`, forget an expired `lost`.
+fn tick_ext(sh: &Shared) {
+    let mut st = sh.st.lock().unwrap();
+    if st.lost.as_ref().is_some_and(|l| l.at.elapsed() >= sh.wake_wait) {
+        st.lost = None;
+    }
+    let silent = st
+        .ext
+        .as_ref()
+        .filter(|e| e.alive.elapsed() >= sh.silent)
+        .map(|e| e.conn);
+    if let Some(conn) = silent {
+        drop_conn(&mut st, conn, "unresponsive");
+    }
+}
+
+/// Drop extension connection `conn` (if it is still the current one): its pending requests fail (the
+/// connection loop ends) and `lost` records why. The `bye restart` is for a worker that is alive but slow: it
+/// reconnects instead of switching itself off; a dead one never reads it.
+fn drop_conn(st: &mut State, conn: u64, reason: &'static str) {
+    if st.ext.as_ref().is_some_and(|e| e.conn == conn) {
+        bye(st, "restart");
+        st.lost = Some(Lost {
+            at: Instant::now(),
+            reason,
+        });
+        log(&format!(
+            "extension stopped answering ({reason}), dropped its connection"
+        ));
+    }
+}
+
+/// Extensions of another version than the bundled one (dev builds, an update in progress) may predate
+/// `ping`/`pong`: they cannot be probed. Their own 20 s pings still feed the silence limit.
+fn probeable(info: &Value) -> bool {
+    // Without an embedded extension (dev builds) the bvl version stands in for the bundled one.
+    info["extVersion"].as_str() == Some(EMBEDDED_EXT_VERSION.unwrap_or(VERSION))
+}
+
+/// Check the extension connection is live: it must answer a `ping` (which it does only after an extension
+/// API call returned). True when it did, or when there is nothing to check. False when it did not: the
+/// connection is then dropped, unless it has a request in flight and `drop_busy` is false (`status` stays
+/// truthful without failing that request). Waits `BVL_EXT_PROBE_MS` (a `req` probe, which drops, waits four times as long while the extension has a request in flight, as a busy worker may be slow; `status` never waits longer, so it stays within the CLI's own 10 s read timeout).
+async fn probe_ext(sh: &Shared, drop_busy: bool) -> bool {
+    let sent = Instant::now();
+    let (conn, busy) = {
+        let st = sh.st.lock().unwrap();
+        let Some(e) = st.ext.as_ref() else { return true };
+        if sh.probe_wait.is_zero() || !probeable(&e.info) {
+            return true;
+        }
+        e.tx.send(json!({"t":"ping"}).to_string()).ok();
+        (e.conn, st.pending.values().any(|p| p.owner == e.conn))
+    };
+    let deadline = tokio::time::Instant::now()
+        + if busy && drop_busy {
+            sh.probe_wait * 4
+        } else {
+            sh.probe_wait
+        };
+    loop {
+        // Register for the notification before looking, so one arriving in between is not missed.
+        let n = sh.alive.notified();
+        tokio::pin!(n);
+        n.as_mut().enable();
+        match sh.st.lock().unwrap().ext.as_ref() {
+            Some(e) if e.conn == conn && e.alive <= sent => {}
+            _ => return true, // answered, or gone / replaced by a newer connection (not ours to drop)
+        }
+        if tokio::time::timeout_at(deadline, n).await.is_err() {
+            break;
+        }
+    }
+    let mut st = sh.st.lock().unwrap();
+    if st.ext.as_ref().is_none_or(|e| e.conn != conn) {
+        return true; // replaced or gone while we waited
+    }
+    if drop_busy || !busy {
+        drop_conn(&mut st, conn, "unresponsive");
+    }
+    false
 }
 
 /// Tell the extension why the proxy is going away and close its connection. `restart` keeps the
@@ -150,6 +274,12 @@ async fn send(ws: &mut Ws, v: Value) -> Result<()> {
 
 /// Next JSON text frame; None on close/error. Cancel-safe (keeps no state between polls).
 async fn next_json(ws: &mut Ws) -> Option<Value> {
+    next_json_noting(ws, &mut false).await
+}
+
+/// Like `next_json`; sets `clean` when the peer ended the connection deliberately (a close frame other than
+/// 1001 "going away"), as opposed to vanishing or being torn down, which is what a terminated worker does.
+async fn next_json_noting(ws: &mut Ws, clean: &mut bool) -> Option<Value> {
     loop {
         match ws.next().await? {
             Ok(Message::Text(t)) => {
@@ -157,7 +287,12 @@ async fn next_json(ws: &mut Ws) -> Option<Value> {
                     return Some(v);
                 }
             }
-            Ok(Message::Close(_)) | Err(_) => return None,
+            Ok(Message::Close(f)) => {
+                // A terminated worker closes with 1001 (going away); the extension's own `close()` sends none.
+                *clean = f.is_none_or(|f| f.code != CloseCode::Away);
+                return None;
+            }
+            Err(_) => return None,
             _ => {}
         }
     }
@@ -262,27 +397,49 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
         if let Some(v) = update {
             tx.send(json!({"t":"update","version":v}).to_string()).ok();
         }
-        st.ext = Some(Ext { conn: id, tx, info });
+        st.ext = Some(Ext {
+            conn: id,
+            tx,
+            info,
+            alive: Instant::now(),
+        });
+        st.lost = None;
         st.exts += 1;
         id
     };
+    sh.alive.notify_waiters(); // wakes a probe of the connection this one replaced
+    let mut clean = false;
     loop {
         tokio::select! {
             m = rx.recv() => match m {
                 Some(s) => if ws.send(Message::text(s)).await.is_err() { break },
                 None => break,
             },
-            m = next_json(&mut ws) => match m {
+            m = next_json_noting(&mut ws, &mut clean) => match m {
                 None => break,
-                Some(v) => route(sh, &v),
+                Some(v) => {
+                    if matches!(v["t"].as_str(), Some("ping" | "pong")) {
+                        if let Some(e) = sh.st.lock().unwrap().ext.as_mut().filter(|e| e.conn == id) {
+                            e.alive = Instant::now();
+                        }
+                        sh.alive.notify_waiters();
+                    }
+                    route(sh, &v)
+                }
             },
         }
     }
-    ws.close(None).await.ok();
+    // A dead peer may never complete the close handshake.
+    timeout(Duration::from_secs(1), ws.close(None)).await.ok();
     let mut st = sh.st.lock().unwrap();
     st.exts -= 1;
     if st.ext.as_ref().is_some_and(|e| e.conn == id) {
         st.ext = None;
+        // A close the extension chose (switched off) leaves no loss behind; a torn-down connection does.
+        st.lost = (!clean).then(|| Lost {
+            at: Instant::now(),
+            reason: "vanished",
+        });
     }
     let dead: Vec<u64> = st
         .pending
@@ -294,6 +451,8 @@ async fn ext_conn(sh: &Shared, mut ws: Ws, info: Value, update: Option<&str>) {
         let p = st.pending.remove(&k).unwrap();
         p.out.send(err_res("browser extension disconnected")).ok();
     }
+    drop(st);
+    sh.alive.notify_waiters(); // a probe of this connection need not wait out its timeout
     log("ext disconnected");
 }
 
@@ -324,16 +483,29 @@ async fn cli_conn(sh: &Shared, mut ws: Ws) -> Result<()> {
         .context("closed before request")?;
     match msg["t"].as_str() {
         Some("status") => {
-            let ext = sh
-                .st
-                .lock()
-                .unwrap()
-                .ext
-                .as_ref()
-                .map_or(Value::Null, |e| e.info.clone());
-            let pending = sh.st.lock().unwrap().pending.len();
-            let proxy = json!({"version":VERSION,"pid":std::process::id(),"port":sh.port,"idleTimeoutSecs":sh.idle,"pending":pending});
-            let v = json!({"t":"status","proxy":proxy,"ext":ext});
+            // `"probe": false`: the CLI's own version check, which must not wait for a ping.
+            let alive = msg["probe"] == false || probe_ext(sh, false).await;
+            let v = {
+                let st = sh.st.lock().unwrap();
+                let ext = st
+                    .ext
+                    .as_ref()
+                    .filter(|_| alive)
+                    .map_or(Value::Null, |e| e.info.clone());
+                let lost = st.lost.as_ref().filter(|l| l.at.elapsed() < sh.wake_wait);
+                // A recorded loss: requests wait `waitSecs` more for it. Unanswered but not dropped (busy):
+                // nothing is recorded and no request would wait (`waitSecs` 0).
+                let ext_lost = match (lost, alive) {
+                    (Some(l), _) => {
+                        let age = l.at.elapsed();
+                        json!({"reason":l.reason,"ageSecs":age.as_secs(),"waitSecs":sh.wake_wait.saturating_sub(age).as_secs()})
+                    }
+                    (None, false) => json!({"reason":"unresponsive","ageSecs":0,"waitSecs":0}),
+                    _ => Value::Null,
+                };
+                let proxy = json!({"version":VERSION,"pid":std::process::id(),"port":sh.port,"idleTimeoutSecs":sh.idle,"pending":st.pending.len()});
+                json!({"t":"status","proxy":proxy,"ext":ext,"extLost":ext_lost})
+            };
             send(&mut ws, v).await
         }
         Some("shutdown") => {
@@ -364,14 +536,33 @@ async fn cli_conn(sh: &Shared, mut ws: Ws) -> Result<()> {
 }
 
 async fn request(sh: &Shared, ws: &mut Ws, req: Value) -> Result<()> {
+    probe_ext(sh, true).await;
     let start = Instant::now();
+    let mut told = false;
     let ext_tx = loop {
         let tx = sh.st.lock().unwrap().ext.as_ref().map(|e| (e.conn, e.tx.clone()));
         if let Some(t) = tx {
             break t;
         }
-        if start.elapsed() >= sh.ext_wait {
-            return send(ws, err_res(NOT_CONNECTED)).await;
+        // A worker that died restarts by itself: wait for it (until `wake_wait` after it was lost, and at
+        // least `ext_wait`), and say so. A loss older than `wake_wait` is no longer a reason to wait.
+        let lost = sh
+            .st
+            .lock()
+            .unwrap()
+            .lost
+            .as_ref()
+            .is_some_and(|l| l.at.elapsed() < sh.wake_wait);
+        if lost && !told {
+            told = true;
+            let note = format!(
+                "browser extension stopped responding; waiting for it to restart (up to {} s) …\n",
+                sh.wake_wait.as_secs()
+            );
+            send(ws, json!({"t":"event","stderr":note})).await?;
+        }
+        if !lost && start.elapsed() >= sh.ext_wait {
+            return send(ws, err_res(if told { WORKER_DEAD } else { NOT_CONNECTED })).await;
         }
         sleep(Duration::from_millis(50)).await;
     };

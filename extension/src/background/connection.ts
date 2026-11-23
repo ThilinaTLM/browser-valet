@@ -82,13 +82,25 @@ export function connect(): void {
   }
   if (ws || connecting) return;
   connecting = true;
-  // Re-read pairing.json first so re-pairing (`bvl setup`) needs no extension reload.
-  void refreshPairing()
+  // Re-read pairing.json first so re-pairing (`bvl setup`) needs no extension reload. Then make sure
+  // extension API calls return at all: a wedged worker (see `alive`) must not connect, or the proxy
+  // would take it for a healthy one. It gives up after 5 s and retries (the browser will end it).
+  const ready = refreshPairing()
     .catch(() => undefined)
-    .then(() => {
-      connecting = false;
-      if (!ws && settings.enabled) open();
-    });
+    .then(alive)
+    .catch(() => undefined)
+    .then(() => true);
+  const timeout = new Promise<boolean>((resolve) =>
+    setTimeout(() => {
+      resolve(false);
+    }, 5000),
+  );
+  void Promise.race([ready, timeout]).then((ok) => {
+    connecting = false;
+    if (!settings.enabled) return;
+    if (!ok) scheduleRetry();
+    else if (!ws) open();
+  });
 }
 
 /** Wait for in-flight requests, hand the state over, and reload into the new version. */
@@ -185,6 +197,16 @@ function open(): void {
         send({ t: 'res', id, res });
         break;
       }
+      case 'ping':
+        // Liveness check from the proxy. Answer only once an extension API call has come back: after
+        // a controlled tab closes, Chrome can leave the worker running JavaScript (so its socket and
+        // timers still work) while every `chrome.*` call hangs. Such a worker is dead for our purposes.
+        if (authed) {
+          void alive().then(() => {
+            send({ t: 'pong' });
+          });
+        }
+        break;
       case 'update':
         if (authed && typeof msg.version === 'string') void selfUpdate(msg.version);
         break;
@@ -226,10 +248,19 @@ function open(): void {
   };
 }
 
-/** Keep the socket and the service worker alive (extension API calls reset the idle timer). */
+/** Resolves when the browser answers an extension API call (never, if the worker is wedged). */
+async function alive(): Promise<void> {
+  await chrome.runtime.getPlatformInfo();
+}
+
+/**
+ * Keep the socket and the service worker alive (extension API calls reset the idle timer). The
+ * `ping` is sent only after the API call returns, so the proxy hears nothing from a wedged worker.
+ */
 export function startKeepAlive(): void {
   setInterval(() => {
-    void chrome.runtime.getPlatformInfo();
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'ping' }));
+    void alive().then(() => {
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'ping' }));
+    });
   }, 20_000);
 }

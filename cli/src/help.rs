@@ -83,13 +83,10 @@ const LOCAL: &[Local] = &[
 ];
 
 #[derive(Debug)]
-struct NotConnected;
+struct NotConnected(String);
 impl std::fmt::Display for NotConnected {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(
-            "the extension is not connected (probably switched off: ask the user to click the \
-             Browser Valet icon and switch it on).",
-        )
+        write!(f, "the extension is not connected ({}).", self.0)
     }
 }
 impl std::error::Error for NotConnected {}
@@ -201,9 +198,10 @@ fn browser_help() -> Result<String> {
 /// The extension reconnects about once a second after the proxy starts; don't wait the proxy's full
 /// request timeout for one that is switched off.
 fn wait_for_ext(c: &Config) -> Result<()> {
-    if status_with_ext(c, EXT_GRACE)?["ext"].is_object() {
+    let v = status_with_ext(c, EXT_GRACE)?;
+    if v["ext"].is_object() {
         Ok(())
     } else {
-        Err(NotConnected.into())
+        Err(NotConnected(crate::not_connected_hint(&v["extLost"])).into())
     }
 }

@@ -27,9 +27,16 @@ impl Drop for Proxy {
 
 #[allow(clippy::zombie_processes)]
 fn start(extra: &[&str]) -> Proxy {
+    start_env(extra, &[])
+}
+
+/// Like `start`, with proxy environment overrides. Tests start with liveness probing off
+/// (`BVL_EXT_PROBE_MS=0`: their fake extensions do not answer `ping`); the liveness tests turn it on.
+#[allow(clippy::zombie_processes)]
+fn start_env(extra: &[&str], env: &[(&str, &str)]) -> Proxy {
     // Picking a free port is racy across parallel tests: retry if our proxy died (e.g. port taken).
     for _ in 0..5 {
-        if let Some(p) = try_start(extra) {
+        if let Some(p) = try_start(extra, env) {
             return p;
         }
     }
@@ -37,7 +44,7 @@ fn start(extra: &[&str]) -> Proxy {
 }
 
 #[allow(clippy::zombie_processes)]
-fn try_start(extra: &[&str]) -> Option<Proxy> {
+fn try_start(extra: &[&str], env: &[(&str, &str)]) -> Option<Proxy> {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -55,6 +62,9 @@ fn try_start(extra: &[&str]) -> Option<Proxy> {
         .args(extra)
         .env("BVL_CONFIG_DIR", &dir)
         .env("BVL_EXT_WAIT_MS", "400")
+        .env("BVL_EXT_WAKE_MS", "1500")
+        .env("BVL_EXT_PROBE_MS", "0")
+        .envs(env.iter().copied())
         .env_remove("BVL_PORT")
         .stderr(Stdio::null())
         .spawn()
@@ -361,6 +371,282 @@ fn newer_cli_does_not_restart_a_busy_proxy() {
     assert!(err.contains("busy with 1 request"), "{err}");
     assert_eq!(seen, ["status"]);
     std::fs::remove_dir_all(&d).ok();
+}
+
+// ---- liveness: a browser keeps the socket of a dead service worker open, so `ping` finds it out ----
+
+/// Version the proxy expects of a probeable extension (extensions of another bundled version are not probed).
+fn ext_version() -> String {
+    let dist = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../extension/dist/manifest.json");
+    std::fs::read(dist)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|m| m["version"].as_str().map(String::from))
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+fn live_ext(p: &Proxy) -> Ws {
+    let info = json!({"browser":"Test Chrome 1","extVersion":ext_version()});
+    try_connect_info(p.port, "ext", Some(EXT_ORIGIN), true, info).unwrap()
+}
+fn probing(wake_ms: &str) -> Proxy {
+    start_env(&[], &[("BVL_EXT_PROBE_MS", "500"), ("BVL_EXT_WAKE_MS", wake_ms)])
+}
+/// Read the next `ping` and answer it.
+fn pong(e: &mut Ws) {
+    assert_eq!(recv(e), json!({"t":"ping"}));
+    send(e, json!({"t":"pong"}));
+}
+
+#[test]
+fn silent_extension_is_dropped_and_status_says_so() {
+    let p = probing("4000");
+    let mut e = live_ext(&p);
+    let t = Instant::now();
+    let s = status(&p);
+    assert!(s["ext"].is_null());
+    assert_eq!(s["extLost"]["reason"], "unresponsive");
+    assert!(s["extLost"]["waitSecs"].as_u64().unwrap() <= 4);
+    assert!(t.elapsed() < Duration::from_secs(4));
+    assert_eq!(try_recv(&mut e, 500), Some(json!({"t":"ping"})));
+    // A live but slow worker is told to reconnect rather than switch itself off.
+    assert_eq!(try_recv(&mut e, 500), Some(json!({"t":"bye","reason":"restart"})));
+}
+
+#[test]
+fn answering_extension_stays_connected() {
+    let p = probing("4000");
+    let mut e = live_ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"status"}));
+    pong(&mut e);
+    let s = recv(&mut c);
+    assert_eq!(s["ext"]["browser"], "Test Chrome 1");
+    assert!(s["extLost"].is_null());
+}
+
+/// The `res` of a request is not proof of life: a wedged worker can still finish one (`tab close`) and then
+/// hang on the next. A command right after a response is probed too.
+#[test]
+fn probes_right_after_a_response() {
+    let p = probing("4000");
+    let mut e = live_ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    pong(&mut e);
+    let r = recv(&mut e);
+    send(&mut e, json!({"t":"res","id":r["id"],"res":{"exitCode":0,"stdout":""}}));
+    assert_eq!(recv(&mut c)["t"], "res");
+    // No pause: the extension is now "wedged" and does not answer.
+    let s = status(&p);
+    assert!(s["ext"].is_null(), "{s}");
+    assert_eq!(recv(&mut e), json!({"t":"ping"}));
+}
+
+#[test]
+fn status_does_not_drop_an_extension_with_a_request_in_flight() {
+    let p = probing("4000");
+    let mut e = live_ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    pong(&mut e);
+    let r = recv(&mut e);
+    // Busy and silent: status is truthful (not connected) but the request is not failed.
+    let t = Instant::now();
+    let s = status(&p);
+    assert!(s["ext"].is_null());
+    assert_eq!(s["extLost"]["reason"], "unresponsive");
+    assert!(
+        t.elapsed() < Duration::from_millis(1500),
+        "status waits one probe, not the busy multiple"
+    );
+    assert_eq!(s["extLost"]["waitSecs"], 0);
+    assert_eq!(s["proxy"]["pending"], 1);
+    send(
+        &mut e,
+        json!({"t":"res","id":r["id"],"res":{"exitCode":0,"stdout":"done\n"}}),
+    );
+    assert_eq!(recv(&mut c)["res"]["stdout"], "done\n");
+}
+
+/// The real CLI has a 10 s read timeout: `bvl status` with a silent, busy extension must answer well within it.
+#[test]
+fn cli_status_with_a_silent_busy_extension_is_prompt() {
+    let p = start_env(&[], &[("BVL_EXT_PROBE_MS", "2500")]);
+    let mut e = live_ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    pong(&mut e);
+    recv(&mut e); // the request; never answered
+    let t = Instant::now();
+    let out = bvl(&p, &["status"]);
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(out.status.success(), "{text} {}", String::from_utf8_lossy(&out.stderr));
+    assert!(text.contains("extension: not connected"), "{text}");
+    assert!(t.elapsed() < Duration::from_secs(8), "{:?}", t.elapsed());
+    drop(c);
+}
+
+#[test]
+fn extension_silent_for_too_long_is_dropped_but_pings_keep_it() {
+    let p = start_env(&[], &[("BVL_EXT_SILENT_MS", "700")]);
+    let mut kept = live_ext(&p);
+    for _ in 0..8 {
+        send(&mut kept, json!({"t":"ping"}));
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(status(&p)["ext"].is_object());
+    // Now it goes quiet.
+    let end = Instant::now() + Duration::from_secs(4);
+    let s = loop {
+        let s = status(&p);
+        if s["ext"].is_null() || Instant::now() > end {
+            break s;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert!(s["ext"].is_null(), "{s}");
+    assert_eq!(s["extLost"]["reason"], "unresponsive");
+}
+
+#[test]
+fn lost_is_cleared_by_a_reconnect_and_expires() {
+    let p = probing("1500");
+    let _dead = live_ext(&p);
+    assert!(status(&p)["extLost"].is_object());
+    let mut back = live_ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"status"}));
+    pong(&mut back);
+    let s = recv(&mut c);
+    assert!(s["ext"].is_object() && s["extLost"].is_null(), "{s}");
+    // A new loss, and nobody comes back: after `wake_wait` it is forgotten, and a request gets the
+    // ordinary "switch it on" answer.
+    drop(back);
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(status(&p)["extLost"].is_object());
+    std::thread::sleep(Duration::from_millis(1700));
+    let s = status(&p);
+    assert!(s["extLost"].is_null(), "{s}");
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    let r = recv(&mut c);
+    assert!(r["res"]["stderr"].as_str().unwrap().contains("switch it on"));
+}
+
+/// A connection that replaces the one being probed must not be dropped by the old probe.
+#[test]
+fn replacement_during_a_probe_is_not_dropped() {
+    let p = start_env(&[], &[("BVL_EXT_PROBE_MS", "1500")]);
+    let _old = live_ext(&p);
+    let port = p.port;
+    let probe = std::thread::spawn(move || {
+        let mut c = try_connect(port, "cli", None, true).unwrap();
+        send(&mut c, json!({"t":"status"}));
+        recv(&mut c)
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let mut new = live_ext(&p);
+    let s = probe.join().unwrap();
+    assert!(s["ext"].is_object(), "{s}");
+    assert_eq!(
+        try_recv(&mut new, 300),
+        None,
+        "the new connection was probed or dropped"
+    );
+}
+
+#[test]
+fn request_waits_for_a_dead_extension_to_come_back() {
+    let p = probing("8000");
+    let _dead = live_ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{"argv":["x"]}}));
+    let note = recv(&mut c);
+    assert_eq!(note["t"], "event");
+    assert!(note["stderr"].as_str().unwrap().contains("waiting for it to restart"));
+    // The worker "restarts" after the ordinary wait for an extension has passed.
+    std::thread::sleep(Duration::from_millis(1200));
+    let mut e = live_ext(&p);
+    let r = recv(&mut e);
+    assert_eq!(r["t"], "req");
+    send(
+        &mut e,
+        json!({"t":"res","id":r["id"],"res":{"exitCode":0,"stdout":"ok\n"}}),
+    );
+    assert_eq!(recv(&mut c)["res"]["stdout"], "ok\n");
+}
+
+#[test]
+fn request_fails_when_a_dead_extension_does_not_come_back() {
+    let p = probing("1500");
+    let mut e = live_ext(&p);
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    // The ping marks the start of the probe; the drop follows 500 ms later, and the wait 1500 ms after that.
+    assert_eq!(recv(&mut e), json!({"t":"ping"}));
+    let ping_at = Instant::now();
+    assert_eq!(recv(&mut c)["t"], "event");
+    let r = recv(&mut c);
+    assert!(
+        ping_at.elapsed() >= Duration::from_millis(1900),
+        "{:?}",
+        ping_at.elapsed()
+    );
+    assert_eq!(r["res"]["code"], "not_connected");
+    assert!(r["res"]["stderr"].as_str().unwrap().contains("stopped responding"));
+}
+
+/// An extension of another version than the bundled one may predate `ping`: it is not probed or dropped.
+#[test]
+fn extension_of_another_version_is_not_probed() {
+    if !embedded() {
+        // CI builds extension/dist before `cargo test`; locally the test is skipped without it.
+        assert!(std::env::var_os("CI").is_none(), "extension/dist is missing in CI");
+        return;
+    }
+    let p = probing("4000");
+    let mut e = ext_with(&p, json!({"browser":"Test Chrome 1","extVersion":"0.0.1"}));
+    let s = status(&p);
+    assert!(s["ext"].is_object(), "{s}");
+    assert_eq!(try_recv(&mut e, 300), None);
+}
+
+#[test]
+fn vanished_extension_is_waited_for_but_a_closed_one_is_not() {
+    let p = start(&[]);
+    // Closed with a close frame (switched off): the usual "not connected" after the short wait.
+    let mut e = ext(&p);
+    e.close(None).ok();
+    e.flush().ok();
+    std::thread::sleep(Duration::from_millis(200));
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    let r = recv(&mut c);
+    assert!(r["res"]["stderr"].as_str().unwrap().contains("switch it on"));
+    // Torn down by the browser with 1001 "going away" (what a terminated worker sends): wait for a restart.
+    let mut e = ext(&p);
+    e.close(Some(tungstenite::protocol::CloseFrame {
+        code: tungstenite::protocol::frame::coding::CloseCode::Away,
+        reason: "".into(),
+    }))
+    .ok();
+    e.flush().ok();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(status(&p)["extLost"]["reason"], "vanished");
+    // Gone without a close frame: the same.
+    let e = ext(&p);
+    e.get_ref().shutdown(std::net::Shutdown::Both).ok();
+    drop(e);
+    std::thread::sleep(Duration::from_millis(200));
+    let s = status(&p);
+    assert_eq!(s["extLost"]["reason"], "vanished");
+    let mut c = cli(&p);
+    send(&mut c, json!({"t":"req","req":{}}));
+    assert_eq!(recv(&mut c)["t"], "event");
+    assert!(recv(&mut c)["res"]["stderr"]
+        .as_str()
+        .unwrap()
+        .contains("stopped responding"));
 }
 
 #[test]

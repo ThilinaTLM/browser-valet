@@ -1,6 +1,7 @@
 //! bvl: thin CLI + relay proxy for Browser Valet (see ../docs/architecture/protocol.md).
 //!
-//! Env: BVL_PORT (port), BVL_SESSION, BVL_IDLE_TIMEOUT (proxy), BVL_EXT_WAIT_MS (proxy; test hook),
+//! Env: BVL_PORT (port), BVL_SESSION, BVL_IDLE_TIMEOUT (proxy), BVL_EXT_WAIT_MS, BVL_EXT_WAKE_MS,
+//! BVL_EXT_PROBE_MS, BVL_EXT_SILENT_MS (proxy; test hooks),
 //! BVL_CONFIG_DIR (replaces `<config_dir>/browser-valet`), BVL_DATA_DIR (replaces the data and state dirs;
 //! defaults to BVL_CONFIG_DIR when only that is set, so tests stay isolated).
 mod doctor;
@@ -140,7 +141,7 @@ pub fn connect(c: &Config) -> Result<Ws> {
     }
     // Never kill a proxy that is serving requests (possibly for another bvl version): report instead.
     let mut ws = ws;
-    if send(&mut ws, json!({"t":"status"})).is_ok() {
+    if send(&mut ws, json!({"t":"status","probe":false})).is_ok() {
         let busy = recv(&mut ws).map_or(0, |s| s["proxy"]["pending"].as_u64().unwrap_or(0));
         if busy > 0 {
             bail!(
@@ -410,6 +411,22 @@ pub(crate) fn status_with_ext(c: &Config, wait: Duration) -> Result<Value> {
     }
 }
 
+/// What to tell about an extension that is not connected, from the proxy's `extLost` (null when it is just off).
+pub(crate) fn not_connected_hint(lost: &Value) -> String {
+    const OFF: &str = "if the browser was restarted, or the extension was disabled or reloaded, ask the user to click the Browser Valet icon and switch it on";
+    if lost.is_object() {
+        let wait = match lost["waitSecs"].as_u64() {
+            Some(n) if n > 0 => format!(" within about {n} s"),
+            _ => String::new(),
+        };
+        format!(
+            "its background worker stopped responding (the browser terminated it, usually after a controlled tab was closed). It restarts by itself{wait}: retry shortly; opening the Browser Valet popup wakes it at once. Otherwise: {OFF}"
+        )
+    } else {
+        "it is probably switched off: ask the user to click the Browser Valet icon and switch it on".into()
+    }
+}
+
 fn status(json_out: bool) -> Result<i32> {
     let c = paired();
     ensure_proxy(&c)?;
@@ -449,9 +466,7 @@ fn status(json_out: bool) -> Result<i32> {
                 );
             }
         }
-        None => println!(
-            "extension: not connected (it is probably switched off: ask the user to click the Browser Valet icon and switch it on)"
-        ),
+        None => println!("extension: not connected ({})", not_connected_hint(&v["extLost"])),
     }
     Ok(0)
 }
